@@ -390,7 +390,7 @@ export default function App() {
         })
       }
     },
-    [session],
+    [session, needSession],
   )
 
   const closeTab = (id: string) => {
