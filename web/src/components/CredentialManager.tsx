@@ -41,7 +41,7 @@ export function CredentialManager(p: Props) {
   return (
     <Collapsible open={p.open} onOpenChange={p.onOpenChange} className="border-b">
       <CollapsibleTrigger asChild>
-        <button className="flex w-full items-center gap-1.5 px-2.5 py-2 text-left text-[12px] font-semibold hover:bg-accent">
+        <button className="-mb-px flex h-10 w-full items-center gap-1.5 px-2.5 text-left text-[12px] font-semibold hover:bg-accent">
           <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
           Connections
           <span className="flex-1" />

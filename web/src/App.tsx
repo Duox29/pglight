@@ -794,7 +794,7 @@ export default function App() {
         <ResizableHandle withHandle />
         <ResizablePanel defaultSize={55} minSize={30} className="min-h-0">
         <main className="flex h-full min-h-0 min-w-0 flex-col">
-          <div className="flex gap-1 overflow-x-auto border-b bg-card px-2 pt-1.5">
+          <div className="flex h-10 items-end gap-1 overflow-x-auto border-b bg-card px-2 pt-1.5">
             {tabs.map((t) => (
               <button
                 key={t.id}

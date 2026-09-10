@@ -10,19 +10,20 @@
 - **Frontend**: React 18 + Vite 5 + Tailwind v3 + shadcn-style prebuilt
   components (`web/src/components/ui/*`, Radix + cva + tailwind-merge +
   lucide-react) + Sonner toasts + promise-based dialog host (`dialogs.tsx`).
-  Build output `web/dist` is **committed** — `main.go` embeds it.
+  Build output `web/dist` is **git-ignored** (local build artifact) — `main.go` embeds it.
 - **Test DB**: `docker/` → postgres:14-alpine + `init.sql` seed.
 
 ## 1. Golden commands
 
 ```sh
-./scripts/rerun.sh                 # kill :8080, rebuild Go+dist, rerun (PORT=… to change)
+go run ./scripts/rerun              # kill :8080, rebuild, rerun (PORT=… to change)
 docker compose -f docker/docker-compose.yml up -d   # test DB
 cd web && npm run dev              # Vite :5173, proxies /api → :8080
 ```
 
-Gate before finishing any change: `./scripts/check.sh` (gofmt, vet, build,
-tsc, eslint). Frontend change ⇒ `cd web && npm run build` so `dist/` stays fresh.
+Gate before finishing any change: `go run ./scripts/check` (gofmt, vet, build,
+  tsc, eslint). Frontend change ⇒ `cd web && npm run build` so the local `dist/`
+  stays fresh (`dist/` is git-ignored: rebuild it, never commit it).
 
 ## 2. Backend rules (Go)
 
@@ -102,9 +103,8 @@ tsc, eslint). Frontend change ⇒ `cd web && npm run build` so `dist/` stays fre
 ## 5. Docs & commits
 
 - New endpoint/component/behavior ⇒ update `PLAN.md` (API list / stack section).
-- Commit `web/dist` together with its source change, never alone.
-- Never commit `web/node_modules`, `*.tsbuildinfo`, `data/`, binaries, or `.env` files.
-- **One feature = one commit.** Finish order: implement → `./scripts/check.sh`
+- Never commit `web/dist` (git-ignored build output), `web/node_modules`, `*.tsbuildinfo`, `data/`, binaries, or `.env` files.
+- **One feature = one commit.** Finish order: implement → `go run ./scripts/check`
   → rebuild `dist` → smoke-test (API + UI) → commit immediately. Message in
   conventional style: `feat|fix|docs|chore|refactor(scope): subject`, e.g.
   `feat(observability): AOP request/query logging with web settings`.
