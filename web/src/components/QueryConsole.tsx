@@ -131,19 +131,7 @@ export function QueryConsole(p: Props) {
                   if (v != null && navigator.clipboard) navigator.clipboard.writeText(String(v))
                 }}
               />
-              <div className="mt-1.5 flex items-center gap-1.5">
-                <span className="text-[12px] text-muted-foreground">{res.rows.length} rows</span>
-                <span className="flex-1" />
-                <Button size="sm" variant="ghost" onClick={() => exportAs('csv', ri)}>
-                  CSV
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => exportAs('json', ri)}>
-                  JSON
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => exportAs('sql', ri)}>
-                  INSERTs
-                </Button>
-              </div>
+              <div className="mt-1.5 text-[12px] text-muted-foreground">{res.rows.length} rows</div>
             </>
           )}
         </Card>
