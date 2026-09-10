@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Plug, PlugZap, Save, Trash2, KeyRound, ChevronsUpDown } from 'lucide-react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
-import { Badge } from './ui/badge'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import type { ConnFields } from './ConnectionBar'
@@ -42,9 +41,6 @@ export function CredentialManager(p: Props) {
         <button className="flex w-full items-center gap-1.5 px-2.5 py-2 text-left text-[12px] font-semibold hover:bg-accent">
           <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
           Connections
-          <Badge variant={p.connected ? 'success' : 'secondary'} className="ml-1">
-            {p.connected ? 'connected' : 'disconnected'}
-          </Badge>
           <span className="flex-1" />
           <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" />
         </button>

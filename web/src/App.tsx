@@ -502,7 +502,6 @@ export default function App() {
       />
       <ConnectionBar
         connected={connected}
-        inTxn={inTxn}
         onSearch={() => setPaletteOpen(true)}
         onPanel={(v) => {
           setSideView(v)

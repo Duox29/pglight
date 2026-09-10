@@ -1,6 +1,5 @@
 import { Database, Search, History, Star, LayoutDashboard, Plus, Settings } from 'lucide-react'
 import { Button } from './ui/button'
-import { Badge } from './ui/badge'
 
 export interface ConnFields {
   host: string
@@ -13,7 +12,6 @@ export interface ConnFields {
 
 export function ConnectionBar(props: {
   connected: boolean
-  inTxn: boolean
   onSearch: () => void
   onPanel: (v: 'history' | 'snippets' | 'server' | 'settings') => void
   onNewQuery: () => void
@@ -23,11 +21,6 @@ export function ConnectionBar(props: {
       <span className="flex items-center gap-1.5 text-sm font-bold">
         <Database className="h-4 w-4" /> DbClient
       </span>
-      {props.inTxn ? (
-        <Badge variant="warning">IN TRANSACTION</Badge>
-      ) : (
-        <Badge variant="success">AUTOCOMMIT</Badge>
-      )}
       <span className="flex-1" />
       <Button size="sm" variant="outline" onClick={props.onSearch}>
         <Search /> <span className="hidden xl:inline">Search (Ctrl+K)</span>
