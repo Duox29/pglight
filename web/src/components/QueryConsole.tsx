@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Play, FileDown, Sparkles, Star, Wand2 } from 'lucide-react'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
@@ -18,7 +18,7 @@ interface Props {
   inTxn: boolean
   running: boolean
   onSqlChange: (sql: string) => void
-  onRun: () => void
+  onRun: (sql?: string) => void
   onExplain: (analyze: boolean) => void
   onLimit: (n: number) => void
   onSaveSnippet: () => void
@@ -28,7 +28,13 @@ interface Props {
 export function QueryConsole(p: Props) {
   const { tab: t } = p
   const [sortIdx, setSortIdx] = useState<Record<number, boolean>>({})
-
+  const sqlRef = useRef<HTMLTextAreaElement>(null)
+  // Run the highlighted selection when present, else the whole script.
+  const runSelected = () => {
+    const el = sqlRef.current
+    const sel = el && el.selectionStart !== el.selectionEnd ? el.value.slice(el.selectionStart, el.selectionEnd) : ''
+    p.onRun(sel.trim() ? sel : undefined)
+  }
   const exportAs = async (fmt: 'csv' | 'json' | 'sql', ri = 0) => {
     const r = t.results?.[ri]
     if (!r) return
@@ -49,6 +55,7 @@ export function QueryConsole(p: Props) {
       <ResizablePanel defaultSize={30} minSize={12} className="min-h-0">
         <div className="flex h-full min-h-0 flex-col gap-2 pb-2">
       <Textarea
+        ref={sqlRef}
         value={t.sql}
         spellCheck={false}
         className="min-h-0 flex-1 resize-none font-mono"
@@ -56,12 +63,12 @@ export function QueryConsole(p: Props) {
         onKeyDown={(e) => {
           if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
             e.preventDefault()
-            p.onRun()
+            runSelected()
           }
         }}
       />
       <div className="flex flex-wrap items-center gap-1.5">
-        <Button size="sm" onClick={p.onRun} disabled={p.running}>
+        <Button size="sm" onClick={runSelected} disabled={p.running} title="Run selection if any, else whole script">
           <Play /> Run (Ctrl+Enter)
         </Button>
         <Button size="sm" variant="secondary" onClick={() => p.onExplain(false)}>

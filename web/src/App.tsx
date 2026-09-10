@@ -641,16 +641,17 @@ export default function App() {
   }
 
   const runQuery = useCallback(
-    async (id: string) => {
+    async (id: string, sqlOver?: string) => {
       const t = tabs.find((x) => x.id === id)
       if (!t || t.kind !== 'query' || !session) return
+      const sql = sqlOver ?? t.sql
       if (!autocommit) {
         const st = await apiClient.txn(session, 'status')
         if (!st.in_txn) await apiClient.txn(session, 'begin')
       }
       setRunning((r) => ({ ...r, [id]: true }))
       updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: undefined, plan: undefined } : x))
-      const j = await apiClient.runQuery(session, t.sql, t.limit || undefined)
+      const j = await apiClient.runQuery(session, sql, t.limit || undefined)
       setRunning((r) => ({ ...r, [id]: false }))
       setInTxn(!!(j as { in_txn?: boolean }).in_txn)
       if (j.error && !(j as { results?: unknown }).results) {
@@ -658,15 +659,14 @@ export default function App() {
         return
       }
       if (j.results) {
-        updateTab(id, (x) => (x.kind === 'query' ? { ...x, results: j.results ?? null, meta: `${j.results!.length} statements · ${(j as { duration_ms?: number }).duration_ms}ms`, error: (j as { error?: string }).error } : x))
-        pushHist(t.sql, (j as { duration_ms?: number }).duration_ms, j.results.reduce((a, r) => a + (r.rows?.length ?? 0), 0))
+        pushHist(sql, (j as { duration_ms?: number }).duration_ms, j.results.reduce((a, r) => a + (r.rows?.length ?? 0), 0))
       } else {
         updateTab(id, (x) =>
           x.kind === 'query'
             ? { ...x, results: [j], meta: `${(j.rows ?? []).length} rows · ${j.duration_ms}ms`, error: undefined }
             : x,
         )
-        pushHist(t.sql, j.duration_ms, (j.rows ?? []).length)
+        pushHist(sql, j.duration_ms, (j.rows ?? []).length)
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -941,7 +941,7 @@ export default function App() {
                 inTxn={inTxn}
                 running={!!running[cur.id]}
                 onSqlChange={(sql) => updateTab(cur.id, (x) => (x.kind === 'query' ? { ...x, sql } : x))}
-                onRun={() => runQuery(cur.id)}
+                onRun={(sql) => runQuery(cur.id, sql)}
                 onExplain={(a) => explainQuery(cur.id, a)}
                 onLimit={(n) => updateTab(cur.id, (x) => (x.kind === 'query' ? { ...x, limit: n } : x))}
                 onSaveSnippet={async () => {
