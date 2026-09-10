@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Play, FileDown, Braces, Sparkles, Star, Wand2 } from 'lucide-react'
+import { Play, FileDown, Sparkles, Star, Wand2 } from 'lucide-react'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Badge } from './ui/badge'
@@ -8,6 +8,7 @@ import { DataGrid } from './ui/data-grid'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './ui/resizable'
 import { ErrorText } from './ui/feedback'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import type { QueryTabT } from '@/types'
 import type { DialogsApi } from './dialogs'
 import { download, formatSqlText, resultToCSV, resultToInserts, resultToJSON, fmtPlanText } from '@/lib/format'
@@ -85,15 +86,18 @@ export function QueryConsole(p: Props) {
             <SelectItem value="0">no limit</SelectItem>
           </SelectContent>
         </Select>
-        <Button size="sm" variant="ghost" onClick={() => exportAs('csv')}>
-          <FileDown /> CSV
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => exportAs('json')}>
-          <Braces /> JSON
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => exportAs('sql')}>
-          INSERTs
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="ghost" disabled={!t.results?.[0]?.columns?.length}>
+              <FileDown /> Export
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem onSelect={() => exportAs('csv')}>CSV</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => exportAs('json')}>JSON</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => exportAs('sql')}>INSERTs</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <span className="text-[12px] text-muted-foreground">{t.meta}</span>
         {t.results?.[0]?.stale && <Badge variant="secondary">Snapshot from last session — Run to refresh</Badge>}
         {p.inTxn && <Badge variant="warning">IN TXN</Badge>}
