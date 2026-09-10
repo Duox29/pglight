@@ -121,7 +121,7 @@ export interface ErdTabT {
 
 export type Tab = QueryTabT | TableTabT | BrowserTabT | ErdTabT | DocsTabT
 
-export type SideView = 'history' | 'snippets' | 'server' | 'activity' | 'locks' | 'stats' | 'settings'
+export type SideView = 'history' | 'snippets' | 'server' | 'activity' | 'locks' | 'stats' | 'settings' | 'logs'
 
 /** Capped result snapshot kept for query tabs (never auto re-run). */
 export interface QuerySnapshot {

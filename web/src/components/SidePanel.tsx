@@ -9,6 +9,7 @@ import { EmptyNote, ErrorText } from './ui/feedback'
 import type { HistoryEntry, SideView, Snippet } from '@/types'
 import type { DialogsApi } from './dialogs'
 import { SettingsPanel } from './SettingsPanel'
+import { LogsPanel } from './LogsPanel'
 import { api, q } from '@/lib/api'
 
 interface Props {
@@ -23,7 +24,7 @@ interface Props {
   dialogs: DialogsApi
 }
 
-const views: SideView[] = ['history', 'snippets', 'server', 'activity', 'locks', 'stats', 'settings']
+const views: SideView[] = ['history', 'snippets', 'server', 'activity', 'locks', 'stats', 'settings', 'logs']
 
 export function SidePanel(p: Props) {
   const [filter, setFilter] = useState('')
@@ -32,7 +33,7 @@ export function SidePanel(p: Props) {
 
   useEffect(() => {
     if (!p.session) return
-    if (p.view === 'history' || p.view === 'snippets' || p.view === 'settings') return
+    if (p.view === 'history' || p.view === 'snippets' || p.view === 'settings' || p.view === 'logs') return
     let stop = false
     const load = async () => {
       try {
@@ -121,7 +122,7 @@ export function SidePanel(p: Props) {
             {!p.snippets.length && <EmptyNote text="No snippets — use ★ in a query tab" />}
           </div>
         )}
-        {(p.view === 'server' || p.view === 'activity' || p.view === 'locks' || p.view === 'stats' || p.view === 'settings') && (
+        {(p.view === 'server' || p.view === 'activity' || p.view === 'locks' || p.view === 'stats' || p.view === 'settings' || p.view === 'logs') && (
           <div className="flex flex-col gap-2">
             <ErrorText message={error} />
             {p.view === 'server' && payload != null && !(payload as { error?: string }).error && <ServerView data={payload as ServerInfo} />}
@@ -138,6 +139,7 @@ export function SidePanel(p: Props) {
             )}
             {p.view === 'stats' && payload != null && !(payload as { error?: string }).error && <StatsView data={payload as StatsInfo} />}
             {p.view === 'settings' && <SettingsPanel />}
+            {p.view === 'logs' && <LogsPanel />}
           </div>
         )}
       </div>
