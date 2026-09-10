@@ -105,6 +105,12 @@ export interface BrowserTabT {
   error?: string
 }
 
+export interface DocsTabT {
+  id: string
+  kind: 'docs'
+  title: string
+}
+
 export interface ErdTabT {
   id: string
   kind: 'erd'
@@ -113,7 +119,7 @@ export interface ErdTabT {
   data: { nodes: string[]; edges: { fk: string; src_table: string; src_col: string; dst_schema: string; dst_table: string; dst_col: string }[] } | null
 }
 
-export type Tab = QueryTabT | TableTabT | BrowserTabT | ErdTabT
+export type Tab = QueryTabT | TableTabT | BrowserTabT | ErdTabT | DocsTabT
 
 export type SideView = 'history' | 'snippets' | 'server' | 'activity' | 'locks' | 'stats' | 'settings'
 

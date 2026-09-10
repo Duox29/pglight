@@ -12,6 +12,7 @@ import { Explorer } from './components/Explorer'
 import { QueryConsole, explainToText } from './components/QueryConsole'
 import { TableWorkspace } from './components/TableWorkspace'
 import { BrowserView } from './components/BrowserView'
+import { DocsView } from './components/DocsView'
 import { ErdView } from './components/ErdView'
 import { SidePanel } from './components/SidePanel'
 import { SearchPalette } from './components/SearchPalette'
@@ -49,6 +50,8 @@ function slimTab(t: Tab): StoredTab | null {
       return { id: t.id, kind: t.kind, title: t.title, key: t.id.replace(/^b_/, '') }
     case 'erd':
       return { id: t.id, kind: t.kind, title: t.title, schema: t.schema }
+    case 'docs':
+      return { id: 'docs', kind: 'docs', title: 'Docs' }
   }
 }
 
@@ -463,6 +466,8 @@ export default function App() {
           rebuilt.push({ id: `b_${s.key}`, kind: 'browser', title: d.title, url: d.url, cols: d.cols, rows: null })
         } else if (s.kind === 'erd' && s.schema) {
           rebuilt.push({ id: `e_${s.schema}`, kind: 'erd', title: `ERD ${s.schema}`, schema: s.schema, data: null })
+        } else if (s.kind === 'docs') {
+          rebuilt.push({ id: 'docs', kind: 'docs', title: 'Docs' })
         }
       }
       if (!rebuilt.length) {
@@ -497,6 +502,11 @@ export default function App() {
     },
     [session, loadTablePage, loadTableMeta, newQueryTab],
   )
+
+  const openDocsTab = useCallback(() => {
+    setTabs((prev) => (prev.find((t) => t.id === 'docs') ? prev : [...prev, { id: 'docs', kind: 'docs', title: 'Docs' }]))
+    setActiveTab('docs')
+  }, [])
 
   const closeTab = (id: string) => {
     setTabs((prev) => {
@@ -663,6 +673,7 @@ export default function App() {
           setSideOpen(true)
         }}
         onNewQuery={() => newQueryTab()}
+        onDocs={() => openDocsTab()}
       />
       {connected && (
         <div className="flex items-center gap-2 border-b bg-card px-2.5 py-1.5 text-[12px]">
@@ -682,7 +693,7 @@ export default function App() {
           <span className="text-muted-foreground">{inTxn ? '● open transaction — Commit or Rollback' : 'no txn'}</span>
         </div>
       )}
-      <ResizablePanelGroup direction="horizontal" autoSaveId="dbclient-main-layout" className="min-h-0 flex-1">
+      <ResizablePanelGroup direction="horizontal" autoSaveId="pglight-main-layout" className="min-h-0 flex-1">
         <ResizablePanel defaultSize={20} minSize={12} maxSize={32} className="min-h-0">
         <aside className="flex h-full min-h-0 flex-col border-r bg-card">
           <CredentialManager
@@ -887,6 +898,7 @@ export default function App() {
                 onOpenTable={openTableTab}
               />
             )}
+            {cur?.kind === 'docs' && <DocsView />}
           </div>
         </main>
         </ResizablePanel>
