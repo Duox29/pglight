@@ -128,7 +128,7 @@ const SECTIONS: Section[] = [
     title: 'Session restore',
     body: (
       <>
-        <P>Reload the page and you return to the same workspace: autologin replays the last connection, then every open tab is rebuilt — tables, browsers and diagrams reload their data, query tabs keep their SQL ready to run. The open tab, the autocommit toggle and the layout sizes are restored too.</P>
+        <P>Reload the page and you return to the same workspace: autologin replays the last connection (a stored session is verified first, never trusted blindly), then every open tab is rebuilt — tables, browsers and diagrams reload their data, and query tabs bring back their last result as a labeled snapshot (queries are never auto re-run). The open tab, the autocommit toggle and the layout sizes are restored too.</P>
       </>
     ),
   },

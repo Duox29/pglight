@@ -42,8 +42,25 @@ const BROWSER_DEFS: Record<string, { title: string; url: string; cols: string[] 
 
 function slimTab(t: Tab): StoredTab | null {
   switch (t.kind) {
-    case 'query':
-      return { id: t.id, kind: t.kind, title: t.title, sql: t.sql, limit: t.limit }
+    case 'query': {
+      // Keep a capped snapshot of the last result (never auto re-run: the SQL
+      // could be DML). Oversized snapshots are dropped to protect storage.
+      let snapshot: StoredTab['snapshot']
+      const r = t.results?.[0]
+      if (r && r.columns?.length && !r.stale) {
+        const snap = {
+          columns: r.columns,
+          rows: (r.rows ?? []).slice(0, 50).map((row) => row.map((c) => (typeof c === 'string' ? c.slice(0, 200) : c))),
+          at: new Date().toLocaleTimeString(),
+        }
+        try {
+          if (JSON.stringify(snap).length <= 200_000) snapshot = snap
+        } catch {
+          snapshot = undefined
+        }
+      }
+      return { id: t.id, kind: t.kind, title: t.title, sql: t.sql, limit: t.limit, snapshot }
+    }
     case 'table':
       return { id: t.id, kind: t.kind, title: t.title, schema: t.schema, table: t.table, subtab: t.subtab, limit: t.limit, offset: t.offset, filter: t.filter, order: t.order }
     case 'browser':
@@ -78,13 +95,9 @@ export default function App() {
   const [fields, setFields] = useState<ConnFields>({ host: 'localhost', port: '5432', user: 'postgres', password: '', dbname: 'postgres', sslmode: 'disable' })
   const [saved, setSaved] = useLocalStorage<SavedConnection[]>('conns', [])
   const [session, setSession] = useLocalStorage<string>('sid', '')
-  const [connected, setConnected] = useState(() => {
-    try {
-      return !!localStorage.getItem('sid')
-    } catch {
-      return false
-    }
-  })
+  // Always starts disconnected; a stored sid is only trusted after the boot
+  // check below verifies it (a server restart invalidates all sessions).
+  const [connected, setConnected] = useState(false)
   const [inTxn, setInTxn] = useState(false)
   const [autocommit, setAutocommit] = useLocalStorage<boolean>('autocommit', true)
   const [autoLogin, setAutoLogin] = useLocalStorage<boolean>('auto-login', true)
@@ -454,7 +467,10 @@ export default function App() {
         if (s.kind === 'query') {
           const m = /^q(\d+)$/.exec(s.id)
           if (m) maxQ = Math.max(maxQ, Number(m[1]))
-          rebuilt.push({ id: s.id, kind: 'query', title: s.title || 'Query', sql: s.sql ?? DEFAULT_SQL, limit: s.limit ?? 200, results: null })
+          rebuilt.push({
+            id: s.id, kind: 'query', title: s.title || 'Query', sql: s.sql ?? DEFAULT_SQL, limit: s.limit ?? 200,
+            results: s.snapshot ? [{ columns: s.snapshot.columns, rows: s.snapshot.rows, rows_affected: s.snapshot.rows.length, stale: true }] : null,
+          })
         } else if (s.kind === 'table' && s.schema && s.table) {
           rebuilt.push({
             id: `t_${s.schema}_${s.table}`, kind: 'table', title: s.table, schema: s.schema, table: s.table,
@@ -599,8 +615,28 @@ export default function App() {
     return () => document.removeEventListener('keydown', h)
   }, [])
 
-  // Persist open tabs so a fresh start can reopen the last session.
+  // Verify a stored sid against the live server (a restart invalidates it).
+  const verifyStoredSession = useCallback(
+    async (sid: string) => {
+      try {
+        const j = await api<unknown>(q(sid, '/api/schemas?'))
+        if (Array.isArray(j)) setConnected(true)
+        else setSession('')
+      } catch {
+        setSession('')
+      }
+    },
+    [setSession],
+  )
+
+  // Persist open tabs so a fresh start can reopen the last session. Skipped
+  // while empty pre-hydration so boot never wipes the stored session away.
+  const hydrated = useRef(false)
   useEffect(() => {
+    if (!hydrated.current) {
+      if (tabs.length === 0) return
+      hydrated.current = true
+    }
     try {
       const slim = tabs.map(slimTab).filter((t): t is StoredTab => t !== null)
       localStorage.setItem('open-tabs', JSON.stringify(slim))
@@ -616,14 +652,22 @@ export default function App() {
     if (booted.current) return
     booted.current = true
     const auto = readJSON<boolean>('auto-login', true)
-    if (!auto) return
     const last = readJSON<ConnFields | null>('last-conn', null)
-    if (last && last.host) {
+    if (auto && last && last.host) {
       // Boot-only handoff: stored credentials move into state once here.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFields(last)
       void bootConnect(last, true)
+      return
     }
+    const sid = (() => {
+      try {
+        return localStorage.getItem('sid')
+      } catch {
+        return null
+      }
+    })()
+    if (sid) void verifyStoredSession(sid)
     // Boot-only effect by design (guarded by ref, not deps).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

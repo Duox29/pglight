@@ -92,6 +92,7 @@ export function QueryConsole(p: Props) {
           INSERTs
         </Button>
         <span className="text-[12px] text-muted-foreground">{t.meta}</span>
+        {t.results?.[0]?.stale && <Badge variant="secondary">Snapshot from last session — Run to refresh</Badge>}
         {p.inTxn && <Badge variant="warning">IN TXN</Badge>}
       </div>
       <ErrorText message={t.error} />

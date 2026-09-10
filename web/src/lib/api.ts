@@ -21,6 +21,8 @@ export interface QueryResult {
   total?: number
   statement?: string
   in_txn?: boolean
+  /** True when restored from last session's snapshot — Run to refresh. */
+  stale?: boolean
 }
 
 export interface MultiResult {

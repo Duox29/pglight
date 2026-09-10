@@ -123,7 +123,15 @@ export type Tab = QueryTabT | TableTabT | BrowserTabT | ErdTabT | DocsTabT
 
 export type SideView = 'history' | 'snippets' | 'server' | 'activity' | 'locks' | 'stats' | 'settings'
 
-/** Minimal persisted tab shell for last-session restore (no results). */
+/** Capped result snapshot kept for query tabs (never auto re-run). */
+export interface QuerySnapshot {
+  columns: string[]
+  rows: unknown[][]
+  meta?: string
+  at: string
+}
+
+/** Minimal persisted tab shell for last-session restore. */
 export interface StoredTab {
   id: string
   kind: string
@@ -137,4 +145,5 @@ export interface StoredTab {
   order?: string
   offset?: number
   key?: string
+  snapshot?: QuerySnapshot
 }
