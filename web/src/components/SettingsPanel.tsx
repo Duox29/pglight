@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Save, Trash2 } from 'lucide-react'
+import { RotateCcw, Save, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
@@ -12,6 +12,16 @@ import { apiClient, type LogEntry, type LoggingConfig } from '@/lib/api'
 
 const LEVELS = ['debug', 'info', 'warn', 'error']
 const CATEGORIES = ['http', 'query', 'txn', 'system']
+
+// Mirrors logging.DefaultConfig() on the backend.
+const DEFAULTS: LoggingConfig = {
+  enabled: true,
+  level: 'info',
+  log_http: true,
+  log_query: true,
+  slow_ms: 500,
+  max_entries: 500,
+}
 
 export function SettingsPanel() {
   const [cfg, setCfg] = useState<LoggingConfig | null>(null)
@@ -72,6 +82,20 @@ export function SettingsPanel() {
       else {
         setCfg(j.logging)
         toast.success('Settings saved')
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const reset = async () => {
+    setSaving(true)
+    try {
+      const j = await apiClient.saveSettings(DEFAULTS)
+      if (j.error) toast.error(j.error)
+      else {
+        setCfg(j.logging)
+        toast.success('Reset to defaults')
       }
     } finally {
       setSaving(false)
@@ -144,9 +168,14 @@ export function SettingsPanel() {
             <div className="text-[11px] text-muted-foreground">
               Steady-state queries log at debug; slow queries warn, failures error.
             </div>
-            <Button size="sm" onClick={save} disabled={saving}>
-              <Save /> Save
-            </Button>
+            <div className="flex gap-1.5">
+              <Button size="sm" className="flex-1" onClick={save} disabled={saving}>
+                <Save /> Save
+              </Button>
+              <Button size="sm" variant="secondary" onClick={reset} disabled={saving} title="Reset to defaults">
+                <RotateCcw /> Defaults
+              </Button>
+            </div>
           </div>
         )}
       </Card>

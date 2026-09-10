@@ -105,7 +105,9 @@ All txn-aware: `/api/query`, `/api/explain`, `/api/table-data`, `/api/row`, `/ap
 The hand-rolled vanilla UI (`web/app.js` + `web/style.css`) was replaced with a
 React + Vite + Tailwind v3 app built on **shadcn-style prebuilt components**
 (`web/src/components/ui/*`: Button, Input, Textarea, Badge, Card, Table,
-Tabs, Dialog, Select, Separator, ScrollArea, DataGrid) on top of Radix
+Tabs, Dialog, Select, Separator, ScrollArea, Collapsible, Switch, Resizable
+(react-resizable-panels, persisted via autoSaveId) for the 3-column layout,
+DataGrid) on top of Radix
 primitives, `class-variance-authority`, `clsx` + `tailwind-merge`,
 `lucide-react` icons, Sonner `<Toaster>` (monochrome thin style) for all
 notifications, and a promise-based `dialogs.tsx` host on top of shadcn

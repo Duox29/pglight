@@ -7,6 +7,7 @@ import { Separator } from './components/ui/separator'
 import { ConnectionBar, type ConnFields } from './components/ConnectionBar'
 import { CredentialManager } from './components/CredentialManager'
 import { DialogHost, createDialogs, type PendingDialog } from './components/dialogs'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './components/ui/resizable'
 import { Explorer } from './components/Explorer'
 import { QueryConsole, explainToText } from './components/QueryConsole'
 import { TableWorkspace } from './components/TableWorkspace'
@@ -529,8 +530,9 @@ export default function App() {
           <span className="text-muted-foreground">multi-statement scripts supported</span>
         </div>
       )}
-      <div className="grid min-h-0 flex-1" style={{ gridTemplateColumns: `280px 1fr ${sideOpen ? '360px' : '0'}` }}>
-        <aside className="flex min-h-0 flex-col border-r bg-card">
+      <ResizablePanelGroup direction="horizontal" autoSaveId="dbclient-main-layout" className="min-h-0 flex-1">
+        <ResizablePanel defaultSize={20} minSize={12} maxSize={32} className="min-h-0">
+        <aside className="flex h-full min-h-0 flex-col border-r bg-card">
           <CredentialManager
             fields={fields}
             setFields={setFields}
@@ -578,7 +580,10 @@ export default function App() {
             onRefresh={loadExplorer}
           />
         </aside>
-        <main className="flex min-h-0 min-w-0 flex-col">
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize={55} minSize={30} className="min-h-0">
+        <main className="flex h-full min-h-0 min-w-0 flex-col">
           <div className="flex gap-1 overflow-x-auto border-b bg-card px-2 pt-1.5">
             {tabs.map((t) => (
               <button
@@ -729,8 +734,12 @@ export default function App() {
             )}
           </div>
         </main>
+        </ResizablePanel>
         {sideOpen && (
-          <aside className="flex min-h-0 flex-col border-l bg-card">
+          <>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize={25} minSize={15} maxSize={50} className="min-h-0">
+          <aside className="flex h-full min-h-0 flex-col border-l bg-card">
             <SidePanel
               view={sideView}
               onView={setSideView}
@@ -743,8 +752,10 @@ export default function App() {
               dialogs={dialogs}
             />
           </aside>
+          </ResizablePanel>
+          </>
         )}
-      </div>
+      </ResizablePanelGroup>
       <Separator />
       <Card className="rounded-none border-0 border-t px-2.5 py-1 text-[11px] text-muted-foreground">
         {connected ? `connected · ${fields.user}@${fields.host}:${fields.port}/${fields.dbname}` : 'disconnected'} · Ctrl+K search · Ctrl+Enter run
