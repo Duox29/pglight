@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Play, FileDown, Sparkles, Star, Wand2 } from 'lucide-react'
+import { Play, FileDown, Sparkles, Star, Trash2, Wand2 } from 'lucide-react'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Badge } from './ui/badge'
@@ -19,6 +19,7 @@ interface Props {
   running: boolean
   onSqlChange: (sql: string) => void
   onRun: (sql?: string) => void
+  onClearResults: () => void
   onExplain: (analyze: boolean) => void
   onLimit: (n: number) => void
   onSaveSnippet: () => void
@@ -108,6 +109,10 @@ export function QueryConsole(p: Props) {
         <span className="text-[12px] text-muted-foreground">{t.meta}</span>
         {t.results?.[0]?.stale && <Badge variant="secondary">Snapshot from last session — Run to refresh</Badge>}
         {p.inTxn && <Badge variant="warning">IN TXN</Badge>}
+        <span className="flex-1" />
+        <Button size="sm" variant="ghost" onClick={p.onClearResults} disabled={!t.results && !t.error && !t.plan} title="Clear results">
+          <Trash2 />
+        </Button>
       </div>
         </div>
       </ResizablePanel>

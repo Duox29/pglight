@@ -942,6 +942,7 @@ export default function App() {
                 running={!!running[cur.id]}
                 onSqlChange={(sql) => updateTab(cur.id, (x) => (x.kind === 'query' ? { ...x, sql } : x))}
                 onRun={(sql) => runQuery(cur.id, sql)}
+                onClearResults={() => updateTab(cur.id, (x) => (x.kind === 'query' ? { ...x, results: null, error: undefined, plan: undefined, meta: undefined } : x))}
                 onExplain={(a) => explainQuery(cur.id, a)}
                 onLimit={(n) => updateTab(cur.id, (x) => (x.kind === 'query' ? { ...x, limit: n } : x))}
                 onSaveSnippet={async () => {
