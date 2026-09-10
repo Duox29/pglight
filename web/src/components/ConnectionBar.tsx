@@ -28,9 +28,6 @@ export function ConnectionBar(props: {
       ) : (
         <Badge variant="success">AUTOCOMMIT</Badge>
       )}
-      <Badge variant={props.connected ? 'success' : 'secondary'}>
-        {props.connected ? 'connected' : 'disconnected'}
-      </Badge>
       <span className="flex-1" />
       <Button size="sm" variant="outline" onClick={props.onSearch}>
         <Search /> <span className="hidden xl:inline">Search (Ctrl+K)</span>

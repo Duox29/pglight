@@ -526,8 +526,6 @@ export default function App() {
             Rollback
           </Button>
           <span className="text-muted-foreground">{inTxn ? '● open transaction — Commit or Rollback' : 'no txn'}</span>
-          <span className="flex-1" />
-          <span className="text-muted-foreground">multi-statement scripts supported</span>
         </div>
       )}
       <ResizablePanelGroup direction="horizontal" autoSaveId="dbclient-main-layout" className="min-h-0 flex-1">
