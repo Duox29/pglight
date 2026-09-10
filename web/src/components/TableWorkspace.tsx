@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, FileDown, Plus, RefreshCw, Upload, Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from './ui/button'
@@ -11,6 +11,7 @@ import { ErrorText, EmptyNote } from './ui/feedback'
 import type { TableSubtab, TableTabT } from '@/types'
 import type { DialogsApi } from './dialogs'
 import { download, parseCSV, resultToCSV, resultToInserts } from '@/lib/format'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from './ui/context-menu'
 
 interface Props {
   tab: TableTabT
@@ -22,6 +23,9 @@ interface Props {
   onEditCell: (col: string, orig: Record<string, unknown>) => void
   onDeleteRow: (orig: Record<string, unknown>) => void
   onCopyInsert: (orig: Record<string, unknown>) => void
+  onExportRows: (rows: Record<string, unknown>[], fmt: 'csv' | 'json' | 'sql') => void
+  onCopyRows: (rows: Record<string, unknown>[]) => void
+  onDeleteRows: (rows: Record<string, unknown>[]) => void
   onInsert: () => void
   onMaintenance: (op: string) => void
   onImport: (columns: string[], rows: unknown[][]) => void
@@ -32,6 +36,32 @@ interface Props {
 export function TableWorkspace(p: Props) {
   const { tab: t } = p
   const fileRef = useRef<HTMLInputElement>(null)
+  // Bulk row selection, keyed by serialized row content so it survives
+  // reloads/paging. Identical duplicate rows share one key (known limit).
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const anchor = useRef(0)
+  const pageRows = t.result?.rows ?? []
+  const pageCols = t.result?.columns ?? []
+  const rowKey = (r: unknown[]) => JSON.stringify(r)
+  const selRecs = pageRows.filter((r) => sel.has(rowKey(r))).map((r) => Object.fromEntries(pageCols.map((c, i) => [c, r[i]])))
+  const toggleRow = (ri: number, r: unknown[]) => {
+    const k = rowKey(r)
+    setSel((prev) => {
+      const next = new Set(prev)
+      if (next.has(k)) next.delete(k)
+      else next.add(k)
+      return next
+    })
+    anchor.current = ri
+  }
+  const rangeTo = (ri: number) => {
+    const [a, b] = anchor.current < ri ? [anchor.current, ri] : [ri, anchor.current]
+    setSel((prev) => {
+      const next = new Set(prev)
+      for (let i = a; i <= b; i++) if (pageRows[i]) next.add(rowKey(pageRows[i]))
+      return next
+    })
+  }
 
   const startImport = () => fileRef.current?.click()
 
@@ -155,61 +185,103 @@ export function TableWorkspace(p: Props) {
             <span className="text-[12px] text-muted-foreground">
               {t.result ? `${t.result.rows.length} rows${t.result.total != null ? ` / ${t.result.total} total` : ''} · ${t.result.duration_ms}ms` : ''}
             </span>
+            {selRecs.length > 0 && (
+              <>
+                <span className="text-[12px] font-semibold">{selRecs.length} selected</span>
+                <Button size="sm" variant="ghost" onClick={() => setSel(new Set())}>
+                  Clear
+                </Button>
+              </>
+            )}
             <span className="flex-1" />
-            <Button size="sm" variant="ghost" onClick={() => p.onMaintenance('vacuum')}>
-              VACUUM
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => p.onMaintenance('analyze')}>
-              ANALYZE
-            </Button>
             <Button size="sm" variant="ghost" onClick={p.onApply} title="Reload">
               <RefreshCw />
             </Button>
           </div>
           <ErrorText message={t.error} />
           {t.result ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  {t.result.columns.map((c) => (
-                    <TableHead key={c}>{c}</TableHead>
-                  ))}
-                  <TableHead>✎</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {t.result.rows.map((r, ri) => {
-                  const orig = Object.fromEntries(t.result!.columns.map((c, i) => [c, r[i]]))
-                  return (
-                    <TableRow key={ri}>
-                      {r.map((c, ci) => (
-                        <TableCell
-                          key={ci}
-                          title="Double-click to edit"
-                          className="cursor-text bg-sky-950/30"
-                          onDoubleClick={() => p.onEditCell(t.result!.columns[ci], orig)}
-                          onClick={() => {
-                            if (c != null && navigator.clipboard) navigator.clipboard.writeText(String(c))
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      {t.result.columns.map((c) => (
+                        <TableHead key={c}>{c}</TableHead>
+                      ))}
+                      <TableHead>✎</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {t.result.rows.map((r, ri) => {
+                      const orig = Object.fromEntries(t.result!.columns.map((c, i) => [c, r[i]]))
+                      const k = rowKey(r)
+                      return (
+                        <TableRow
+                          key={ri}
+                          data-state={sel.has(k) ? 'selected' : undefined}
+                          onContextMenu={() => {
+                            if (!sel.has(k)) {
+                              setSel(new Set([k]))
+                              anchor.current = ri
+                            }
                           }}
                         >
-                          {c == null ? <span className="italic text-muted-foreground">NULL</span> : String(c).slice(0, 200)}
-                        </TableCell>
-                      ))}
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button size="sm" variant="ghost" title="Copy row as INSERT" onClick={() => p.onCopyInsert(orig)}>
-                            ⧉
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => p.onDeleteRow(orig)}>
-                            del
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
+                          {r.map((c, ci) => (
+                            <TableCell
+                              key={ci}
+                              title="Click to copy · Ctrl-click to select · Shift-click for range · Right-click for menu"
+                              className="cursor-text bg-sky-950/30"
+                              onDoubleClick={() => p.onEditCell(t.result!.columns[ci], orig)}
+                              onClick={(e) => {
+                                if (e.ctrlKey || e.metaKey) {
+                                  toggleRow(ri, r)
+                                  return
+                                }
+                                if (e.shiftKey) {
+                                  rangeTo(ri)
+                                  return
+                                }
+                                if (c != null && navigator.clipboard) navigator.clipboard.writeText(String(c))
+                              }}
+                            >
+                              {c == null ? <span className="italic text-muted-foreground">NULL</span> : String(c).slice(0, 200)}
+                            </TableCell>
+                          ))}
+                          <TableCell>
+                            <div className="flex gap-1">
+                              <Button size="sm" variant="ghost" title="Copy row as INSERT" onClick={() => p.onCopyInsert(orig)}>
+                                ⧉
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => p.onDeleteRow(orig)}>
+                                del
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuLabel>{selRecs.length ? `${selRecs.length} row${selRecs.length === 1 ? '' : 's'} selected` : 'No rows selected'}</ContextMenuLabel>
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger disabled={!selRecs.length}>Export</ContextMenuSubTrigger>
+                  <ContextMenuSubContent>
+                    <ContextMenuItem onSelect={() => p.onExportRows(selRecs, 'csv')}>CSV</ContextMenuItem>
+                    <ContextMenuItem onSelect={() => p.onExportRows(selRecs, 'json')}>JSON</ContextMenuItem>
+                    <ContextMenuItem onSelect={() => p.onExportRows(selRecs, 'sql')}>INSERTs</ContextMenuItem>
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
+                <ContextMenuItem disabled={!selRecs.length} onSelect={() => p.onCopyRows(selRecs)}>
+                  Copy
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem disabled={!selRecs.length} className="text-red-400 focus:text-red-400" onSelect={() => p.onDeleteRows(selRecs)}>
+                  Delete
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           ) : (
             <EmptyNote text={t.error ? 'Failed to load' : 'Loading…'} />
           )}

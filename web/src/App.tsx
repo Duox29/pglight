@@ -32,7 +32,7 @@ import type {
   TableTabT,
 } from './types'
 import { cn } from './lib/utils'
-import { download, resultToCSV, resultToInserts } from './lib/format'
+import { download, resultToCSV, resultToInserts, resultToJSON } from './lib/format'
 
 const DEFAULT_SQL = 'SELECT * FROM information_schema.tables LIMIT 20;'
 
@@ -989,6 +989,46 @@ export default function App() {
                 }}
                 onCopyInsert={(orig) => {
                   copyName(resultToInserts(Object.keys(orig), [Object.values(orig)], `${qi(cur.schema)}.${qi(cur.table)}`))
+                }}
+                onExportRows={(rows, fmt) => {
+                  if (!rows.length) return
+                  const cols = cur.result?.columns ?? Object.keys(rows[0])
+                  const matrix = rows.map((r) => cols.map((c) => r[c]))
+                  const base = `${cur.schema}.${cur.table}-selected`
+                  if (fmt === 'csv') download(resultToCSV(cols, matrix), `${base}.csv`, 'text/csv')
+                  else if (fmt === 'json') download(resultToJSON(cols, matrix), `${base}.json`, 'application/json')
+                  else download(resultToInserts(cols, matrix, `${qi(cur.schema)}.${qi(cur.table)}`), `${base}.sql`, 'text/sql')
+                }}
+                onCopyRows={(rows) => {
+                  if (!rows.length) return
+                  const cols = cur.result?.columns ?? Object.keys(rows[0])
+                  copyName(resultToCSV(cols, rows.map((r) => cols.map((c) => r[c]))))
+                }}
+                onDeleteRows={async (rows) => {
+                  if (!rows.length) return
+                  if (!needSession(`${cur.schema}.${cur.table}`)) return
+                  const ok = await dialogs.confirm({
+                    title: `Delete ${rows.length} row${rows.length === 1 ? '' : 's'}?`,
+                    description: 'This cannot be undone.',
+                    confirmText: 'Delete',
+                    danger: true,
+                  })
+                  if (!ok) return
+                  if (!autocommit) {
+                    const st = await apiClient.txn(session, 'status')
+                    if (!st.in_txn) await apiClient.txn(session, 'begin')
+                  }
+                  let failed = 0
+                  let inTxn = false
+                  for (const w of rows) {
+                    const j = await apiClient.rowOp({ session_id: session, schema: cur.schema, table: cur.table, op: 'delete', values: {}, where: w })
+                    if (j.error) failed++
+                    inTxn = !!j.in_txn
+                  }
+                  setInTxn(inTxn)
+                  if (failed) toast.error(`Failed to delete ${failed} row${failed === 1 ? '' : 's'}`)
+                  else toast.success(`Deleted ${rows.length} row${rows.length === 1 ? '' : 's'}`)
+                  loadTablePage(cur.id, cur.schema, cur.table, cur.limit, cur.offset, cur.filter, cur.order)
                 }}
                 onInsert={async () => {
                   if (!cur.result) return

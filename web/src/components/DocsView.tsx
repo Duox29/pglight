@@ -74,7 +74,7 @@ const SECTIONS: Section[] = [
       <>
         <P>Tables open with seven sub-tabs: Data, Columns, DDL, Indexes, Constraints, Triggers, Stats.</P>
         <ul className="mt-1.5 list-disc space-y-1 pl-5">
-          <Li><K>Data</K>: free-form WHERE filter, ORDER input, paging, per-row edit (double-click a cell, <K>__NULL__</K> for NULL), copy row as INSERT (⧉), delete, insert row form, CSV export/INSERT export.</Li>
+          <Li><K>Data</K>: free-form WHERE filter, ORDER input, paging, per-row edit (double-click a cell, <K>__NULL__</K> for NULL), copy row as INSERT (⧉), delete, insert row form, CSV export/INSERT export. Bulk select with Ctrl-click / Shift-click, right-click for Export (CSV/JSON/INSERTs), Copy and bulk Delete.</Li>
           <Li><K>Import CSV</K>: header row maps to columns automatically (or positional fallback); confirm before inserting.</Li>
           <Li><K>Stats</K> shows sizes, seq/idx scans, live/dead tuples and vacuum ages, with VACUUM / ANALYZE / REINDEX actions (refused inside an open txn, like pgAdmin).</Li>
           <Li>UPDATE/DELETE without a key are refused server-side.</Li>
