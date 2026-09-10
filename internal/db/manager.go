@@ -7,16 +7,34 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Querier is satisfied by *pgxpool.Pool and pgx.Tx (and *pgxpool.Conn).
+type Querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// Manager holds one pgx pool per session plus optional explicit transaction state.
+// Explicit txns (DataGrip/pgAdmin-style) pin a single pooled connection so that
+// subsequent queries in the same session see uncommitted data.
 type Manager struct {
-	mu    sync.RWMutex
-	pools map[string]*pgxpool.Pool
+	mu      sync.RWMutex
+	pools   map[string]*pgxpool.Pool
+	txConns map[string]*pgxpool.Conn
+	txs     map[string]pgx.Tx
 }
 
 func New() *Manager {
-	return &Manager{pools: make(map[string]*pgxpool.Pool)}
+	return &Manager{
+		pools:   make(map[string]*pgxpool.Pool),
+		txConns: make(map[string]*pgxpool.Conn),
+		txs:     make(map[string]pgx.Tx),
+	}
 }
 
 func ConnString(host string, port int, user, password, dbname, sslmode string) string {
@@ -43,7 +61,7 @@ func (m *Manager) Add(id, connStr string) error {
 	if err != nil {
 		return err
 	}
-	cfg.MaxConns = 5
+	cfg.MaxConns = 8
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return err
@@ -55,6 +73,11 @@ func (m *Manager) Add(id, connStr string) error {
 	m.mu.Lock()
 	if old, ok := m.pools[id]; ok {
 		old.Close()
+	}
+	if c, ok := m.txConns[id]; ok {
+		c.Release()
+		delete(m.txConns, id)
+		delete(m.txs, id)
 	}
 	m.pools[id] = pool
 	m.mu.Unlock()
@@ -71,8 +94,112 @@ func (m *Manager) Get(id string) (*pgxpool.Pool, bool) {
 func (m *Manager) Close(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if tx, ok := m.txs[id]; ok {
+		_ = tx.Rollback(context.Background())
+		delete(m.txs, id)
+	}
+	if c, ok := m.txConns[id]; ok {
+		c.Release()
+		delete(m.txConns, id)
+	}
 	if p, ok := m.pools[id]; ok {
 		p.Close()
 		delete(m.pools, id)
 	}
+}
+
+// InTxn reports whether the session has an open explicit transaction.
+func (m *Manager) InTxn(id string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.txs[id]
+	return ok
+}
+
+// Begin starts an explicit transaction for the session.
+func (m *Manager) Begin(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pool, ok := m.pools[id]
+	if !ok {
+		return fmt.Errorf("not connected")
+	}
+	if _, ok := m.txs[id]; ok {
+		return fmt.Errorf("transaction already open")
+	}
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		conn.Release()
+		return err
+	}
+	m.txConns[id] = conn
+	m.txs[id] = tx
+	return nil
+}
+
+// Commit commits the session transaction and releases the pinned connection.
+func (m *Manager) Commit(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	tx, ok := m.txs[id]
+	if !ok {
+		return fmt.Errorf("no open transaction")
+	}
+	conn := m.txConns[id]
+	err := tx.Commit(ctx)
+	if conn != nil {
+		conn.Release()
+	}
+	delete(m.txs, id)
+	delete(m.txConns, id)
+	return err
+}
+
+// Rollback aborts the session transaction and releases the pinned connection.
+func (m *Manager) Rollback(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	tx, ok := m.txs[id]
+	if !ok {
+		return fmt.Errorf("no open transaction")
+	}
+	conn := m.txConns[id]
+	err := tx.Rollback(ctx)
+	if conn != nil {
+		conn.Release()
+	}
+	delete(m.txs, id)
+	delete(m.txConns, id)
+	return err
+}
+
+// Q returns the query target for a session: the open txn when present,
+// otherwise the pool. Caller must NOT close/release the result.
+func (m *Manager) Q(id string) (Querier, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if tx, ok := m.txs[id]; ok {
+		return tx, true
+	}
+	p, ok := m.pools[id]
+	if !ok {
+		return nil, false
+	}
+	return p, true
+}
+
+// PoolOrTxn is a convenience for handlers that need *pgxpool.Pool for
+// helpers but must stay txn-aware. It returns the txn when open.
+func (m *Manager) PoolOrTxn(id string) (Querier, *pgxpool.Pool, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if tx, ok := m.txs[id]; ok {
+		return tx, nil, true
+	}
+	p, ok := m.pools[id]
+	return p, p, ok
 }

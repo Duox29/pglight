@@ -1,0 +1,31 @@
+# Test database for DbClient: Postgres 14 (alpine, nhe).
+# Credential cau hinh san, khop voi default tren UI:
+#   host=localhost port=5432 user=postgres password=postgres dbname=postgres
+#
+# Chay:  docker compose -f docker/docker-compose.yml up -d
+# Dung:  docker compose -f docker/docker-compose.yml down      (gi du lieu)
+# Reset: docker compose -f docker/docker-compose.yml down -v  (seed lai tu init.sql)
+name: dbclient
+
+services:
+  pg14:
+    image: postgres:14-alpine
+    container_name: dbclient-pg14
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - pg14data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pg14data:
