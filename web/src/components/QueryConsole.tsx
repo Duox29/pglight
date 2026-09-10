@@ -108,7 +108,7 @@ export function QueryConsole(p: Props) {
       {t.plan && (
         <Card className="whitespace-pre-wrap p-2.5 font-mono text-[12px]">{t.plan}</Card>
       )}
-      {(t.results ?? []).map((res, ri) => (
+      {(t.results ?? []).map((res, ri) => ({ res, ri })).reverse().map(({ res, ri }) => (
         <Card key={ri} className="p-2.5">
           {(t.results?.length ?? 0) > 1 && (
             <div className="mb-1.5 text-[12px] text-muted-foreground">
