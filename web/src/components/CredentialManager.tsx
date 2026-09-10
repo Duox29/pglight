@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Plug, PlugZap, Save, Trash2, KeyRound, ChevronsUpDown } from 'lucide-react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
+import { Switch } from './ui/switch'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import type { ConnFields } from './ConnectionBar'
@@ -18,6 +19,8 @@ interface Props {
   onSave: () => void
   onDisconnect: () => void
   connected: boolean
+  autoLogin: boolean
+  onAutoLogin: (v: boolean) => void
 }
 
 export function CredentialManager(p: Props) {
@@ -113,6 +116,10 @@ export function CredentialManager(p: Props) {
               ✖
             </Button>
           </div>
+          <label className="flex cursor-pointer items-center justify-between gap-2 text-[12px] text-muted-foreground">
+            <span>Auto-connect on startup</span>
+            <Switch checked={p.autoLogin} onCheckedChange={p.onAutoLogin} />
+          </label>
         </div>
       </CollapsibleContent>
     </Collapsible>

@@ -25,6 +25,7 @@ import type {
   SchemaGroup,
   SideView,
   Snippet,
+  StoredTab,
   Tab,
   TableSubtab,
   TableTabT,
@@ -32,6 +33,43 @@ import type {
 import { cn } from './lib/utils'
 
 const DEFAULT_SQL = 'SELECT * FROM information_schema.tables LIMIT 20;'
+
+const BROWSER_DEFS: Record<string, { title: string; url: string; cols: string[] }> = {
+  extensions: { title: 'Extensions', url: '/api/extensions', cols: ['name', 'default_version', 'installed_version', 'comment'] },
+  roles: { title: 'Roles', url: '/api/roles', cols: ['name', 'superuser', 'login', 'createdb', 'member_of'] },
+}
+
+function slimTab(t: Tab): StoredTab | null {
+  switch (t.kind) {
+    case 'query':
+      return { id: t.id, kind: t.kind, title: t.title, sql: t.sql, limit: t.limit }
+    case 'table':
+      return { id: t.id, kind: t.kind, title: t.title, schema: t.schema, table: t.table, subtab: t.subtab, limit: t.limit, offset: t.offset, filter: t.filter, order: t.order }
+    case 'browser':
+      return { id: t.id, kind: t.kind, title: t.title, key: t.id.replace(/^b_/, '') }
+    case 'erd':
+      return { id: t.id, kind: t.kind, title: t.title, schema: t.schema }
+  }
+}
+
+function readJSON<T>(key: string, fallback: T): T {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) ?? 'null') as T
+    return v ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+function readStoredTabs(): StoredTab[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem('open-tabs') ?? '[]') as StoredTab[]
+    if (!Array.isArray(raw)) return []
+    return raw.filter((t) => t && typeof t.id === 'string' && typeof t.kind === 'string').slice(0, 20)
+  } catch {
+    return []
+  }
+}
 
 export default function App() {
   const [fields, setFields] = useState<ConnFields>({ host: 'localhost', port: '5432', user: 'postgres', password: '', dbname: 'postgres', sslmode: 'disable' })
@@ -45,7 +83,8 @@ export default function App() {
     }
   })
   const [inTxn, setInTxn] = useState(false)
-  const [autocommit, setAutocommit] = useState(true)
+  const [autocommit, setAutocommit] = useLocalStorage<boolean>('autocommit', true)
+  const [autoLogin, setAutoLogin] = useLocalStorage<boolean>('auto-login', true)
   const [databases, setDatabases] = useState<DbInfo[]>([])
   const [schemas, setSchemas] = useState<SchemaGroup[]>([])
   const [detail, setDetail] = useState<ObjectDetail | null>(null)
@@ -68,28 +107,38 @@ export default function App() {
   }, [])
 
   /* ---------- connection ---------- */
-  const connect = useCallback(
-    async (fresh: boolean, dbnameOver?: string) => {
+  const bootConnect = useCallback(
+    async (f: ConnFields, fresh: boolean, dbnameOver?: string) => {
       const j = await apiClient.connect({
-        host: fields.host,
-        port: Number(fields.port) || 5432,
-        user: fields.user,
-        password: fields.password,
-        dbname: dbnameOver || fields.dbname,
-        sslmode: fields.sslmode,
+        host: f.host,
+        port: Number(f.port) || 5432,
+        user: f.user,
+        password: f.password,
+        dbname: dbnameOver || f.dbname,
+        sslmode: f.sslmode,
         session_id: fresh ? '' : session || undefined,
       })
       if (j.error || !j.session_id) {
         toast.error(j.error ?? 'Connect failed')
         return false
       }
+      try {
+        localStorage.setItem('last-conn', JSON.stringify({ ...f, dbname: dbnameOver || f.dbname }))
+      } catch {
+        /* private mode etc. — autologin just won't persist */
+      }
       setSession(j.session_id)
-      if (dbnameOver) setFields((f) => ({ ...f, dbname: dbnameOver }))
+      if (dbnameOver) setFields((f0) => ({ ...f0, dbname: dbnameOver }))
       setConnected(true)
       setInTxn(false)
       return true
     },
-    [fields, session, setSession],
+    [session, setSession],
+  )
+
+  const connect = useCallback(
+    (fresh: boolean, dbnameOver?: string) => bootConnect(fields, fresh, dbnameOver),
+    [bootConnect, fields],
   )
 
   const disconnect = useCallback(() => {
@@ -393,6 +442,62 @@ export default function App() {
     [session, needSession],
   )
 
+  /* ---------- last-session restore (tabs + autologin) ---------- */
+  const restoreStoredTabs = useCallback(
+    (stored: StoredTab[]) => {
+      const rebuilt: Tab[] = []
+      let maxQ = 0
+      for (const s of stored) {
+        if (s.kind === 'query') {
+          const m = /^q(\d+)$/.exec(s.id)
+          if (m) maxQ = Math.max(maxQ, Number(m[1]))
+          rebuilt.push({ id: s.id, kind: 'query', title: s.title || 'Query', sql: s.sql ?? DEFAULT_SQL, limit: s.limit ?? 200, results: null })
+        } else if (s.kind === 'table' && s.schema && s.table) {
+          rebuilt.push({
+            id: `t_${s.schema}_${s.table}`, kind: 'table', title: s.table, schema: s.schema, table: s.table,
+            subtab: s.subtab ?? 'data', limit: s.limit ?? 100, offset: s.offset ?? 0, filter: s.filter ?? '', order: s.order ?? '',
+            result: null, cols: null, ddl: null, constraints: null, triggers: null, stats: null,
+          })
+        } else if (s.kind === 'browser' && s.key && BROWSER_DEFS[s.key]) {
+          const d = BROWSER_DEFS[s.key]
+          rebuilt.push({ id: `b_${s.key}`, kind: 'browser', title: d.title, url: d.url, cols: d.cols, rows: null })
+        } else if (s.kind === 'erd' && s.schema) {
+          rebuilt.push({ id: `e_${s.schema}`, kind: 'erd', title: `ERD ${s.schema}`, schema: s.schema, data: null })
+        }
+      }
+      if (!rebuilt.length) {
+        newQueryTab()
+        return
+      }
+      tabSeq.current = maxQ
+      setTabs(rebuilt)
+      const wantActive = (() => {
+        try {
+          return localStorage.getItem('active-tab')
+        } catch {
+          return null
+        }
+      })()
+      setActiveTab(wantActive && rebuilt.some((t) => t.id === wantActive) ? wantActive : rebuilt[0].id)
+      if (!session) return
+      for (const t of rebuilt) {
+        if (t.kind === 'table') {
+          void loadTablePage(t.id, t.schema, t.table, t.limit, t.offset, t.filter, t.order)
+          void loadTableMeta(t.id, t.schema, t.table)
+        } else if (t.kind === 'browser') {
+          api<Record<string, unknown>[] | { error: string }>(q(session, `${t.url}?`)).then((j) => {
+            setTabs((prev) => prev.map((x) => (x.id === t.id && x.kind === 'browser' ? { ...x, rows: Array.isArray(j) ? j : null, error: (j as { error?: string }).error } : x)))
+          })
+        } else if (t.kind === 'erd') {
+          api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(session, `/api/erd?schema=${encodeURIComponent(t.schema)}`)).then((j) => {
+            setTabs((prev) => prev.map((x) => (x.id === t.id && x.kind === 'erd' ? { ...x, data: j } : x)))
+          })
+        }
+      }
+    },
+    [session, loadTablePage, loadTableMeta, newQueryTab],
+  )
+
   const closeTab = (id: string) => {
     setTabs((prev) => {
       const next = prev.filter((t) => t.id !== id)
@@ -484,10 +589,46 @@ export default function App() {
     return () => document.removeEventListener('keydown', h)
   }, [])
 
+  // Persist open tabs so a fresh start can reopen the last session.
   useEffect(() => {
-    if (tabs.length === 0 && connected) newQueryTab()
+    try {
+      const slim = tabs.map(slimTab).filter((t): t is StoredTab => t !== null)
+      localStorage.setItem('open-tabs', JSON.stringify(slim))
+      localStorage.setItem('active-tab', activeTab ?? '')
+    } catch {
+      /* quota/private mode — session restore just won't persist */
+    }
+  }, [tabs, activeTab])
+
+  // Autologin once on boot from the last successful connection.
+  const booted = useRef(false)
+  useEffect(() => {
+    if (booted.current) return
+    booted.current = true
+    const auto = readJSON<boolean>('auto-login', true)
+    if (!auto) return
+    const last = readJSON<ConnFields | null>('last-conn', null)
+    if (last && last.host) {
+      // Boot-only handoff: stored credentials move into state once here.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFields(last)
+      void bootConnect(last, true)
+    }
+    // Boot-only effect by design (guarded by ref, not deps).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connected])
+  }, [])
+
+  // Reopen last session's tabs on the first connection of this app load.
+  const restored = useRef(false)
+  useEffect(() => {
+    if (!connected || restored.current) return
+    restored.current = true
+    const stored = readStoredTabs()
+    // One-shot restore; loaders resolve into state asynchronously.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (stored.length) restoreStoredTabs(stored)
+    else newQueryTab()
+  }, [connected, newQueryTab, restoreStoredTabs])
 
   return (
     <div className="flex h-screen flex-col">
@@ -572,6 +713,8 @@ export default function App() {
               disconnect()
               setCredOpen(true)
             }}
+            autoLogin={autoLogin}
+            onAutoLogin={setAutoLogin}
             connected={connected}
           />
           <Explorer

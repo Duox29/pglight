@@ -116,3 +116,19 @@ export interface ErdTabT {
 export type Tab = QueryTabT | TableTabT | BrowserTabT | ErdTabT
 
 export type SideView = 'history' | 'snippets' | 'server' | 'activity' | 'locks' | 'stats' | 'settings'
+
+/** Minimal persisted tab shell for last-session restore (no results). */
+export interface StoredTab {
+  id: string
+  kind: string
+  title: string
+  sql?: string
+  limit?: number
+  schema?: string
+  table?: string
+  subtab?: TableSubtab
+  filter?: string
+  order?: string
+  offset?: number
+  key?: string
+}

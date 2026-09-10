@@ -127,7 +127,9 @@ CSV/JSON/INSERT export), `TableWorkspace` (Data/Columns/DDL/Indexes/
 Constraints/Triggers/Stats sub-tabs, cell edit/duplicate/delete, CSV import,
 VACUUM/ANALYZE/REINDEX), `BrowserView` (extensions/roles), `ErdView` (FK
 graph SVG), `SidePanel` (history/snippets/server/activity/locks/stats with
-auto-refresh), `SearchPalette` (Ctrl+K global search dialog).
+auto-refresh), `SearchPalette` (Ctrl+K global search dialog), last-session restore (open tabs +
+active tab + autocommit persist to localStorage; autologin from last successful
+connection with an opt-out Switch in Connections).
 
 Dev workflow:
 
