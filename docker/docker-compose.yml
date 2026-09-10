@@ -1,16 +1,16 @@
-# Test database for DbClient: Postgres 14 (alpine, nhe).
+# Test database for pglight: Postgres 14 (alpine, nhe).
 # Credential cau hinh san, khop voi default tren UI:
 #   host=localhost port=5432 user=postgres password=postgres dbname=postgres
 #
 # Chay:  docker compose -f docker/docker-compose.yml up -d
 # Dung:  docker compose -f docker/docker-compose.yml down      (gi du lieu)
 # Reset: docker compose -f docker/docker-compose.yml down -v  (seed lai tu init.sql)
-name: dbclient
+name: pglight
 
 services:
   pg14:
     image: postgres:14-alpine
-    container_name: dbclient-pg14
+    container_name: pglight-pg14
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"dbclient/internal/db"
-	"dbclient/internal/logging"
+	"pglight/internal/db"
+	"pglight/internal/logging"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"

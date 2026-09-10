@@ -1,4 +1,4 @@
-// Package logging implements DbClient's AOP-style observability: one HTTP
+// Package logging implements pglight's AOP-style observability: one HTTP
 // middleware plus one Querier wrapper capture every request and query in a
 // central ring buffer, with runtime config (see Config) persisted to disk.
 // Handlers must NOT log ad-hoc; route everything through Logger.

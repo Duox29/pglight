@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Kill the DbClient Go process currently listening on $PORT (default 8080)
+# Kill the pglight Go process currently listening on $PORT (default 8080)
 # and rerun a fresh build in the background.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -19,6 +19,6 @@ else
   echo "Nothing listening on :$PORT."
 fi
 
-go build -o /tmp/dbclient .
-PORT="$PORT" nohup /tmp/dbclient >/tmp/dbclient.log 2>&1 &
-echo "DbClient rerun on :$PORT (pid $!). Log: /tmp/dbclient.log"
+go build -o /tmp/pglight .
+PORT="$PORT" nohup /tmp/pglight >/tmp/pglight.log 2>&1 &
+echo "pglight rerun on :$PORT (pid $!). Log: /tmp/pglight.log"

@@ -1,8 +1,8 @@
-# DbClient — DataGrip / pgAdmin parity plan
+# pglight — DataGrip / pgAdmin parity plan
 
 Source features surveyed: JetBrains DataGrip (explorer, consoles, diff, Explain, data editor, import/export, diagrams, search) and pgAdmin 4 (browser tree, dashboard, Query Tool, Properties panels, maintenance, backup, roles).
 
-## Where DbClient is now (v0.1)
+## Where pglight is now (v0.1)
 
 | Area | Status |
 |---|---|

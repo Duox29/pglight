@@ -1,4 +1,4 @@
-# DbClient — Project Rules (frontend + backend)
+# pglight — Project Rules (frontend + backend)
 
 > Rules for every contributor (human or agent). Follow them; if a rule blocks
 > you, say so instead of silently breaking it.

@@ -1,4 +1,4 @@
--- Demo dataset for DbClient (runs once on first container init).
+-- Demo dataset for pglight (runs once on first container init).
 -- Exercises every explorer group: tables + FK, view, matview, function,
 -- enum type, sequence defaults, indexes, CHECK/UNIQUE constraints, trigger.
 CREATE TABLE authors (

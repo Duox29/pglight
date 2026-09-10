@@ -1,4 +1,4 @@
-module dbclient
+module pglight
 
 go 1.25.0
 

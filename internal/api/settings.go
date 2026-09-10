@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"dbclient/internal/logging"
+	"pglight/internal/logging"
 )
 
 // Settings reads (GET) or replaces (POST) the runtime config, currently the

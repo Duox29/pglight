@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
-	"dbclient/internal/api"
-	"dbclient/internal/db"
-	"dbclient/internal/logging"
+	"pglight/internal/api"
+	"pglight/internal/db"
+	"pglight/internal/logging"
 )
 
 //go:embed web/dist
@@ -63,7 +63,7 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-	log.Println("DbClient listening on :" + port)
+	log.Println("pglight listening on :" + port)
 	log.Fatal(http.ListenAndServe(":"+port, logging.Middleware(appLog, mux)))
 }
 
