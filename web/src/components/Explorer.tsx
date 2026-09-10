@@ -16,7 +16,6 @@ import {
 import { Input } from './ui/input'
 import { Button } from './ui/button'
 import { ScrollArea } from './ui/scroll-area'
-import { Card } from './ui/card'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './ui/context-menu'
 import type { DbInfo, ObjectDetail, SchemaGroup } from '@/types'
 import { cn } from '@/lib/utils'
@@ -214,12 +213,10 @@ export function Explorer(p: Props) {
           </div>
         </div>
       </ScrollArea>
-      <div className="max-h-[38%] overflow-auto border-t p-2">
-        <Card className="p-2.5">
-          <div className="mb-1 text-[12px] font-semibold">{p.detail?.title ?? 'Object'}</div>
-          <div className="text-[12px]">{p.detail?.body ?? <span className="text-muted-foreground">Select a table</span>}</div>
-        </Card>
-      </div>
+      <ScrollArea className="max-h-[38%] border-t px-3 py-2">
+        <div className="mb-1 text-[12px] font-semibold">{p.detail?.title ?? 'Object'}</div>
+        <div className="text-[12px]">{p.detail?.body ?? <span className="text-muted-foreground">Select a table</span>}</div>
+      </ScrollArea>
     </div>
   )
 }
