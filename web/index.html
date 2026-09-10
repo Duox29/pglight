@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DbClient - Postgres IDE</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<b>DbClient</b>
+<select id="saved" title="saved connections"></select>
+<input id="host" value="localhost" size="10" placeholder="host">
+<input id="port" value="5432" size="5" placeholder="port">
+<input id="user" value="postgres" size="9" placeholder="user">
+<input id="password" type="password" size="9" placeholder="pass">
+<input id="dbname" value="postgres" size="10" placeholder="db">
+<select id="sslmode"><option value="disable">disable</option><option value="prefer">prefer</option><option value="require">require</option></select>
+<button onclick="connect(true)">Connect</button>
+<button onclick="saveConn()">💾</button>
+<button onclick="disconnect()">✖</button>
+<span id="status">disconnected</span>
+<span class="sp"></span>
+<button onclick="togglePanel('history')">History</button>
+<button onclick="showActivity()">Activity</button>
+<button onclick="newQueryTab()">+Query</button>
+</header>
+<div id="layout">
+<aside id="explorer">
+<div class="row"><input id="treeFilter" placeholder="filter objects…" oninput="renderTree()"><button onclick="loadExplorer()" title="refresh">↻</button></div>
+<div id="tree"></div>
+<div id="objDetail"><h4>Object</h4><div id="objBody">select a table</div></div>
+</aside>
+<main>
+<div id="tabs"></div>
+<div id="pages"></div>
+</main>
+<aside id="side" class="hidden">
+<div class="side-head"><b id="sideTitle">History</b><button onclick="togglePanel()">✖</button></div>
+<div id="sideBody"></div>
+</aside>
+</div>
+<datalist id="compl"></datalist>
+<script src="app.js"></script>
+</body>
+</html>
