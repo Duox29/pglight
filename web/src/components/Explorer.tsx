@@ -17,6 +17,7 @@ import { Input } from './ui/input'
 import { Button } from './ui/button'
 import { ScrollArea } from './ui/scroll-area'
 import { Card } from './ui/card'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './ui/context-menu'
 import type { DbInfo, ObjectDetail, SchemaGroup } from '@/types'
 import { cn } from '@/lib/utils'
 
@@ -36,6 +37,11 @@ interface Props {
   onOpenBrowser: (key: 'extensions' | 'roles', title: string) => void
   onOpenErd: (schema: string) => void
   onRefresh: () => void
+  onNewQuery: (scope: { db?: string; schema?: string; table?: string }) => void
+  onNewSchema: (db: string) => void
+  onNewTable: (schema: string) => void
+  onExport: (schema: string, table: string, fmt: 'csv' | 'sql') => void
+  onCopy: (text: string) => void
 }
 
 function Group(props: {
@@ -45,6 +51,7 @@ function Group(props: {
   render: (name: string) => React.ReactNode
   onOpen: (name: string) => void
   onDetail?: (name: string) => void
+  menu?: (name: string) => React.ReactNode
 }) {
   const [open, setOpen] = useState(true)
   if (!props.items.length) return null
@@ -63,15 +70,19 @@ function Group(props: {
       {open && (
         <div className="ml-3">
           {props.items.map((t) => (
-            <div
-              key={t.name}
-              className="cursor-pointer truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent"
-              title="Click to open · double-click for definition"
-              onClick={() => props.onOpen(t.name)}
-              onDoubleClick={() => props.onDetail?.(t.name)}
-            >
-              {props.render(t.name)}
-            </div>
+            <ContextMenu key={t.name}>
+              <ContextMenuTrigger asChild>
+                <div
+                  className="cursor-pointer truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent"
+                  title="Click to open · double-click for definition"
+                  onClick={() => props.onOpen(t.name)}
+                  onDoubleClick={() => props.onDetail?.(t.name)}
+                >
+                  {props.render(t.name)}
+                </div>
+              </ContextMenuTrigger>
+              {props.menu?.(t.name)}
+            </ContextMenu>
           ))}
         </div>
       )}
@@ -103,18 +114,29 @@ export function Explorer(p: Props) {
               .filter((d) => d.name.toLowerCase().includes(f))
               .slice(0, 60)
               .map((d) => (
-                <div
-                  key={d.name}
-                  className={cn(
-                    'cursor-pointer truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent',
-                    d.name === p.currentDb && 'font-semibold text-foreground',
-                  )}
-                  title="Click to reconnect to this database"
-                  onClick={() => p.onSwitchDb(d.name)}
-                >
-                  {d.name === p.currentDb ? '●' : '○'} {d.name}
-                  <span className="text-muted-foreground"> {d.size ?? ''}</span>
-                </div>
+                <ContextMenu key={d.name}>
+                  <ContextMenuTrigger asChild>
+                    <div
+                      className={cn(
+                        'cursor-pointer truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent',
+                        d.name === p.currentDb && 'font-semibold text-foreground',
+                      )}
+                      title="Click to reconnect to this database"
+                      onClick={() => p.onSwitchDb(d.name)}
+                    >
+                      {d.name === p.currentDb ? '●' : '○'} {d.name}
+                      <span className="text-muted-foreground"> {d.size ?? ''}</span>
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem onSelect={() => p.onNewQuery({ db: d.name })}>New Query</ContextMenuItem>
+                    <ContextMenuItem disabled={!p.connected} onSelect={() => p.onNewSchema(d.name)}>New Schema…</ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onSelect={() => p.onSwitchDb(d.name)}>Switch to this database</ContextMenuItem>
+                    <ContextMenuItem onSelect={() => p.onCopy(d.name)}>Copy name</ContextMenuItem>
+                    <ContextMenuItem onSelect={p.onRefresh}>Refresh</ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               ))}
           </div>
           {p.schemas.map((s) => {
@@ -128,24 +150,55 @@ export function Explorer(p: Props) {
             const total = T.length + V.length + M.length + F.length + Fn.length + Sq.length + Ty.length
             if (f && !total && !s.schema.toLowerCase().includes(f)) return null
             const isOpen = openSchemas[s.schema] ?? true
+            const fullMenu = (onDetail: (name: string) => void) => (name: string) => (
+              <ContextMenuContent>
+                <ContextMenuItem onSelect={() => p.onOpenTable(s.schema, name)}>Open Data</ContextMenuItem>
+                <ContextMenuItem onSelect={() => p.onNewQuery({ schema: s.schema, table: name })}>New Query</ContextMenuItem>
+                <ContextMenuItem onSelect={() => onDetail(name)}>View Definition</ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem onSelect={() => p.onExport(s.schema, name, 'csv')}>Export CSV</ContextMenuItem>
+                <ContextMenuItem onSelect={() => p.onExport(s.schema, name, 'sql')}>Export INSERTs</ContextMenuItem>
+                <ContextMenuItem onSelect={() => p.onCopy(`${s.schema}.${name}`)}>Copy qualified name</ContextMenuItem>
+                <ContextMenuItem onSelect={p.onRefresh}>Refresh</ContextMenuItem>
+              </ContextMenuContent>
+            )
+            const slimMenu = (name: string) => (
+              <ContextMenuContent>
+                <ContextMenuItem onSelect={() => p.onNewQuery({ schema: s.schema })}>New Query</ContextMenuItem>
+                <ContextMenuItem onSelect={() => p.onCopy(`${s.schema}.${name}`)}>Copy name</ContextMenuItem>
+                <ContextMenuItem onSelect={p.onRefresh}>Refresh</ContextMenuItem>
+              </ContextMenuContent>
+            )
             return (
               <div key={s.schema}>
-                <button
-                  className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-[12px] font-semibold text-sky-300 hover:bg-accent"
-                  onClick={() => setOpenSchemas((m) => ({ ...m, [s.schema]: !isOpen }))}
-                >
-                  {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                  {s.schema} ({T.length + V.length + M.length + F.length})
-                </button>
+                <ContextMenu>
+                  <ContextMenuTrigger asChild>
+                    <button
+                      className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-[12px] font-semibold text-sky-300 hover:bg-accent"
+                      onClick={() => setOpenSchemas((m) => ({ ...m, [s.schema]: !isOpen }))}
+                    >
+                      {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                      {s.schema} ({T.length + V.length + M.length + F.length})
+                    </button>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem onSelect={() => p.onNewQuery({ schema: s.schema })}>New Query</ContextMenuItem>
+                    <ContextMenuItem onSelect={() => p.onNewTable(s.schema)}>New Table…</ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onSelect={() => p.onOpenErd(s.schema)}>Open ERD</ContextMenuItem>
+                    <ContextMenuItem onSelect={() => p.onCopy(s.schema)}>Copy name</ContextMenuItem>
+                    <ContextMenuItem onSelect={p.onRefresh}>Refresh</ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
                 {isOpen && (
                   <div className="ml-2">
-                    <Group icon={<Table2 className="h-3 w-3" />} label="Tables" items={T} render={(n) => `▦ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} onDetail={(n) => p.onShowDDL(s.schema, n)} />
-                    <Group icon={<Eye className="h-3 w-3" />} label="Views" items={V} render={(n) => `👁 ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} onDetail={(n) => p.onShowView(s.schema, n)} />
-                    <Group icon={<Layers className="h-3 w-3" />} label="MatViews" items={M} render={(n) => `▦ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} onDetail={(n) => p.onShowView(s.schema, n)} />
-                    <Group icon={<Network className="h-3 w-3" />} label="Foreign" items={F} render={(n) => `⛓ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} onDetail={(n) => p.onShowDDL(s.schema, n)} />
-                    <Group icon={<FunctionSquare className="h-3 w-3" />} label="Functions" items={Fn} render={(n) => `ƒ ${n}`} onOpen={(n) => p.onShowFunc(s.schema, n)} onDetail={(n) => p.onShowFunc(s.schema, n)} />
-                    <Group icon={<Hash className="h-3 w-3" />} label="Sequences" items={Sq} render={(n) => `🔢 ${n}`} onOpen={(n) => p.onShowSeq(s.schema, n)} />
-                    <Group icon={<Shapes className="h-3 w-3" />} label="Types" items={Ty} render={(n) => `◈ ${n}`} onOpen={(n) => p.onShowType(s.schema, n)} />
+                    <Group icon={<Table2 className="h-3 w-3" />} label="Tables" items={T} render={(n) => `▦ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} onDetail={(n) => p.onShowDDL(s.schema, n)} menu={fullMenu((n) => p.onShowDDL(s.schema, n))} />
+                    <Group icon={<Eye className="h-3 w-3" />} label="Views" items={V} render={(n) => `👁 ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} onDetail={(n) => p.onShowView(s.schema, n)} menu={fullMenu((n) => p.onShowView(s.schema, n))} />
+                    <Group icon={<Layers className="h-3 w-3" />} label="MatViews" items={M} render={(n) => `▦ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} onDetail={(n) => p.onShowView(s.schema, n)} menu={fullMenu((n) => p.onShowView(s.schema, n))} />
+                    <Group icon={<Network className="h-3 w-3" />} label="Foreign" items={F} render={(n) => `⛓ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} onDetail={(n) => p.onShowDDL(s.schema, n)} menu={fullMenu((n) => p.onShowDDL(s.schema, n))} />
+                    <Group icon={<FunctionSquare className="h-3 w-3" />} label="Functions" items={Fn} render={(n) => `ƒ ${n}`} onOpen={(n) => p.onShowFunc(s.schema, n)} onDetail={(n) => p.onShowFunc(s.schema, n)} menu={slimMenu} />
+                    <Group icon={<Hash className="h-3 w-3" />} label="Sequences" items={Sq} render={(n) => `🔢 ${n}`} onOpen={(n) => p.onShowSeq(s.schema, n)} menu={slimMenu} />
+                    <Group icon={<Shapes className="h-3 w-3" />} label="Types" items={Ty} render={(n) => `◈ ${n}`} onOpen={(n) => p.onShowType(s.schema, n)} menu={slimMenu} />
                   </div>
                 )}
               </div>

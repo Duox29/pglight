@@ -32,8 +32,11 @@ import type {
   TableTabT,
 } from './types'
 import { cn } from './lib/utils'
+import { download, resultToCSV, resultToInserts } from './lib/format'
 
 const DEFAULT_SQL = 'SELECT * FROM information_schema.tables LIMIT 20;'
+
+const qi = (s: string) => `"${s.replace(/"/g, '""')}"`
 
 const BROWSER_DEFS: Record<string, { title: string; url: string; cols: string[] }> = {
   extensions: { title: 'Extensions', url: '/api/extensions', cols: ['name', 'default_version', 'installed_version', 'comment'] },
@@ -425,6 +428,106 @@ export default function App() {
     },
     [loadTablePage, loadTableMeta, needSession],
   )
+  /* ---------- explorer context menu (Explorer stays presentational) ---------- */
+  const newScopedQuery = useCallback(
+    (scope: { db?: string; schema?: string; table?: string }) => {
+      if (!needSession('query')) return
+      if (scope.table && scope.schema) {
+        newQueryTab(`SET search_path TO ${qi(scope.schema)}, public;\nSELECT * FROM ${qi(scope.schema)}.${qi(scope.table)} LIMIT 100;`)
+        return
+      }
+      if (scope.schema) {
+        const first = schemas.find((x) => x.schema === scope.schema)?.tables[0]?.name
+        if (first) {
+          newQueryTab(`SET search_path TO ${qi(scope.schema)}, public;\nSELECT * FROM ${qi(scope.schema)}.${qi(first)} LIMIT 100;`)
+        } else {
+          newQueryTab(
+            `SET search_path TO ${qi(scope.schema)}, public;\nSELECT * FROM information_schema.tables WHERE table_schema = '${scope.schema.replace(/'/g, "''")}' LIMIT 50;`,
+          )
+        }
+        return
+      }
+      if (scope.db) newQueryTab(`-- DB: ${scope.db}\n${DEFAULT_SQL}`)
+    },
+    [needSession, newQueryTab, schemas],
+  )
+
+  const createSchema = useCallback(
+    async (db?: string) => {
+      if (!needSession('schema')) return
+      if (db && db !== fields.dbname) {
+        toast.error(`Switch to "${db}" first`)
+        return
+      }
+      const name = await dialogs.prompt({ title: 'New schema', placeholder: 'my_schema' })
+      if (name == null) return
+      const trimmed = name.trim()
+      if (!trimmed) return
+      const j = await apiClient.runQuery(session, `CREATE SCHEMA ${qi(trimmed)}`)
+      if (j.error) {
+        toast.error(j.error)
+        return
+      }
+      setInTxn(!!j.in_txn)
+      toast.success(`Created schema ${trimmed}`)
+      loadExplorer()
+    },
+    [session, needSession, dialogs, fields.dbname, loadExplorer],
+  )
+
+  const createTable = useCallback(
+    async (schema: string) => {
+      if (!needSession(schema)) return
+      const v = await dialogs.form({
+        title: `New table in ${schema}`,
+        fields: [
+          { key: 'name', label: 'Table name', placeholder: 'my_table' },
+          { key: 'columns', label: 'Columns DDL', placeholder: 'id SERIAL PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT now()' },
+        ],
+      })
+      if (v == null) return
+      const name = (v.name ?? '').trim()
+      if (!name) return
+      const cols = (v.columns ?? '').trim() || 'id SERIAL PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT now()'
+      const j = await apiClient.runQuery(session, `CREATE TABLE ${qi(schema)}.${qi(name)} (${cols})`)
+      if (j.error) {
+        toast.error(j.error)
+        return
+      }
+      setInTxn(!!j.in_txn)
+      toast.success(`Created table ${schema}.${name}`)
+      loadExplorer()
+      openTableTab(schema, name)
+    },
+    [session, needSession, dialogs, loadExplorer, openTableTab],
+  )
+
+  const exportTable = useCallback(
+    async (schema: string, table: string, fmt: 'csv' | 'sql') => {
+      if (!needSession(`${schema}.${table}`)) return
+      const j = await api<{ columns?: string[]; rows?: unknown[][]; error?: string }>(
+        q(session, `/api/table-data?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}&limit=1000&offset=0&filter=&order=`),
+      )
+      if (j.error) {
+        toast.error(j.error)
+        return
+      }
+      const columns = j.columns ?? []
+      const rows = (j.rows ?? []) as unknown[][]
+      if (fmt === 'csv') download(resultToCSV(columns, rows), `${schema}.${table}.csv`, 'text/csv')
+      else download(resultToInserts(columns, rows, `${qi(schema)}.${qi(table)}`), `${schema}.${table}.sql`, 'text/sql')
+    },
+    [session, needSession],
+  )
+
+  const copyName = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success('Copied')
+    } catch {
+      toast.error('Copy failed')
+    }
+  }, [])
 
   const openBrowser = useCallback(
     (key: 'extensions' | 'roles', title: string) => {
@@ -789,6 +892,11 @@ export default function App() {
             onOpenBrowser={openBrowser}
             onOpenErd={openErd}
             onRefresh={loadExplorer}
+            onNewQuery={newScopedQuery}
+            onNewSchema={createSchema}
+            onNewTable={createTable}
+            onExport={exportTable}
+            onCopy={copyName}
           />
         </aside>
         </ResizablePanel>

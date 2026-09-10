@@ -53,7 +53,7 @@ Backend (`internal/db`, `internal/api`):
 - [x] `POST /api/import {columns, rows[][]}` — txn-wrapped bulk INSERT for CSV import (500-row batches, `ON CONFLICT DO NOTHING` option).
 
 Frontend (`web/`):
-- [x] Explorer: Databases node + per-schema groups (Tables/Views/MatViews/Foreign/Functions/Sequences/Types) + global Extensions/Roles nodes. Lazy per-schema loading, filter, counts.
+- [x] Explorer: Databases node + per-schema groups (Tables/Views/MatViews/Foreign/Functions/Sequences/Types) + global Extensions/Roles nodes. Lazy per-schema loading, filter, counts. Right-click context menus (Radix `ui/context-menu`) at database/schema/table tiers: scoped New Query (`SET search_path` + `SELECT … LIMIT 100`), New Schema/Table dialogs, Open Data, View Definition, Export CSV/INSERTs (≤1000 rows), Copy name, Refresh. No new backend endpoints.
 - [x] Table workspace with sub-tabs: **Data | Columns | DDL | Indexes | Constraints | Triggers | Stats**. DDL uses server definition + reconstructed fallback.
 - [x] Query console upgrades: txn bar (autocommit toggle, Begin/Commit/Rollback, in-txn badge), Format button, Save-snippet, multi-result rendering (one grid per statement), per-result CSV/INSERT export.
 - [x] Global search palette (Ctrl+K / button): jump to table/view/function, open DDL or data.
