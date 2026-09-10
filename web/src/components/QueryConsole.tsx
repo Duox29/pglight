@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Play, FileDown, Sparkles, Star, Trash2, Wand2 } from 'lucide-react'
+import { Play, FileDown, Sparkles, Square, Star, Trash2, Wand2 } from 'lucide-react'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Badge } from './ui/badge'
@@ -20,6 +20,7 @@ interface Props {
   onSqlChange: (sql: string) => void
   onRun: (sql?: string) => void
   onClearResults: () => void
+  onCancel: () => void
   onExplain: (analyze: boolean) => void
   onLimit: (n: number) => void
   onSaveSnippet: () => void
@@ -71,6 +72,9 @@ export function QueryConsole(p: Props) {
       <div className="flex flex-wrap items-center gap-1.5">
         <Button size="sm" onClick={runSelected} disabled={p.running} title="Run selection if any, else whole script">
           <Play /> Run (Ctrl+Enter)
+        </Button>
+        <Button size="sm" variant="ghost" onClick={p.onCancel} disabled={!p.running} title="Cancel running query">
+          <Square />
         </Button>
         <Button size="sm" variant="secondary" onClick={() => p.onExplain(false)}>
           Explain

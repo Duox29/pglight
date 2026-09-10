@@ -119,6 +119,9 @@ export default function App() {
   const dialogs = useMemo(() => createDialogs(setDlg), [])
   const [paletteOpen, setPaletteOpen] = useState(false)
   const tabSeq = useRef(0)
+  // SQL actually sent per running tab (may be a selection, LIMIT-wrapped
+  // server-side). Used to match the backend in pg_stat_activity on Cancel.
+  const runSql = useRef<Record<string, string>>({})
 
   const cur = tabs.find((t) => t.id === activeTab) ?? null
   const updateTab = useCallback((id: string, fn: (t: Tab) => Tab) => {
@@ -645,6 +648,7 @@ export default function App() {
       const t = tabs.find((x) => x.id === id)
       if (!t || t.kind !== 'query' || !session) return
       const sql = sqlOver ?? t.sql
+      runSql.current[id] = sql
       if (!autocommit) {
         const st = await apiClient.txn(session, 'status')
         if (!st.in_txn) await apiClient.txn(session, 'begin')
@@ -653,6 +657,7 @@ export default function App() {
       updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: undefined, plan: undefined } : x))
       const j = await apiClient.runQuery(session, sql, t.limit || undefined)
       setRunning((r) => ({ ...r, [id]: false }))
+      delete runSql.current[id]
       setInTxn(!!(j as { in_txn?: boolean }).in_txn)
       if (j.error && !(j as { results?: unknown }).results) {
         updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: j.error, results: null } : x))
@@ -672,6 +677,39 @@ export default function App() {
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tabs, session, autocommit, updateTab],
+  )
+
+  // Cancel the in-flight query of a tab: match its sent SQL against active
+  // backends in pg_stat_activity, then pg_cancel_backend the unique hit.
+  const cancelQuery = useCallback(
+    async (id: string) => {
+      const sent = runSql.current[id]
+      if (!sent || !session) {
+        toast.error('No running query to cancel')
+        return
+      }
+      const norm = (s: string) => s.replace(/\s+/g, ' ').trim().replace(/;+\s*$/, '').slice(0, 80)
+      const needle = norm(sent)
+      const rows = await api<Record<string, unknown>[]>(q(session, '/api/activity?'))
+      const hits = (Array.isArray(rows) ? rows : []).filter((r) => {
+        if (r.state !== 'active') return false
+        const h = norm(String(r.query ?? ''))
+        if (!h || h.includes('pg_stat_activity')) return false
+        return h.includes(needle) || (needle.includes(h) && h.length > 10)
+      })
+      if (!hits.length) {
+        toast.error('No running backend found')
+        return
+      }
+      if (hits.length > 1) {
+        toast.error('Multiple running queries — cancel from Dashboard')
+        return
+      }
+      const j = await apiClient.cancel(session, Number(hits[0].pid))
+      if (j.error) toast.error(j.error)
+      else toast.success(`Cancelled backend ${hits[0].pid}`)
+    },
+    [session],
   )
 
   const explainQuery = useCallback(
@@ -943,6 +981,7 @@ export default function App() {
                 running={!!running[cur.id]}
                 onSqlChange={(sql) => updateTab(cur.id, (x) => (x.kind === 'query' ? { ...x, sql } : x))}
                 onRun={(sql) => runQuery(cur.id, sql)}
+                onCancel={() => cancelQuery(cur.id)}
                 onClearResults={() => updateTab(cur.id, (x) => (x.kind === 'query' ? { ...x, results: null, error: undefined, plan: undefined, meta: undefined } : x))}
                 onExplain={(a) => explainQuery(cur.id, a)}
                 onLimit={(n) => updateTab(cur.id, (x) => (x.kind === 'query' ? { ...x, limit: n } : x))}

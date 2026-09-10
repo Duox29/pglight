@@ -17,9 +17,13 @@ import (
 )
 
 type Handler struct {
-	Mgr *db.Manager
-	Log *logging.Logger
+  Mgr *db.Manager
+  Log *logging.Logger
 }
+
+// queryTimeout caps user query execution (console, table ops). Long enough
+// for analytical statements; the console Cancel button ends them sooner.
+const queryTimeout = 1000 * time.Second
 
 type connectReq struct {
 	Host     string `json:"host"`
@@ -828,7 +832,7 @@ func (h *Handler) runSingle(r *http.Request, qq db.Querier, sql string, limit in
 		sql = fmt.Sprintf("SELECT * FROM (%s) AS _q LIMIT %d", strings.TrimSuffix(sql, ";"), limit)
 	}
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
 	rows, err := qq.Query(ctx, sql)
 	if err != nil {
@@ -1460,7 +1464,7 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) execQuery(w http.ResponseWriter, r *http.Request, qq db.Querier, sid string, sql string, total int64) {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
 	rows, err := qq.Query(ctx, sql)
 	if err != nil {
