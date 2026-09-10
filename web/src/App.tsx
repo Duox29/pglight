@@ -679,8 +679,9 @@ export default function App() {
     [tabs, session, autocommit, updateTab],
   )
 
-  // Cancel the in-flight query of a tab: match its sent SQL against active
-  // backends in pg_stat_activity, then pg_cancel_backend the unique hit.
+  // Cancel the in-flight query of a tab. Backends are pool-scoped by
+  // application_name (pglight:<session>), so the tab's own pool is matched
+  // first; the sent SQL only disambiguates concurrent runs in one session.
   const cancelQuery = useCallback(
     async (id: string) => {
       const sent = runSql.current[id]
@@ -688,26 +689,43 @@ export default function App() {
         toast.error('No running query to cancel')
         return
       }
-      const norm = (s: string) => s.replace(/\s+/g, ' ').trim().replace(/;+\s*$/, '').slice(0, 80)
+      const norm = (s: string) => s.replace(/\s+/g, ' ').trim().replace(/;+\s*$/, '').slice(0, 200)
       const needle = norm(sent)
-      const rows = await api<Record<string, unknown>[]>(q(session, '/api/activity?'))
-      const hits = (Array.isArray(rows) ? rows : []).filter((r) => {
-        if (r.state !== 'active') return false
-        const h = norm(String(r.query ?? ''))
-        if (!h || h.includes('pg_stat_activity')) return false
+      const sqlHit = (query: unknown) => {
+        const h = norm(String(query ?? ''))
+        if (!h) return false
         return h.includes(needle) || (needle.includes(h) && h.length > 10)
-      })
-      if (!hits.length) {
-        toast.error('No running backend found')
+      }
+      const rows = await api<Record<string, unknown>[]>(q(session, '/api/activity?'))
+      // NOTE: the poll-exclusion below must test the full query text — the
+      // activity statement mentions pg_stat_activity only after column 80.
+      const live = (Array.isArray(rows) ? rows : []).filter(
+        (r) => r.state === 'active' && !String(r.query ?? '').includes('pg_stat_activity'),
+      )
+      // Own pool first (exact when a single backend runs there).
+      const own = live.filter((r) => String(r.app ?? '') === `pglight:${session}`)
+      const pick = (pool: Record<string, unknown>[]): Record<string, unknown> | null => {
+        if (!pool.length) return null
+        if (pool.length === 1) return pool[0]
+        const matched = pool.filter((r) => sqlHit(r.query))
+        return matched.length === 1 ? matched[0] : null
+      }
+      let hit = pick(own)
+      let ambiguous = !!own.length && !hit
+      if (!hit && !ambiguous) {
+        // Untagged pools (connected before the backend upgrade): fall back
+        // to matching the sent SQL across all backends.
+        const matched = live.filter((r) => sqlHit(r.query))
+        if (matched.length === 1) hit = matched[0]
+        else ambiguous = !!matched.length
+      }
+      if (!hit) {
+        toast.error(ambiguous ? 'Multiple running queries — cancel from Dashboard' : 'No running backend found')
         return
       }
-      if (hits.length > 1) {
-        toast.error('Multiple running queries — cancel from Dashboard')
-        return
-      }
-      const j = await apiClient.cancel(session, Number(hits[0].pid))
+      const j = await apiClient.cancel(session, Number(hit.pid))
       if (j.error) toast.error(j.error)
-      else toast.success(`Cancelled backend ${hits[0].pid}`)
+      else toast.success(`Cancelled backend ${hit.pid}`)
     },
     [session],
   )

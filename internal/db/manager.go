@@ -71,6 +71,16 @@ func (m *Manager) Add(id, connStr string) error {
 		return err
 	}
 	cfg.MaxConns = 8
+	// Tag every backend of this pool so /api/activity (and the console
+	// Cancel button) can attribute running queries to this session.
+	app := "pglight:" + id
+	if len(app) > 60 {
+		app = app[len(app)-60:]
+	}
+	if cfg.ConnConfig.RuntimeParams == nil {
+		cfg.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	cfg.ConnConfig.RuntimeParams["application_name"] = app
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return err
