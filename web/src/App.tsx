@@ -334,8 +334,20 @@ export default function App() {
     [session],
   )
 
+  const needSession = useCallback(
+    (what: string) => {
+      if (!session) {
+        toast.error(`Connect to a database first — cannot open ${what}`)
+        return false
+      }
+      return true
+    },
+    [session],
+  )
+
   const openTableTab = useCallback(
     (schema: string, table: string) => {
+      if (!needSession(`${schema}.${table}`)) return
       const id = `t_${schema}_${table}`
       setTabs((prev) =>
         prev.find((t) => t.id === id)
@@ -346,11 +358,12 @@ export default function App() {
       loadTablePage(id, schema, table, 100, 0, '', '')
       loadTableMeta(id, schema, table)
     },
-    [loadTablePage, loadTableMeta],
+    [loadTablePage, loadTableMeta, needSession],
   )
 
   const openBrowser = useCallback(
     (key: 'extensions' | 'roles', title: string) => {
+      if (!needSession(title)) return
       const id = `b_${key}`
       const url = key === 'extensions' ? '/api/extensions' : '/api/roles'
       const cols = key === 'extensions' ? ['name', 'default_version', 'installed_version', 'comment'] : ['name', 'superuser', 'login', 'createdb', 'member_of']
@@ -362,11 +375,12 @@ export default function App() {
         })
       }
     },
-    [session],
+    [session, needSession],
   )
 
   const openErd = useCallback(
     (schema: string) => {
+      if (!needSession(`ERD ${schema}`)) return
       const id = `e_${schema}`
       setTabs((prev) => (prev.find((t) => t.id === id) ? prev : [...prev, { id, kind: 'erd', title: `ERD ${schema}`, schema, data: null }]))
       setActiveTab(id)
@@ -561,6 +575,7 @@ export default function App() {
             connected={connected}
           />
           <Explorer
+            connected={connected}
             databases={databases}
             schemas={schemas}
             currentDb={fields.dbname}

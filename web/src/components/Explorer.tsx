@@ -24,6 +24,7 @@ interface Props {
   databases: DbInfo[]
   schemas: SchemaGroup[]
   currentDb: string
+  connected: boolean
   detail: ObjectDetail | null
   onSwitchDb: (name: string) => void
   onOpenTable: (schema: string, table: string) => void
@@ -153,10 +154,10 @@ export function Explorer(p: Props) {
           <div className="flex items-center gap-1 px-1 py-1 text-[12px] font-semibold text-sky-300">
             <ServerCog className="h-3.5 w-3.5" /> Server objects
           </div>
-          <div className="ml-3">
-            <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenBrowser('extensions', 'Extensions')}>○ Extensions</div>
-            <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenBrowser('roles', 'Roles')}>○ Roles</div>
-            <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenErd('public')}>○ ERD</div>
+          <div className={cn('ml-3', !p.connected && 'pointer-events-none opacity-40')} title={p.connected ? undefined : 'Connect to a database first'}>
+            <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" title="Installed Postgres extensions (pg_catalog)" onClick={() => p.onOpenBrowser('extensions', 'Extensions')}>○ Extensions</div>
+            <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" title="Users, groups and their attributes" onClick={() => p.onOpenBrowser('roles', 'Roles')}>○ Roles</div>
+            <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" title="Foreign-key graph of a schema" onClick={() => p.onOpenErd('public')}>○ ERD</div>
           </div>
         </div>
       </ScrollArea>
