@@ -3,10 +3,10 @@ package db
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/url"
 	"sync"
 	"time"
-
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,6 +27,7 @@ type Manager struct {
 	pools   map[string]*pgxpool.Pool
 	txConns map[string]*pgxpool.Conn
 	txs     map[string]pgx.Tx
+	seen    map[string]time.Time
 }
 
 func New() *Manager {
@@ -34,7 +35,15 @@ func New() *Manager {
 		pools:   make(map[string]*pgxpool.Pool),
 		txConns: make(map[string]*pgxpool.Conn),
 		txs:     make(map[string]pgx.Tx),
+		seen:    make(map[string]time.Time),
 	}
+}
+
+// touch marks a session active now. Callers must NOT hold m.mu (it locks).
+func (m *Manager) touch(id string) {
+	m.mu.Lock()
+	m.seen[id] = time.Now()
+	m.mu.Unlock()
 }
 
 func ConnString(host string, port int, user, password, dbname, sslmode string) string {
@@ -80,14 +89,37 @@ func (m *Manager) Add(id, connStr string) error {
 		delete(m.txs, id)
 	}
 	m.pools[id] = pool
+	m.seen[id] = time.Now()
 	m.mu.Unlock()
 	return nil
 }
 
+// Alive reports whether the session has a healthy pool. A dead pool is closed
+// and removed so the caller can transparently reconnect under the same id.
+func (m *Manager) Alive(id string) bool {
+	m.mu.RLock()
+	p, ok := m.pools[id]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := p.Ping(ctx); err != nil {
+		m.Close(id)
+		return false
+	}
+	m.touch(id)
+	return true
+}
+
 func (m *Manager) Get(id string) (*pgxpool.Pool, bool) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	p, ok := m.pools[id]
+	m.mu.RUnlock()
+	if ok {
+		m.touch(id)
+	}
 	return p, ok
 }
 
@@ -106,6 +138,7 @@ func (m *Manager) Close(id string) {
 		p.Close()
 		delete(m.pools, id)
 	}
+	delete(m.seen, id)
 }
 
 // InTxn reports whether the session has an open explicit transaction.
@@ -138,6 +171,7 @@ func (m *Manager) Begin(ctx context.Context, id string) error {
 	}
 	m.txConns[id] = conn
 	m.txs[id] = tx
+	m.seen[id] = time.Now()
 	return nil
 }
 
@@ -156,6 +190,7 @@ func (m *Manager) Commit(ctx context.Context, id string) error {
 	}
 	delete(m.txs, id)
 	delete(m.txConns, id)
+	m.seen[id] = time.Now()
 	return err
 }
 
@@ -174,6 +209,7 @@ func (m *Manager) Rollback(ctx context.Context, id string) error {
 	}
 	delete(m.txs, id)
 	delete(m.txConns, id)
+	m.seen[id] = time.Now()
 	return err
 }
 
@@ -181,14 +217,17 @@ func (m *Manager) Rollback(ctx context.Context, id string) error {
 // otherwise the pool. Caller must NOT close/release the result.
 func (m *Manager) Q(id string) (Querier, bool) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if tx, ok := m.txs[id]; ok {
+	tx, hasTx := m.txs[id]
+	p, hasPool := m.pools[id]
+	m.mu.RUnlock()
+	if hasTx {
+		m.touch(id)
 		return tx, true
 	}
-	p, ok := m.pools[id]
-	if !ok {
+	if !hasPool {
 		return nil, false
 	}
+	m.touch(id)
 	return p, true
 }
 
@@ -196,10 +235,56 @@ func (m *Manager) Q(id string) (Querier, bool) {
 // helpers but must stay txn-aware. It returns the txn when open.
 func (m *Manager) PoolOrTxn(id string) (Querier, *pgxpool.Pool, bool) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if tx, ok := m.txs[id]; ok {
+	tx, hasTx := m.txs[id]
+	p, hasPool := m.pools[id]
+	m.mu.RUnlock()
+	if hasTx {
+		m.touch(id)
 		return tx, nil, true
 	}
-	p, ok := m.pools[id]
-	return p, p, ok
+	if hasPool {
+		m.touch(id)
+	}
+	return p, p, hasPool
+}
+
+// Sweep tuning: idle sessions (no query/txn/connect activity) are closed to
+// release their postgres connections. Sessions with an open explicit
+// transaction are spared — rolling those back silently could lose user work.
+const (
+	DefaultSweepInterval = 5 * time.Minute
+	DefaultIdleTTL       = 30 * time.Minute
+)
+
+// SweepIdle closes sessions idle longer than ttl (except open-txn ones) and
+// returns the swept ids. Synchronous; call it from a ticker goroutine.
+func (m *Manager) SweepIdle(ttl time.Duration) []string {
+	cutoff := time.Now().Add(-ttl)
+	m.mu.RLock()
+	var stale []string
+	for id, at := range m.seen {
+		if at.Before(cutoff) {
+			if _, open := m.txs[id]; !open {
+				stale = append(stale, id)
+			}
+		}
+	}
+	m.mu.RUnlock()
+	for _, id := range stale {
+		m.Close(id)
+	}
+	return stale
+}
+
+// StartSweeper reaps idle sessions every interval until the process exits.
+func (m *Manager) StartSweeper(interval, ttl time.Duration) {
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for range t.C {
+			for _, id := range m.SweepIdle(ttl) {
+				log.Printf("pglight: swept idle session %s", id)
+			}
+		}
+	}()
 }

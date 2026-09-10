@@ -83,6 +83,12 @@ func (h *Handler) Connect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := req.Session
+	if id != "" && h.Mgr.Alive(id) {
+		// Reload/resume path: same browser session, healthy pool — reuse it
+		// instead of leaking a new pool per refresh.
+		writeJSON(w, 200, map[string]string{"session_id": id})
+		return
+	}
 	if id == "" {
 		id = fmt.Sprintf("%d", time.Now().UnixNano())
 	}

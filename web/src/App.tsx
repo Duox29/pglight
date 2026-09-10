@@ -657,7 +657,9 @@ export default function App() {
       // Boot-only handoff: stored credentials move into state once here.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFields(last)
-      void bootConnect(last, true)
+      // Resume (not fresh): the stored sid reuses the same server pool instead
+      // of leaking a new one per reload; the backend recreates it if missing.
+      void bootConnect(last, false)
       return
     }
     const sid = (() => {

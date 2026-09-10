@@ -18,6 +18,7 @@ var webFS embed.FS
 
 func main() {
 	mgr := db.New()
+	mgr.StartSweeper(db.DefaultSweepInterval, db.DefaultIdleTTL)
 	appLog := logging.New("data/logging.json")
 	h := &api.Handler{Mgr: mgr, Log: appLog}
 
