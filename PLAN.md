@@ -144,13 +144,13 @@ npm run build           # emits web/dist (committed so `go build` works)
 frontend change before `go build`.
 
 Conventions for contributors live in `AGENTS.md` (backend + frontend rules,
-checklists); run `./scripts/check.sh` before finishing any change.
+checklists); run `go run ./scripts/check` before finishing any change.
 
 Restart the backend (kills `:8080`, rebuilds, reruns in background):
 
 ```sh
-./scripts/rerun.sh          # PORT=8080 default
-PORT=18080 ./scripts/rerun.sh
+go run ./scripts/rerun          # PORT=8080 default
+PORT=18080 go run ./scripts/rerun
 ```
 
 ## Test database (docker/postgres:14-alpine)

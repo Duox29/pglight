@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Info, Loader2, X } from 'lucide-react'
+import { Check, Info, Loader2, Plus, X } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { Button } from './components/ui/button'
 import { Card } from './components/ui/card'
@@ -716,7 +716,6 @@ export default function App() {
           setSideView(v)
           setSideOpen(true)
         }}
-        onNewQuery={() => newQueryTab()}
         onDocs={() => openDocsTab()}
       />
       {connected && (
@@ -816,6 +815,13 @@ export default function App() {
                 {t.title}
               </button>
             ))}
+            <button
+              onClick={() => newQueryTab()}
+              title="New query"
+              className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap px-2 py-1.5 text-[12px] text-muted-foreground hover:text-foreground"
+            >
+              <Plus className="h-3.5 w-3.5" /> Query
+            </button>
           </div>
           <div className="min-h-0 flex-1 overflow-auto p-3">
             {!cur && <div className="text-muted-foreground">{connected ? 'Open a table or run a query.' : 'Connect to a database to begin.'}</div>}

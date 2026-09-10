@@ -1,4 +1,4 @@
-import { BookOpen, Database, Search, History, Star, LayoutDashboard, Plus, Settings } from 'lucide-react'
+import { BookOpen, Database, Search, History, Star, LayoutDashboard, Settings } from 'lucide-react'
 import { Button } from './ui/button'
 
 export interface ConnFields {
@@ -14,7 +14,6 @@ export function ConnectionBar(props: {
   connected: boolean
   onSearch: () => void
   onPanel: (v: 'history' | 'snippets' | 'server' | 'settings') => void
-  onNewQuery: () => void
   onDocs: () => void
 }) {
   return (
@@ -37,9 +36,6 @@ export function ConnectionBar(props: {
       </Button>
       <Button size="sm" variant="ghost" onClick={() => props.onPanel('settings')} title="Settings">
         <Settings />
-      </Button>
-      <Button size="sm" variant="secondary" onClick={props.onNewQuery}>
-        <Plus /> Query
       </Button>
       <Button size="sm" variant="ghost" onClick={props.onDocs} title="Documentation">
         <BookOpen /> Docs
