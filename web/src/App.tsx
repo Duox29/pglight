@@ -659,6 +659,7 @@ export default function App() {
         return
       }
       if (j.results) {
+        updateTab(id, (x) => (x.kind === 'query' ? { ...x, results: j.results ?? null, meta: `${j.results!.length} statements · ${(j as { duration_ms?: number }).duration_ms}ms`, error: (j as { error?: string }).error } : x))
         pushHist(sql, (j as { duration_ms?: number }).duration_ms, j.results.reduce((a, r) => a + (r.rows?.length ?? 0), 0))
       } else {
         updateTab(id, (x) =>
