@@ -32,8 +32,12 @@ export function SidePanel(p: Props) {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    if (!p.session) return
     if (p.view === 'history' || p.view === 'snippets' || p.view === 'settings' || p.view === 'logs') return
+    // Drop the previous view's payload: without this a slow fetch briefly
+    // renders stale data (e.g. an array) under the new view and crashes it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPayload(null)
+    setError('')
     let stop = false
     const load = async () => {
       try {
@@ -161,7 +165,7 @@ function ServerView({ data }: { data: ServerInfo }) {
   return (
     <div className="flex flex-col gap-2">
       <Card className="p-2.5 text-[12px]">
-        <div className="flex justify-between border-b border-dashed py-1"><span className="text-muted-foreground">version</span><b className="text-right">{data.version.split(' ').slice(0, 3).join(' ')}</b></div>
+        <div className="flex justify-between border-b border-dashed py-1"><span className="text-muted-foreground">version</span><b className="text-right">{(data.version ?? '').split(' ').slice(0, 3).join(' ')}</b></div>
         <div className="flex justify-between border-b border-dashed py-1"><span className="text-muted-foreground">database</span><b>{data.database} ({data.db_size})</b></div>
         <div className="flex justify-between border-b border-dashed py-1"><span className="text-muted-foreground">uptime</span><b>{data.uptime}</b></div>
         <div className="flex justify-between py-1"><span className="text-muted-foreground">connections</span><b>{data.connections}/{data.max_connections}</b></div>

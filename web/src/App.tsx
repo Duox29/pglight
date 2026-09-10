@@ -862,7 +862,7 @@ export default function App() {
                   const v = await dialogs.prompt({
                     title: `Edit ${col}`,
                     description: 'Type __NULL__ for NULL',
-                    defaultValue: orig[col] == null ? 'NULL' : String(orig[col]),
+                    defaultValue: orig[col] == null ? '__NULL__' : String(orig[col]),
                   })
                   if (v == null) return
                   const where: Record<string, unknown> = {}

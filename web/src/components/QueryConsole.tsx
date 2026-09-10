@@ -5,6 +5,7 @@ import { Textarea } from './ui/textarea'
 import { Badge } from './ui/badge'
 import { Card } from './ui/card'
 import { DataGrid } from './ui/data-grid'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './ui/resizable'
 import { ErrorText } from './ui/feedback'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import type { QueryTabT } from '@/types'
@@ -43,11 +44,13 @@ export function QueryConsole(p: Props) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <ResizablePanelGroup direction="vertical" autoSaveId="pglight-query-split" className="flex h-full min-h-0 flex-col">
+      <ResizablePanel defaultSize={30} minSize={12} className="min-h-0">
+        <div className="flex h-full min-h-0 flex-col gap-2 pb-2">
       <Textarea
         value={t.sql}
         spellCheck={false}
-        className="h-[120px]"
+        className="min-h-0 flex-1 resize-none font-mono"
         onChange={(e) => p.onSqlChange(e.target.value)}
         onKeyDown={(e) => {
           if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -95,6 +98,12 @@ export function QueryConsole(p: Props) {
         {t.results?.[0]?.stale && <Badge variant="secondary">Snapshot from last session — Run to refresh</Badge>}
         {p.inTxn && <Badge variant="warning">IN TXN</Badge>}
       </div>
+        </div>
+      </ResizablePanel>
+      <ResizableHandle withHandle />
+      <ResizablePanel defaultSize={70} minSize={12} className="min-h-0">
+        <div className="h-full overflow-auto pt-2">
+          <div className="flex flex-col gap-2">
       <ErrorText message={t.error} />
       {t.plan && (
         <Card className="whitespace-pre-wrap p-2.5 font-mono text-[12px]">{t.plan}</Card>
@@ -140,7 +149,10 @@ export function QueryConsole(p: Props) {
         </Card>
       ))}
       {t.results && t.results.length === 0 && <Sparkles className="h-4 w-4 text-muted-foreground" />}
-    </div>
+          </div>
+        </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   )
 }
 
