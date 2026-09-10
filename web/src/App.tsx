@@ -987,10 +987,8 @@ export default function App() {
                   })
                   if (ok) rowOp(cur.id, 'delete', {}, orig)
                 }}
-                onDuplicateRow={(orig) => {
-                  const vals: Record<string, unknown> = {}
-                  for (const [k, v] of Object.entries(orig)) if (v != null) vals[k] = String(v)
-                  rowOp(cur.id, 'insert', vals, {})
+                onCopyInsert={(orig) => {
+                  copyName(resultToInserts(Object.keys(orig), [Object.values(orig)], `${qi(cur.schema)}.${qi(cur.table)}`))
                 }}
                 onInsert={async () => {
                   if (!cur.result) return

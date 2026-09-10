@@ -74,7 +74,7 @@ const SECTIONS: Section[] = [
       <>
         <P>Tables open with seven sub-tabs: Data, Columns, DDL, Indexes, Constraints, Triggers, Stats.</P>
         <ul className="mt-1.5 list-disc space-y-1 pl-5">
-          <Li><K>Data</K>: free-form WHERE filter, ORDER input, paging, per-row edit (double-click a cell, <K>__NULL__</K> for NULL), duplicate (⧉), delete, insert row form, CSV export/INSERT export.</Li>
+          <Li><K>Data</K>: free-form WHERE filter, ORDER input, paging, per-row edit (double-click a cell, <K>__NULL__</K> for NULL), copy row as INSERT (⧉), delete, insert row form, CSV export/INSERT export.</Li>
           <Li><K>Import CSV</K>: header row maps to columns automatically (or positional fallback); confirm before inserting.</Li>
           <Li><K>Stats</K> shows sizes, seq/idx scans, live/dead tuples and vacuum ages, with VACUUM / ANALYZE / REINDEX actions (refused inside an open txn, like pgAdmin).</Li>
           <Li>UPDATE/DELETE without a key are refused server-side.</Li>
@@ -191,7 +191,7 @@ function textOf(id: string): string {
     connect: 'connect login password saved auto-connect disconnect database',
     explorer: 'tree tables views functions sequences types extensions roles filter definition',
     query: 'sql run multi-statement explain analyze format snippet export csv json insert transaction autocommit',
-    table: 'data edit delete duplicate insert csv import vacuum analyze reindex columns ddl indexes constraints triggers stats',
+    table: 'data edit delete copy insert csv import vacuum analyze reindex columns ddl indexes constraints triggers stats',
     erd: 'diagram foreign key graph schema',
     dashboard: 'history snippets server activity locks stats sessions cancel kill',
     logging: 'settings log level debug slow threshold config',

@@ -21,7 +21,7 @@ interface Props {
   onPage: (d: number) => void
   onEditCell: (col: string, orig: Record<string, unknown>) => void
   onDeleteRow: (orig: Record<string, unknown>) => void
-  onDuplicateRow: (orig: Record<string, unknown>) => void
+  onCopyInsert: (orig: Record<string, unknown>) => void
   onInsert: () => void
   onMaintenance: (op: string) => void
   onImport: (columns: string[], rows: unknown[][]) => void
@@ -197,7 +197,7 @@ export function TableWorkspace(p: Props) {
                       ))}
                       <TableCell>
                         <div className="flex gap-1">
-                          <Button size="sm" variant="ghost" title="Duplicate row" onClick={() => p.onDuplicateRow(orig)}>
+                          <Button size="sm" variant="ghost" title="Copy row as INSERT" onClick={() => p.onCopyInsert(orig)}>
                             ⧉
                           </Button>
                           <Button size="sm" variant="ghost" onClick={() => p.onDeleteRow(orig)}>
