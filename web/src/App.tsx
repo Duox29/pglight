@@ -804,14 +804,16 @@ export default function App() {
                   t.id === activeTab ? 'bg-background font-semibold' : 'bg-muted text-muted-foreground hover:text-foreground',
                 )}
               >
+                <span title="Close tab" className="flex shrink-0">
+                  <X
+                    className="h-3 w-3 opacity-60 hover:opacity-100"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      closeTab(t.id)
+                    }}
+                  />
+                </span>
                 {t.title}
-                <X
-                  className="h-3 w-3 opacity-60 hover:opacity-100"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    closeTab(t.id)
-                  }}
-                />
               </button>
             ))}
           </div>
