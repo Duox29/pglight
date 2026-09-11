@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react'
-import { Play, FileDown, Sparkles, Square, Star, Trash2, Wand2 } from 'lucide-react'
+import { Play, FileDown, RefreshCw, Sparkles, Square, Star, Trash2, Wand2 } from 'lucide-react'
 import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
-import { Textarea } from './ui/textarea'
+import { SqlEditor, type SqlEditorHandle } from './SqlEditor'
+import { ensureSnapshot } from '@/lib/schemaCache'
 import { Badge } from './ui/badge'
 import { Card } from './ui/card'
 import { DataGrid } from './ui/data-grid'
@@ -31,11 +32,10 @@ interface Props {
 export function QueryConsole(p: Props) {
   const { tab: t } = p
   const [sortIdx, setSortIdx] = useState<Record<number, boolean>>({})
-  const sqlRef = useRef<HTMLTextAreaElement>(null)
+  const editorHandle = useRef<SqlEditorHandle | null>(null)
   // Run the highlighted selection when present, else the whole script.
   const runSelected = () => {
-    const el = sqlRef.current
-    const sel = el && el.selectionStart !== el.selectionEnd ? el.value.slice(el.selectionStart, el.selectionEnd) : ''
+    const sel = editorHandle.current?.getSelection() ?? ''
     p.onRun(sel.trim() ? sel : undefined)
   }
   const exportAs = async (fmt: 'csv' | 'json' | 'sql', ri = 0) => {
@@ -57,18 +57,12 @@ export function QueryConsole(p: Props) {
     <ResizablePanelGroup direction="vertical" autoSaveId="pglight-query-split" className="flex h-full min-h-0 flex-col">
       <ResizablePanel defaultSize={30} minSize={12} className="min-h-0">
         <div className="flex h-full min-h-0 flex-col gap-2 pb-2">
-      <Textarea
-        ref={sqlRef}
+      <SqlEditor
         value={t.sql}
-        spellCheck={false}
-        className="min-h-0 flex-1 resize-none font-mono"
-        onChange={(e) => p.onSqlChange(e.target.value)}
-        onKeyDown={(e) => {
-          if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-            e.preventDefault()
-            runSelected()
-          }
-        }}
+        session={t.sessionId}
+        onChange={p.onSqlChange}
+        onCtrlEnter={runSelected}
+        handleRef={editorHandle}
       />
       <div className="flex flex-wrap items-center gap-1.5">
         <Tip content="Run selection if any, else whole script">
@@ -97,6 +91,13 @@ export function QueryConsole(p: Props) {
         <Button size="sm" variant="ghost" onClick={p.onSaveSnippet}>
           <Star /> Snippet
         </Button>
+        <Tip content="Refresh autocomplete schema (cached 60s, auto-invalidated on DDL)">
+          <span className="inline-flex">
+            <Button size="sm" variant="ghost" onClick={() => ensureSnapshot(t.sessionId, true)} aria-label="Refresh autocomplete schema">
+              <RefreshCw />
+            </Button>
+          </span>
+        </Tip>
         <Select value={String(t.limit)} onValueChange={(v) => p.onLimit(Number(v))}>
           <SelectTrigger className="w-[100px]">
             <SelectValue />

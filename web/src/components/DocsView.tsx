@@ -62,6 +62,7 @@ const SECTIONS: Section[] = [
           <Li><K>Explain / Analyze</K> shows the plan with timing and buffer stats.</Li>
           <Li><K>Format</K> uppercases keywords and breaks clauses; <K>★ Snippet</K> saves the SQL to the Snippets panel.</Li>
           <Li>Export any result as <K>CSV / JSON / INSERTs</K>; click a cell to copy it; click a header to sort.</Li>
+          <Li><K>Autocomplete</K> suggests tables/columns as you type (context-aware: FROM → tables, <K>alias.</K> → that table's columns); <K>Ctrl+Space</K> triggers it manually, <K>Tab/Enter</K> accepts. Schema is cached per session (⟳ forces refresh).</Li>
           <Li>With <K>autocommit off</K>, running DML auto-opens a transaction — Commit or Rollback from the txn bar. The <K>IN TXN</K> badge marks tabs inside it.</Li>
         </ul>
       </>

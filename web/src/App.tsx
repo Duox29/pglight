@@ -20,6 +20,7 @@ import { ErdView } from './components/ErdView'
 import { SidePanel } from './components/SidePanel'
 import { SearchPalette } from './components/SearchPalette'
 import { api, apiClient, q } from './lib/api'
+import { dropSnapshot, ensureSnapshot } from './lib/schemaCache'
 import { useLocalStorage } from './lib/storage'
 import type {
   DbInfo,
@@ -41,6 +42,10 @@ import { download, resultToCSV, resultToInserts, resultToJSON } from './lib/form
 const DEFAULT_SQL = 'SELECT * FROM information_schema.tables LIMIT 20;'
 
 const qi = (s: string) => `"${s.replace(/"/g, '""')}"`
+
+// Mirrors the backend complete-cache DDL detector (ddlRe): after a
+// schema-changing run the editor snapshot is dropped and refetched once.
+const DDL_RE = /\b(CREATE|ALTER|DROP|TRUNCATE|COMMENT)\b/i
 
 const BROWSER_DEFS: Record<string, { title: string; url: string; cols: string[] }> = {
   extensions: { title: 'Extensions', url: '/api/extensions', cols: ['name', 'default_version', 'installed_version', 'comment'] },
@@ -204,6 +209,7 @@ export default function App() {
     (sid?: string) => {
       const target = sid ?? activeId
       if (target) apiClient.disconnect(target)
+      if (target) dropSnapshot(target)
       if (target) dropSession(target)
       if (sessions.length <= 1) setCredOpen(true)
     },
@@ -269,6 +275,9 @@ export default function App() {
     list.sort((a, b) => a.schema.localeCompare(b.schema))
     setSchemas(list)
     setDatabases(Array.isArray(dbs) ? (dbs as DbInfo[]) : [])
+    // Warm the editor snapshot while we're here: one fetch per session per
+    // minute, shared by every keystroke of every query tab on it.
+    void ensureSnapshot(sid)
   }, [activeId])
 
   useEffect(() => {
@@ -742,6 +751,10 @@ export default function App() {
       setRunning((r) => ({ ...r, [id]: false }))
       delete runSql.current[id]
       markTxn(sid, !!(j as { in_txn?: boolean }).in_txn)
+      if (DDL_RE.test(sql)) {
+        dropSnapshot(sid)
+        void ensureSnapshot(sid, true)
+      }
       if (j.error && !(j as { results?: unknown }).results) {
         updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: j.error, results: null } : x))
         return

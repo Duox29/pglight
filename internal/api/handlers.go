@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -130,7 +131,9 @@ func (h *Handler) Sessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Disconnect(w http.ResponseWriter, r *http.Request) {
-	h.Mgr.Close(r.URL.Query().Get("session_id"))
+	sid := r.URL.Query().Get("session_id")
+	h.Mgr.Close(sid)
+	globalComplete.Invalidate(sid)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -827,6 +830,9 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stmts := splitStatements(sql)
+	// Schema may have changed: drop the cached complete snapshot after a
+	// successful DDL run so the editor refetches once (not per keystroke).
+	wantInvalidate := ddlRe.MatchString(sql)
 	if len(stmts) > 1 {
 		start := time.Now()
 		results := []map[string]any{}
@@ -838,11 +844,17 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 			}
 			results = append(results, res)
 		}
+		if wantInvalidate {
+			globalComplete.Invalidate(id)
+		}
 		writeJSON(w, 200, map[string]any{"results": results, "duration_ms": time.Since(start).Milliseconds(), "in_txn": h.Mgr.InTxn(id)})
 		return
 	}
 	if req.Limit > 0 && req.Limit < 5000 && isSingleSelect(sql) {
 		sql = fmt.Sprintf("SELECT * FROM (%s) AS _q LIMIT %d", strings.TrimSuffix(sql, ";"), req.Limit)
+	}
+	if wantInvalidate {
+		defer globalComplete.Invalidate(id)
 	}
 	h.execQuery(w, r, qq, id, sql, -1)
 }
@@ -1462,29 +1474,33 @@ func strVal(v any) any {
 	return v
 }
 
+// ddlRe detects schema-changing statements so the complete cache can be
+// invalidated after they run (conservative: match now, drop after success).
+var ddlRe = regexp.MustCompile(`(?i)\b(CREATE|ALTER|DROP|TRUNCATE|COMMENT)\b`)
+
 func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
-	q, _, ok := h.q(r)
+	q, sid, ok := h.q(r)
 	if !ok {
 		writeJSON(w, 401, map[string]string{"error": "not connected"})
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	_, t, _ := queryJSON(q, ctx, `SELECT table_schema||'.'||table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') LIMIT 1000`)
-	_, c, _ := queryJSON(q, ctx, `SELECT column_name FROM information_schema.columns GROUP BY 1 ORDER BY 1 LIMIT 1000`)
-	_, f, _ := queryJSON(q, ctx, `SELECT DISTINCT proname FROM pg_proc JOIN pg_namespace n ON n.oid=pronamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') LIMIT 500`)
-	tables, cols, funcs := []string{}, []string{}, []string{}
-	for _, r := range t {
-		tables = append(tables, fmt.Sprint(r[0]))
+	// Conditional GET: the editor sends the snapshot version it holds;
+	// a fresh cache entry short-circuits with 304 and zero PG queries.
+	ifNone := r.Header.Get("If-None-Match")
+	refresh := r.URL.Query().Get("refresh") == "1"
+	snap, err := globalComplete.Get(r.Context(), q, sid, refresh)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
 	}
-	for _, r := range c {
-		cols = append(cols, fmt.Sprint(r[0]))
-	}
-	for _, r := range f {
-		funcs = append(funcs, fmt.Sprint(r[0]))
+	etag := fmt.Sprintf(`"%d"`, snap.Version)
+	w.Header().Set("ETag", etag)
+	if ifNone != "" && ifNone == etag && !refresh {
+		w.WriteHeader(304)
+		return
 	}
 	kw := []string{"SELECT", "FROM", "WHERE", "JOIN", "LEFT JOIN", "ORDER BY", "GROUP BY", "HAVING", "LIMIT", "OFFSET", "INSERT INTO", "VALUES", "UPDATE", "SET", "DELETE FROM", "EXPLAIN", "ANALYZE", "CREATE TABLE", "ALTER TABLE", "DROP TABLE", "CREATE INDEX", "VACUUM", "BEGIN", "COMMIT", "ROLLBACK", "WITH", "RETURNING", "ON CONFLICT", "DISTINCT", "COUNT", "SUM", "AVG", "NOW()", "COALESCE"}
-	writeJSON(w, 200, map[string]any{"tables": tables, "columns": cols, "functions": funcs, "keywords": kw})
+	writeJSON(w, 200, map[string]any{"version": snap.Version, "tables": snap.Tables, "functions": snap.Funcs, "fks": snap.FKs, "keywords": kw, "in_txn": h.Mgr.InTxn(sid)})
 }
 
 func (h *Handler) execQuery(w http.ResponseWriter, r *http.Request, qq db.Querier, sid string, sql string, total int64) {

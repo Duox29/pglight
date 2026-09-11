@@ -15,7 +15,7 @@ Source features surveyed: JetBrains DataGrip (explorer, consoles, diff, Explain,
 | DDL (reconstructed) + indexes + FKs | ✅ basic |
 | CSV/JSON export of result | ✅ |
 | Activity (pg_stat_activity) + cancel/kill | ✅ |
-| Autocomplete (tables/columns/keywords) | ✅ basic |
+| Autocomplete (tables/columns/keywords) | ✅ smart (context-aware, cached) |
 | Multi-statement / multi-result | ❌ |
 | Transactions (BEGIN/COMMIT/ROLLBACK) | ❌ |
 | Full tree (views/matviews/foreign/functions/seq/types/triggers/extensions/roles) | ❌ partial |
@@ -49,6 +49,7 @@ Backend (`internal/db`, `internal/api`):
 - [x] `GET /api/table-stats` — sizes, seq/idx scans, live/dead tuples, vacuum/analyze ages.
 - [x] `GET /api/erd?schema=` — nodes + FK edges for diagram.
 - [x] `GET /api/search?q=` — global object search (tables/views/functions/columns, ILIKE, 100 rows cap).
+- [x] `GET /api/complete?session_id=` — structured schema snapshot for autocomplete: `{version, tables[{schema,name,columns[{name,type}]}], functions[{schema,name,args}], fks[{src,dst}], keywords, in_txn}`. Per-session cache (60s TTL, single-flighted); `ETag`/`If-None-Match` → 304; `?refresh=1` bypasses; auto-invalidated after DDL via `/api/query` and on disconnect.
 - [x] `POST /api/maintenance {vacuum,analyze,vacuum_full,reindex}` — pgAdmin-style maintenance buttons.
 - [x] `POST /api/import {columns, rows[][]}` — txn-wrapped bulk INSERT for CSV import (500-row batches, `ON CONFLICT DO NOTHING` option).
 
@@ -61,7 +62,7 @@ Frontend (`web/`):
 - [x] ERD tab per schema: SVG FK graph (click node → open table).
 - [x] Import CSV into open table (file picker, header detection, batch POST), Export as INSERT statements, copy cell.
 - [x] Snippets library (localStorage) + searchable history.
-- [x] SQL keyword formatter + function/keyword autocomplete extended.
+- [x] SQL keyword formatter + smart autocomplete (CodeMirror 6, PostgreSQL dialect): context-aware (FROM/JOIN → tables, SELECT/WHERE/ON → scoped columns, `alias.` → that table's columns), ranking prefix > word-boundary > substring > fuzzy + FROM-scope/FK-neighbour/alias/recent-use boosts, SQL snippets, function signatures, Ctrl+Space manual trigger, recent-use in localStorage. Snapshot cached: 1 fetch/session/60s (memory-first, SWR, ETag), zero network per keystroke; refresh button in console; Run-selection (Ctrl+Enter) and panel resize unchanged.
 
 ### Phase 2 — next (not in this change)
 - Visual EXPLAIN (flame/graph, buffers/timing bars), plan compare.
