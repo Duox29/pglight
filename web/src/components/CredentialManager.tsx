@@ -5,6 +5,7 @@ import { Input } from './ui/input'
 import { Switch } from './ui/switch'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
+import type { SessionInfo } from '@/types'
 import type { ConnFields } from './ConnectionBar'
 
 interface Props {
@@ -21,6 +22,10 @@ interface Props {
   connected: boolean
   autoLogin: boolean
   onAutoLogin: (v: boolean) => void
+  sessions: SessionInfo[]
+  activeId: string
+  onSwitch: (id: string) => void
+  onDisconnectOne: (id: string) => void
 }
 
 export function CredentialManager(p: Props) {
@@ -50,6 +55,28 @@ export function CredentialManager(p: Props) {
       </CollapsibleTrigger>
       <CollapsibleContent className="data-[state=closed]:hidden">
         <div className="flex flex-col gap-1.5 px-2.5 pb-2.5">
+          {p.sessions.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <div className="text-[11px] font-semibold text-muted-foreground">Active sessions ({p.sessions.length})</div>
+              {p.sessions.map((s) => (
+                <div
+                  key={s.id}
+                  className={`flex items-center gap-1.5 rounded border px-1.5 py-1 text-[11px] ${s.id === p.activeId ? 'border-foreground/30 bg-accent' : 'border-border'}`}
+                >
+                  <button
+                    className="min-w-0 flex-1 truncate text-left hover:underline"
+                    title={`${s.user}@${s.host}:${s.port}/${s.dbname}`}
+                    onClick={() => p.onSwitch(s.id)}
+                  >
+                    {s.id === p.activeId ? '●' : '○'} {s.user}@{s.host}/{s.dbname}
+                  </button>
+                  <Button size="sm" variant="ghost" title="Disconnect this session" onClick={() => p.onDisconnectOne(s.id)}>
+                    ✖
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="flex gap-1.5">
             <Select
               value={savedKey}

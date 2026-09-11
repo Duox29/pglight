@@ -24,6 +24,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/connect", h.Connect)
+	mux.HandleFunc("/api/sessions", h.Sessions)
 	mux.HandleFunc("/api/disconnect", h.Disconnect)
 	mux.HandleFunc("/api/databases", h.Databases)
 	mux.HandleFunc("/api/schemas", h.Schemas)

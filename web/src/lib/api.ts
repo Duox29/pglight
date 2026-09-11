@@ -51,16 +51,28 @@ export interface LogEntry {
   detail?: string
 }
 
+export interface SessionInfo {
+  id: string
+  host: string
+  port: number
+  user: string
+  dbname: string
+  sslmode?: string
+  in_txn?: boolean
+  connected_at?: string
+}
+
 export const q = (session: string, path: string) =>
   `${path}${path.includes('?') ? '&' : '?'}session_id=${encodeURIComponent(session)}`
 
 export const apiClient = {
   connect: (b: ConnectParams) =>
-    api<{ session_id?: string; error?: string }>('/api/connect', {
+    api<{ session_id?: string; info?: SessionInfo; error?: string }>('/api/connect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(b),
     }),
+  listSessions: () => api<{ sessions: SessionInfo[] }>(`/api/sessions`),
   disconnect: (session: string) => api('/api/disconnect?session_id=' + encodeURIComponent(session)),
   txn: (session: string, action: string) =>
     api<{ ok?: boolean; in_txn?: boolean; error?: string }>('/api/txn', {

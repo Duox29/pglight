@@ -17,8 +17,8 @@ import (
 )
 
 type Handler struct {
-  Mgr *db.Manager
-  Log *logging.Logger
+	Mgr *db.Manager
+	Log *logging.Logger
 }
 
 // queryTimeout caps user query execution (console, table ops). Long enough
@@ -90,7 +90,8 @@ func (h *Handler) Connect(w http.ResponseWriter, r *http.Request) {
 	if id != "" && h.Mgr.Alive(id) {
 		// Reload/resume path: same browser session, healthy pool — reuse it
 		// instead of leaking a new pool per refresh.
-		writeJSON(w, 200, map[string]string{"session_id": id})
+		meta, _ := h.Mgr.Info(id)
+		writeJSON(w, 200, map[string]any{"session_id": id, "info": sessionInfo(id, meta, h.Mgr.InTxn(id))})
 		return
 	}
 	if id == "" {
@@ -101,7 +102,31 @@ func (h *Handler) Connect(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, 200, map[string]string{"session_id": id})
+	h.Mgr.SetMeta(id, db.ConnMeta{Host: req.Host, Port: req.Port, User: req.User, DbName: req.DbName, SSLMode: req.SSLMode})
+	meta, _ := h.Mgr.Info(id)
+	writeJSON(w, 200, map[string]any{"session_id": id, "info": sessionInfo(id, meta, false)})
+}
+
+func sessionInfo(id string, meta db.ConnMeta, inTxn bool) map[string]any {
+	dbname := meta.DbName
+	if dbname == "" {
+		dbname = "postgres"
+	}
+	return map[string]any{
+		"id": id, "host": meta.Host, "port": meta.Port, "user": meta.User,
+		"dbname": dbname, "sslmode": meta.SSLMode, "in_txn": inTxn,
+		"connected_at": meta.ConnectedAt.Format(time.RFC3339),
+	}
+}
+
+// Sessions lists all live backend sessions (display info only, no passwords).
+func (h *Handler) Sessions(w http.ResponseWriter, r *http.Request) {
+	list := h.Mgr.List()
+	out := make([]map[string]any, 0, len(list))
+	for _, s := range list {
+		out = append(out, sessionInfo(s.ID, s.ConnMeta, s.InTxn))
+	}
+	writeJSON(w, 200, map[string]any{"sessions": out})
 }
 
 func (h *Handler) Disconnect(w http.ResponseWriter, r *http.Request) {

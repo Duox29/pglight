@@ -3,13 +3,13 @@ package db
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"log"
 	"net/url"
 	"sync"
 	"time"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Querier is satisfied by *pgxpool.Pool and pgx.Tx (and *pgxpool.Conn).
@@ -28,6 +28,24 @@ type Manager struct {
 	txConns map[string]*pgxpool.Conn
 	txs     map[string]pgx.Tx
 	seen    map[string]time.Time
+	metas   map[string]ConnMeta
+}
+
+// ConnMeta is display-only connection info for a session (no password).
+type ConnMeta struct {
+	Host        string    `json:"host"`
+	Port        int       `json:"port"`
+	User        string    `json:"user"`
+	DbName      string    `json:"dbname"`
+	SSLMode     string    `json:"sslmode"`
+	ConnectedAt time.Time `json:"connected_at"`
+}
+
+// SessionInfo is the list entry returned by GET /api/sessions.
+type SessionInfo struct {
+	ID    string `json:"id"`
+	InTxn bool   `json:"in_txn"`
+	ConnMeta
 }
 
 func New() *Manager {
@@ -36,6 +54,7 @@ func New() *Manager {
 		txConns: make(map[string]*pgxpool.Conn),
 		txs:     make(map[string]pgx.Tx),
 		seen:    make(map[string]time.Time),
+		metas:   make(map[string]ConnMeta),
 	}
 }
 
@@ -149,6 +168,52 @@ func (m *Manager) Close(id string) {
 		delete(m.pools, id)
 	}
 	delete(m.seen, id)
+	delete(m.metas, id)
+}
+
+// SetMeta stores display-only connection info for a session (no password).
+// ConnectedAt is stamped on first set and preserved across re-Add calls.
+func (m *Manager) SetMeta(id string, meta ConnMeta) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if prev, ok := m.metas[id]; ok && !prev.ConnectedAt.IsZero() {
+		meta.ConnectedAt = prev.ConnectedAt
+	}
+	if meta.ConnectedAt.IsZero() {
+		meta.ConnectedAt = time.Now()
+	}
+	m.metas[id] = meta
+}
+
+// Info returns the stored meta for a session.
+func (m *Manager) Info(id string) (ConnMeta, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	meta, ok := m.metas[id]
+	return meta, ok
+}
+
+// List returns one entry per live pool (display info + txn flag).
+func (m *Manager) List() []SessionInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]SessionInfo, 0, len(m.pools))
+	for id, meta := range m.metas {
+		if _, ok := m.pools[id]; !ok {
+			continue
+		}
+		_, inTxn := m.txs[id]
+		out = append(out, SessionInfo{ID: id, InTxn: inTxn, ConnMeta: meta})
+	}
+	// Pools without meta (e.g. created before the upgrade) still show up.
+	for id := range m.pools {
+		if _, ok := m.metas[id]; ok {
+			continue
+		}
+		_, inTxn := m.txs[id]
+		out = append(out, SessionInfo{ID: id, InTxn: inTxn})
+	}
+	return out
 }
 
 // InTxn reports whether the session has an open explicit transaction.

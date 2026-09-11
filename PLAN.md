@@ -70,12 +70,14 @@ Frontend (`web/`):
 - `pg_dump`/`pg_restore` streaming backup, MOTD log viewer (`pg_log` via `file_fdw` if available).
 - Row-level security / privilege editor (GRANT wizard), role membership editor.
 - Charts from result sets, query plan history, slow-query panel (`pg_stat_statements` when installed).
-- Multi-connection tabs (per-tab session), SSH tunnel + SSL cert auth, read-only mode.
+- Multi-connection tabs (per-tab session) ✅ (sessions list + active session; explorer/txn/dashboard follow active, tabs keep their session; `switchDb` opens a new session) | SSH tunnel + SSL cert auth, read-only mode (later).
 
 ## API added in Phase 1
 
 ```
 POST /api/txn              {session_id, action}
+GET  /api/sessions          → {sessions: [{id,host,port,user,dbname,sslmode,in_txn,connected_at}]} (display info only, no passwords)
+POST /api/connect           (now also returns {info} alongside session_id, additive)
 GET  /api/server-info?session_id=
 GET  /api/stats?session_id=
 GET  /api/locks?session_id=

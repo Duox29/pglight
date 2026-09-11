@@ -24,6 +24,7 @@ import type {
   ObjectDetail,
   SavedConnection,
   SchemaGroup,
+  SessionInfo,
   SideView,
   Snippet,
   StoredTab,
@@ -44,6 +45,7 @@ const BROWSER_DEFS: Record<string, { title: string; url: string; cols: string[] 
 }
 
 function slimTab(t: Tab): StoredTab | null {
+  const sessionId = (t as { sessionId?: string }).sessionId
   switch (t.kind) {
     case 'query': {
       // Keep a capped snapshot of the last result (never auto re-run: the SQL
@@ -62,14 +64,14 @@ function slimTab(t: Tab): StoredTab | null {
           snapshot = undefined
         }
       }
-      return { id: t.id, kind: t.kind, title: t.title, sql: t.sql, limit: t.limit, snapshot }
+      return { id: t.id, kind: t.kind, title: t.title, sessionId, sql: t.sql, limit: t.limit, snapshot }
     }
     case 'table':
-      return { id: t.id, kind: t.kind, title: t.title, schema: t.schema, table: t.table, subtab: t.subtab, limit: t.limit, offset: t.offset, filter: t.filter, order: t.order }
+      return { id: t.id, kind: t.kind, title: t.title, sessionId, schema: t.schema, table: t.table, subtab: t.subtab, limit: t.limit, offset: t.offset, filter: t.filter, order: t.order }
     case 'browser':
-      return { id: t.id, kind: t.kind, title: t.title, key: t.id.replace(/^b_/, '') }
+      return { id: t.id, kind: t.kind, title: t.title, sessionId, key: t.id.split('__')[0].replace(/^b_/, '') }
     case 'erd':
-      return { id: t.id, kind: t.kind, title: t.title, schema: t.schema }
+      return { id: t.id, kind: t.kind, title: t.title, sessionId, schema: t.schema }
     case 'docs':
       return { id: 'docs', kind: 'docs', title: 'Docs' }
   }
@@ -97,11 +99,24 @@ function readStoredTabs(): StoredTab[] {
 export default function App() {
   const [fields, setFields] = useState<ConnFields>({ host: 'localhost', port: '5432', user: 'postgres', password: '', dbname: 'postgres', sslmode: 'disable' })
   const [saved, setSaved] = useLocalStorage<SavedConnection[]>('conns', [])
-  const [session, setSession] = useLocalStorage<string>('sid', '')
-  // Always starts disconnected; a stored sid is only trusted after the boot
-  // check below verifies it (a server restart invalidates all sessions).
-  const [connected, setConnected] = useState(false)
-  const [inTxn, setInTxn] = useState(false)
+  // Multi-session: N live backend pools. Tabs bind to one session id each;
+  // the explorer + txn bar follow the active session. No passwords persist.
+  const [sessions, setSessions] = useLocalStorage<SessionInfo[]>('sessions', [])
+  const [activeId, setActiveId] = useLocalStorage<string>('active-sid', '')
+  const active = sessions.find((s) => s.id === activeId) ?? null
+  const session = active?.id ?? ''
+  const connected = !!active
+  const [inTxnMap, setInTxnMap] = useState<Record<string, boolean>>({})
+  const inTxn = active ? !!inTxnMap[active.id] : false
+  const markTxn = useCallback((sid: string, v: boolean) => {
+    setInTxnMap((m) => (m[sid] === v ? m : { ...m, [sid]: v }))
+  }, [])
+  const setInTxn = useCallback(
+    (v: boolean) => {
+      if (activeId) markTxn(activeId, v)
+    },
+    [activeId, markTxn],
+  )
   const [autocommit, setAutocommit] = useLocalStorage<boolean>('autocommit', true)
   const [autoLogin, setAutoLogin] = useLocalStorage<boolean>('auto-login', true)
   const [databases, setDatabases] = useState<DbInfo[]>([])
@@ -128,34 +143,38 @@ export default function App() {
     setTabs((prev) => prev.map((t) => (t.id === id ? fn(t) : t)))
   }, [])
 
-  /* ---------- connection ---------- */
+  /* ---------- connection (multi-session) ---------- */
   const bootConnect = useCallback(
-    async (f: ConnFields, fresh: boolean, dbnameOver?: string) => {
+    async (f: ConnFields, fresh: boolean, dbnameOver?: string, sidOver?: string) => {
+      const dbname = dbnameOver || f.dbname
       const j = await apiClient.connect({
         host: f.host,
         port: Number(f.port) || 5432,
         user: f.user,
         password: f.password,
-        dbname: dbnameOver || f.dbname,
+        dbname,
         sslmode: f.sslmode,
-        session_id: fresh ? '' : session || undefined,
+        session_id: fresh ? '' : sidOver || session || undefined,
       })
       if (j.error || !j.session_id) {
         toast.error(j.error ?? 'Connect failed')
         return false
       }
+      const sid = j.session_id
+      const info: SessionInfo = j.info
+        ? { id: sid, host: j.info.host, port: String(j.info.port ?? f.port), user: j.info.user || f.user, dbname: j.info.dbname || dbname, sslmode: j.info.sslmode || f.sslmode }
+        : { id: sid, host: f.host, port: f.port, user: f.user, dbname, sslmode: f.sslmode }
+      setSessions((prev) => (prev.some((s) => s.id === sid) ? prev.map((s) => (s.id === sid ? info : s)) : [...prev, info]))
+      setActiveId(sid)
+      markTxn(sid, !!j.info?.in_txn)
       try {
-        localStorage.setItem('last-conn', JSON.stringify({ ...f, dbname: dbnameOver || f.dbname }))
+        localStorage.setItem('last-conn', JSON.stringify({ ...f, dbname }))
       } catch {
         /* private mode etc. — autologin just won't persist */
       }
-      setSession(j.session_id)
-      if (dbnameOver) setFields((f0) => ({ ...f0, dbname: dbnameOver }))
-      setConnected(true)
-      setInTxn(false)
       return true
     },
-    [session, setSession],
+    [session, setSessions, setActiveId, markTxn],
   )
 
   const connect = useCallback(
@@ -163,40 +182,59 @@ export default function App() {
     [bootConnect, fields],
   )
 
-  const disconnect = useCallback(() => {
-    if (session) apiClient.disconnect(session)
-    setSession('')
-    setConnected(false)
-    setInTxn(false)
-  }, [session, setSession])
+  const dropSession = useCallback(
+    (sid: string) => {
+      const next = sessions.filter((s) => s.id !== sid)
+      setSessions(next)
+      if (sid === activeId) setActiveId(next[0]?.id ?? '')
+      setInTxnMap((m) => {
+        if (!(sid in m)) return m
+        const n = { ...m }
+        delete n[sid]
+        return n
+      })
+    },
+    [activeId, sessions, setSessions, setActiveId],
+  )
+
+  const disconnect = useCallback(
+    (sid?: string) => {
+      const target = sid ?? activeId
+      if (target) apiClient.disconnect(target)
+      if (target) dropSession(target)
+      if (sessions.length <= 1) setCredOpen(true)
+    },
+    [activeId, dropSession, sessions.length, setCredOpen],
+  )
 
   const refreshTxn = useCallback(async () => {
     if (!session) return
     const j = await apiClient.txn(session, 'status')
-    setInTxn(!!j.in_txn)
-  }, [session])
+    markTxn(session, !!j.in_txn)
+  }, [session, markTxn])
 
   const doTxn = useCallback(
     async (action: string) => {
       if (!session) return
       const j = await apiClient.txn(session, action)
       if (j.error) toast.error(j.error)
-      setInTxn(!!j.in_txn)
+      markTxn(session, !!j.in_txn)
     },
-    [session],
+    [session, markTxn],
   )
 
-  /* ---------- explorer ---------- */
-  const loadExplorer = useCallback(async () => {
-    if (!session) return
+  /* ---------- explorer (follows the active session) ---------- */
+  const loadExplorer = useCallback(async (sidOver?: string) => {
+    const sid = sidOver ?? activeId
+    if (!sid) return
     const [sch, tbl, dbs] = await Promise.all([
-      api<unknown>(q(session, '/api/schemas?')),
-      api<unknown>(q(session, '/api/tables?')),
-      api<unknown>(q(session, '/api/databases?')),
+      api<unknown>(q(sid, '/api/schemas?')),
+      api<unknown>(q(sid, '/api/tables?')),
+      api<unknown>(q(sid, '/api/databases?')),
     ])
     const [views, matviews, foreign, functions, sequences, types] = await Promise.all(
       (['views', 'matviews', 'foreign', 'functions', 'sequences', 'types'] as const).map((k) =>
-        api<unknown>(q(session, `/api/objects?kind=${k}`)).catch(() => []),
+        api<unknown>(q(sid, `/api/objects?kind=${k}`)).catch(() => []),
       ),
     )
     const by: Record<string, SchemaGroup> = {}
@@ -228,28 +266,37 @@ export default function App() {
     list.sort((a, b) => a.schema.localeCompare(b.schema))
     setSchemas(list)
     setDatabases(Array.isArray(dbs) ? (dbs as DbInfo[]) : [])
-  }, [session])
+  }, [activeId])
 
   useEffect(() => {
-    if (!session) return
+    if (!activeId) return
     // External-system sync: reload server state on session change. Setters run
     // in async continuations after fetch, not during render.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadExplorer()
+    loadExplorer(activeId)
     refreshTxn()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session])
+  }, [activeId])
 
   const switchDb = useCallback(
     async (name: string) => {
+      if (!active) return
+      if (name === active.dbname) return
       const ok = await dialogs.confirm({
-        title: `Reconnect to "${name}"?`,
-        description: 'The current session will be replaced.',
-        confirmText: 'Reconnect',
+        title: `Open "${name}" in a new session?`,
+        description: 'The current session stays open; tabs keep their own session.',
+        confirmText: 'Open',
       })
-      if (ok) connect(true, name)
+      if (!ok) return
+      let password = fields.password
+      if (!password) {
+        const v = await dialogs.prompt({ title: `Password for ${active.user}@${active.host}`, description: `Opening ${name} as ${active.user}` })
+        if (v == null) return
+        password = v
+      }
+      void bootConnect({ host: active.host, port: active.port, user: active.user, password, dbname: active.dbname, sslmode: active.sslmode }, true, name)
     },
-    [connect, dialogs],
+    [bootConnect, dialogs, active, fields.password],
   )
 
   /* ---------- object detail ---------- */
@@ -348,45 +395,51 @@ export default function App() {
     [session],
   )
 
-  /* ---------- tabs ---------- */
+  /* ---------- tabs (each bound to the session active at creation) ---------- */
+  const shortSid = (sid: string) => (sid.length > 6 ? sid.slice(-6) : sid)
   const newQueryTab = useCallback(
-    (sql?: string) => {
+    (sql?: string, sidOver?: string) => {
+      const sid = sidOver ?? activeId
+      if (!sid) {
+        toast.error('Connect to a database first — cannot open query')
+        return
+      }
       tabSeq.current += 1
       const id = `q${tabSeq.current}`
-      setTabs((prev) => [...prev, { id, kind: 'query', title: `Query ${tabSeq.current}`, sql: sql ?? DEFAULT_SQL, limit: 200, results: null }])
+      setTabs((prev) => [...prev, { id, kind: 'query', title: `Query ${tabSeq.current}`, sessionId: sid, sql: sql ?? DEFAULT_SQL, limit: 200, results: null }])
       setActiveTab(id)
     },
-    [],
+    [activeId],
   )
 
-  /* ---------- table ops ---------- */
+  /* ---------- table ops (per-tab session) ---------- */
   const loadTablePage = useCallback(
-    async (id: string, schema: string, table: string, limit: number, offset: number, filter: string, order: string) => {
-      if (!session) return
+    async (sid: string, id: string, schema: string, table: string, limit: number, offset: number, filter: string, order: string) => {
+      if (!sid) return
       const j = await api<import('./lib/api').QueryResult & { total?: number; in_txn?: boolean; error?: string }>(
-        q(session, `/api/table-data?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}&limit=${limit}&offset=${offset}&filter=${encodeURIComponent(filter)}&order=${encodeURIComponent(order)}`),
+        q(sid, `/api/table-data?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}&limit=${limit}&offset=${offset}&filter=${encodeURIComponent(filter)}&order=${encodeURIComponent(order)}`),
       )
       if (j.error) {
         setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'table' ? { ...t, error: j.error } : t)))
         return
       }
-      setInTxn(!!j.in_txn)
+      markTxn(sid, !!j.in_txn)
       setTabs((prev) =>
         prev.map((t) => (t.id === id && t.kind === 'table' ? { ...t, result: j, error: undefined, limit, offset, filter, order } : t)),
       )
     },
-    [session],
+    [markTxn],
   )
 
   const loadTableMeta = useCallback(
-    async (id: string, schema: string, table: string) => {
-      if (!session) return
+    async (sid: string, id: string, schema: string, table: string) => {
+      if (!sid) return
       const [cols, ddl, cons, trg, stats] = await Promise.all([
-        api<unknown>(q(session, `/api/columns?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)).catch(() => null),
-        api<unknown>(q(session, `/api/ddl?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)).catch(() => null),
-        api<unknown>(q(session, `/api/constraints?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)).catch(() => null),
-        api<unknown>(q(session, `/api/triggers?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)).catch(() => null),
-        api<unknown>(q(session, `/api/table-stats?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)).catch(() => null),
+        api<unknown>(q(sid, `/api/columns?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)).catch(() => null),
+        api<unknown>(q(sid, `/api/ddl?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)).catch(() => null),
+        api<unknown>(q(sid, `/api/constraints?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)).catch(() => null),
+        api<unknown>(q(sid, `/api/triggers?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)).catch(() => null),
+        api<unknown>(q(sid, `/api/table-stats?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)).catch(() => null),
       ])
       setTabs((prev) =>
         prev.map((t) => {
@@ -402,7 +455,7 @@ export default function App() {
         }),
       )
     },
-    [session],
+    [],
   )
 
   const needSession = useCallback(
@@ -417,19 +470,23 @@ export default function App() {
   )
 
   const openTableTab = useCallback(
-    (schema: string, table: string) => {
-      if (!needSession(`${schema}.${table}`)) return
-      const id = `t_${schema}_${table}`
+    (schema: string, table: string, sidOver?: string) => {
+      const sid = sidOver ?? activeId
+      if (!sid) {
+        toast.error(`Connect to a database first — cannot open ${schema}.${table}`)
+        return
+      }
+      const id = `t_${shortSid(sid)}_${schema}_${table}`
       setTabs((prev) =>
         prev.find((t) => t.id === id)
           ? prev
-          : [...prev, { id, kind: 'table', title: table, schema, table, subtab: 'data' as TableSubtab, limit: 100, offset: 0, filter: '', order: '', result: null, cols: null, ddl: null, constraints: null, triggers: null, stats: null }],
+          : [...prev, { id, kind: 'table', title: table, sessionId: sid, schema, table, subtab: 'data' as TableSubtab, limit: 100, offset: 0, filter: '', order: '', result: null, cols: null, ddl: null, constraints: null, triggers: null, stats: null }],
       )
       setActiveTab(id)
-      loadTablePage(id, schema, table, 100, 0, '', '')
-      loadTableMeta(id, schema, table)
+      loadTablePage(sid, id, schema, table, 100, 0, '', '')
+      loadTableMeta(sid, id, schema, table)
     },
-    [loadTablePage, loadTableMeta, needSession],
+    [activeId, loadTablePage, loadTableMeta],
   )
   /* ---------- explorer context menu (Explorer stays presentational) ---------- */
   const newScopedQuery = useCallback(
@@ -458,8 +515,8 @@ export default function App() {
   const createSchema = useCallback(
     async (db?: string) => {
       if (!needSession('schema')) return
-      if (db && db !== fields.dbname) {
-        toast.error(`Switch to "${db}" first`)
+      if (db && active && db !== active.dbname) {
+        toast.error(`Session "${active.dbname}" is active — switch sessions to create a schema in "${db}"`)
         return
       }
       const name = await dialogs.prompt({ title: 'New schema', placeholder: 'my_schema' })
@@ -475,7 +532,7 @@ export default function App() {
       toast.success(`Created schema ${trimmed}`)
       loadExplorer()
     },
-    [session, needSession, dialogs, fields.dbname, loadExplorer],
+    [session, needSession, dialogs, active, loadExplorer, setInTxn],
   )
 
   const createTable = useCallback(
@@ -502,7 +559,7 @@ export default function App() {
       loadExplorer()
       openTableTab(schema, name)
     },
-    [session, needSession, dialogs, loadExplorer, openTableTab],
+    [session, needSession, dialogs, loadExplorer, openTableTab, setInTxn],
   )
 
   const exportTable = useCallback(
@@ -534,66 +591,87 @@ export default function App() {
 
   const openBrowser = useCallback(
     (key: 'extensions' | 'roles', title: string) => {
-      if (!needSession(title)) return
-      const id = `b_${key}`
+      if (!activeId) {
+        toast.error(`Connect to a database first — cannot open ${title}`)
+        return
+      }
+      const sid = activeId
+      const id = `b_${key}__${shortSid(sid)}`
       const url = key === 'extensions' ? '/api/extensions' : '/api/roles'
       const cols = key === 'extensions' ? ['name', 'default_version', 'installed_version', 'comment'] : ['name', 'superuser', 'login', 'createdb', 'member_of']
-      setTabs((prev) => (prev.find((t) => t.id === id) ? prev : [...prev, { id, kind: 'browser', title, url, cols, rows: null }]))
+      setTabs((prev) => (prev.find((t) => t.id === id) ? prev : [...prev, { id, kind: 'browser', title, sessionId: sid, url, cols, rows: null }]))
       setActiveTab(id)
-      if (session) {
-        api<Record<string, unknown>[] | { error: string }>(q(session, `${url}?`)).then((j) => {
-          setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'browser' ? { ...t, rows: Array.isArray(j) ? j : null, error: (j as { error?: string }).error } : t)))
-        })
-      }
+      api<Record<string, unknown>[] | { error: string }>(q(sid, `${url}?`)).then((j) => {
+        setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'browser' ? { ...t, rows: Array.isArray(j) ? j : null, error: (j as { error?: string }).error } : t)))
+      })
     },
-    [session, needSession],
+    [activeId],
   )
 
   const openErd = useCallback(
-    (schema: string) => {
-      if (!needSession(`ERD ${schema}`)) return
-      const id = `e_${schema}`
-      setTabs((prev) => (prev.find((t) => t.id === id) ? prev : [...prev, { id, kind: 'erd', title: `ERD ${schema}`, schema, data: null }]))
-      setActiveTab(id)
-      if (session) {
-        api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(session, `/api/erd?schema=${encodeURIComponent(schema)}`)).then((j) => {
-          setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'erd' ? { ...t, data: j } : t)))
-        })
+    (schema: string, sidOver?: string) => {
+      const sid = sidOver ?? activeId
+      if (!sid) {
+        toast.error(`Connect to a database first — cannot open ERD ${schema}`)
+        return
       }
+      const id = `e_${schema}__${shortSid(sid)}`
+      setTabs((prev) => (prev.find((t) => t.id === id) ? prev : [...prev, { id, kind: 'erd', title: `ERD ${schema}`, sessionId: sid, schema, data: null }]))
+      setActiveTab(id)
+      api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(sid, `/api/erd?schema=${encodeURIComponent(schema)}`)).then((j) => {
+        setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'erd' ? { ...t, data: j } : t)))
+      })
     },
-    [session, needSession],
+    [activeId],
   )
 
   /* ---------- last-session restore (tabs + autologin) ---------- */
   const restoreStoredTabs = useCallback(
-    (stored: StoredTab[]) => {
+    (stored: StoredTab[], aliveIds: Set<string>, fallbackSid: string) => {
       const rebuilt: Tab[] = []
+      const seenIds = new Set<string>()
       let maxQ = 0
       for (const s of stored) {
+        // Tabs whose session died (server restart) remap to the fresh session.
+        const sid = s.sessionId && aliveIds.has(s.sessionId) ? s.sessionId : fallbackSid
+        if (!sid) continue
         if (s.kind === 'query') {
           const m = /^q(\d+)$/.exec(s.id)
           if (m) maxQ = Math.max(maxQ, Number(m[1]))
+          if (seenIds.has(s.id)) continue
+          seenIds.add(s.id)
           rebuilt.push({
-            id: s.id, kind: 'query', title: s.title || 'Query', sql: s.sql ?? DEFAULT_SQL, limit: s.limit ?? 200,
+            id: s.id, kind: 'query', title: s.title || 'Query', sessionId: sid, sql: s.sql ?? DEFAULT_SQL, limit: s.limit ?? 200,
             results: s.snapshot ? [{ columns: s.snapshot.columns, rows: s.snapshot.rows, rows_affected: s.snapshot.rows.length, stale: true }] : null,
           })
         } else if (s.kind === 'table' && s.schema && s.table) {
+          const id = `t_${shortSid(sid)}_${s.schema}_${s.table}`
+          if (seenIds.has(id)) continue
+          seenIds.add(id)
           rebuilt.push({
-            id: `t_${s.schema}_${s.table}`, kind: 'table', title: s.table, schema: s.schema, table: s.table,
+            id, kind: 'table', title: s.table, sessionId: sid, schema: s.schema, table: s.table,
             subtab: s.subtab ?? 'data', limit: s.limit ?? 100, offset: s.offset ?? 0, filter: s.filter ?? '', order: s.order ?? '',
             result: null, cols: null, ddl: null, constraints: null, triggers: null, stats: null,
           })
         } else if (s.kind === 'browser' && s.key && BROWSER_DEFS[s.key]) {
           const d = BROWSER_DEFS[s.key]
-          rebuilt.push({ id: `b_${s.key}`, kind: 'browser', title: d.title, url: d.url, cols: d.cols, rows: null })
+          const id = `b_${s.key}__${shortSid(sid)}`
+          if (seenIds.has(id)) continue
+          seenIds.add(id)
+          rebuilt.push({ id, kind: 'browser', title: d.title, sessionId: sid, url: d.url, cols: d.cols, rows: null })
         } else if (s.kind === 'erd' && s.schema) {
-          rebuilt.push({ id: `e_${s.schema}`, kind: 'erd', title: `ERD ${s.schema}`, schema: s.schema, data: null })
+          const id = `e_${s.schema}__${shortSid(sid)}`
+          if (seenIds.has(id)) continue
+          seenIds.add(id)
+          rebuilt.push({ id, kind: 'erd', title: `ERD ${s.schema}`, sessionId: sid, schema: s.schema, data: null })
         } else if (s.kind === 'docs') {
+          if (seenIds.has('docs')) continue
+          seenIds.add('docs')
           rebuilt.push({ id: 'docs', kind: 'docs', title: 'Docs' })
         }
       }
       if (!rebuilt.length) {
-        newQueryTab()
+        newQueryTab(undefined, fallbackSid)
         return
       }
       tabSeq.current = maxQ
@@ -606,23 +684,24 @@ export default function App() {
         }
       })()
       setActiveTab(wantActive && rebuilt.some((t) => t.id === wantActive) ? wantActive : rebuilt[0].id)
-      if (!session) return
       for (const t of rebuilt) {
+        if (t.kind === 'docs' || t.kind === 'query') continue
+        const sid = t.sessionId
         if (t.kind === 'table') {
-          void loadTablePage(t.id, t.schema, t.table, t.limit, t.offset, t.filter, t.order)
-          void loadTableMeta(t.id, t.schema, t.table)
+          void loadTablePage(sid, t.id, t.schema, t.table, t.limit, t.offset, t.filter, t.order)
+          void loadTableMeta(sid, t.id, t.schema, t.table)
         } else if (t.kind === 'browser') {
-          api<Record<string, unknown>[] | { error: string }>(q(session, `${t.url}?`)).then((j) => {
+          api<Record<string, unknown>[] | { error: string }>(q(sid, `${t.url}?`)).then((j) => {
             setTabs((prev) => prev.map((x) => (x.id === t.id && x.kind === 'browser' ? { ...x, rows: Array.isArray(j) ? j : null, error: (j as { error?: string }).error } : x)))
           })
         } else if (t.kind === 'erd') {
-          api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(session, `/api/erd?schema=${encodeURIComponent(t.schema)}`)).then((j) => {
+          api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(sid, `/api/erd?schema=${encodeURIComponent(t.schema)}`)).then((j) => {
             setTabs((prev) => prev.map((x) => (x.id === t.id && x.kind === 'erd' ? { ...x, data: j } : x)))
           })
         }
       }
     },
-    [session, loadTablePage, loadTableMeta, newQueryTab],
+    [loadTablePage, loadTableMeta, newQueryTab],
   )
 
   const openDocsTab = useCallback(() => {
@@ -646,19 +725,20 @@ export default function App() {
   const runQuery = useCallback(
     async (id: string, sqlOver?: string) => {
       const t = tabs.find((x) => x.id === id)
-      if (!t || t.kind !== 'query' || !session) return
+      if (!t || t.kind !== 'query' || !t.sessionId) return
+      const sid = t.sessionId
       const sql = sqlOver ?? t.sql
       runSql.current[id] = sql
       if (!autocommit) {
-        const st = await apiClient.txn(session, 'status')
-        if (!st.in_txn) await apiClient.txn(session, 'begin')
+        const st = await apiClient.txn(sid, 'status')
+        if (!st.in_txn) await apiClient.txn(sid, 'begin')
       }
       setRunning((r) => ({ ...r, [id]: true }))
       updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: undefined, plan: undefined } : x))
-      const j = await apiClient.runQuery(session, sql, t.limit || undefined)
+      const j = await apiClient.runQuery(sid, sql, t.limit || undefined)
       setRunning((r) => ({ ...r, [id]: false }))
       delete runSql.current[id]
-      setInTxn(!!(j as { in_txn?: boolean }).in_txn)
+      markTxn(sid, !!(j as { in_txn?: boolean }).in_txn)
       if (j.error && !(j as { results?: unknown }).results) {
         updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: j.error, results: null } : x))
         return
@@ -676,7 +756,7 @@ export default function App() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tabs, session, autocommit, updateTab],
+    [tabs, autocommit, updateTab, markTxn],
   )
 
   // Cancel the in-flight query of a tab. Backends are pool-scoped by
@@ -684,8 +764,10 @@ export default function App() {
   // first; the sent SQL only disambiguates concurrent runs in one session.
   const cancelQuery = useCallback(
     async (id: string) => {
+      const t = tabs.find((x) => x.id === id)
+      const sid = t && t.kind === 'query' ? t.sessionId : session
       const sent = runSql.current[id]
-      if (!sent || !session) {
+      if (!sent || !sid) {
         toast.error('No running query to cancel')
         return
       }
@@ -696,14 +778,14 @@ export default function App() {
         if (!h) return false
         return h.includes(needle) || (needle.includes(h) && h.length > 10)
       }
-      const rows = await api<Record<string, unknown>[]>(q(session, '/api/activity?'))
+      const rows = await api<Record<string, unknown>[]>(q(sid, '/api/activity?'))
       // NOTE: the poll-exclusion below must test the full query text — the
       // activity statement mentions pg_stat_activity only after column 80.
       const live = (Array.isArray(rows) ? rows : []).filter(
         (r) => r.state === 'active' && !String(r.query ?? '').includes('pg_stat_activity'),
       )
       // Own pool first (exact when a single backend runs there).
-      const own = live.filter((r) => String(r.app ?? '') === `pglight:${session}`)
+      const own = live.filter((r) => String(r.app ?? '') === `pglight:${sid}`)
       const pick = (pool: Record<string, unknown>[]): Record<string, unknown> | null => {
         if (!pool.length) return null
         if (pool.length === 1) return pool[0]
@@ -723,44 +805,45 @@ export default function App() {
         toast.error(ambiguous ? 'Multiple running queries — cancel from Dashboard' : 'No running backend found')
         return
       }
-      const j = await apiClient.cancel(session, Number(hit.pid))
+      const j = await apiClient.cancel(sid, Number(hit.pid))
       if (j.error) toast.error(j.error)
       else toast.success(`Cancelled backend ${hit.pid}`)
     },
-    [session],
+    [session, tabs],
   )
 
   const explainQuery = useCallback(
     async (id: string, analyze: boolean) => {
       const t = tabs.find((x) => x.id === id)
-      if (!t || t.kind !== 'query' || !session) return
-      const j = await apiClient.explain(session, t.sql, analyze)
+      if (!t || t.kind !== 'query' || !t.sessionId) return
+      const j = await apiClient.explain(t.sessionId, t.sql, analyze)
       if ((j as { error?: string }).error) {
         updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: (j as { error: string }).error } : x))
         return
       }
       updateTab(id, (x) => (x.kind === 'query' ? { ...x, plan: explainToText(j), error: undefined } : x))
     },
-    [tabs, session, updateTab],
+    [tabs, updateTab],
   )
 
   const rowOp = useCallback(
     async (tabId: string, op: string, values: Record<string, unknown>, where: Record<string, unknown>) => {
       const t = tabs.find((x) => x.id === tabId)
-      if (!t || t.kind !== 'table' || !session) return
+      if (!t || t.kind !== 'table' || !t.sessionId) return
+      const sid = t.sessionId
       if (!autocommit) {
-        const st = await apiClient.txn(session, 'status')
-        if (!st.in_txn) await apiClient.txn(session, 'begin')
+        const st = await apiClient.txn(sid, 'status')
+        if (!st.in_txn) await apiClient.txn(sid, 'begin')
       }
-      const j = await apiClient.rowOp({ session_id: session, schema: t.schema, table: t.table, op, values, where })
+      const j = await apiClient.rowOp({ session_id: sid, schema: t.schema, table: t.table, op, values, where })
       if (j.error) {
         toast.error(j.error)
         return
       }
-      setInTxn(!!j.in_txn)
-      loadTablePage(t.id, t.schema, t.table, t.limit, t.offset, t.filter, t.order)
+      markTxn(sid, !!j.in_txn)
+      loadTablePage(sid, t.id, t.schema, t.table, t.limit, t.offset, t.filter, t.order)
     },
-    [tabs, session, autocommit, loadTablePage],
+    [tabs, markTxn, autocommit, loadTablePage],
   )
 
   /* ---------- global keys ---------- */
@@ -775,19 +858,32 @@ export default function App() {
     return () => document.removeEventListener('keydown', h)
   }, [])
 
-  // Verify a stored sid against the live server (a restart invalidates it).
-  const verifyStoredSession = useCallback(
-    async (sid: string) => {
-      try {
-        const j = await api<unknown>(q(sid, '/api/schemas?'))
-        if (Array.isArray(j)) setConnected(true)
-        else setSession('')
-      } catch {
-        setSession('')
+  // Reconcile stored sessions against the live server (a restart invalidates
+  // all pools). Adopts the server list when non-empty; otherwise autologin
+  // creates a fresh session from the last successful connection.
+  const reconcileSessions = useCallback(async () => {
+    try {
+      const j = await apiClient.listSessions()
+      const alive = Array.isArray(j.sessions) ? j.sessions : []
+      if (alive.length) {
+        const mapped: SessionInfo[] = alive.map((s) => ({
+          id: s.id,
+          host: s.host || '',
+          port: String(s.port ?? ''),
+          user: s.user || '',
+          dbname: s.dbname || 'postgres',
+          sslmode: s.sslmode || '',
+        }))
+        setSessions(mapped)
+        for (const s of alive) if (s.in_txn) markTxn(s.id, true)
+        setActiveId((prev) => (mapped.some((s) => s.id === prev) ? prev : (mapped[0]?.id ?? '')))
+        return true
       }
-    },
-    [setSession],
-  )
+    } catch {
+      /* server down — fall through to autologin */
+    }
+    return false
+  }, [setSessions, setActiveId, markTxn])
 
   // Persist open tabs so a fresh start can reopen the last session. Skipped
   // while empty pre-hydration so boot never wipes the stored session away.
@@ -806,30 +902,32 @@ export default function App() {
     }
   }, [tabs, activeTab])
 
-  // Autologin once on boot from the last successful connection.
+  // Autologin + reconcile once on boot; tab restore runs in the effect below
+  // once a live session exists.
   const booted = useRef(false)
   useEffect(() => {
     if (booted.current) return
     booted.current = true
-    const auto = readJSON<boolean>('auto-login', true)
-    const last = readJSON<ConnFields | null>('last-conn', null)
-    if (auto && last && last.host) {
-      // Boot-only handoff: stored credentials move into state once here.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setFields(last)
-      // Resume (not fresh): the stored sid reuses the same server pool instead
-      // of leaking a new one per reload; the backend recreates it if missing.
-      void bootConnect(last, false)
-      return
-    }
-    const sid = (() => {
+    void (async () => {
+      const alive = await reconcileSessions()
+      if (alive) return
+      // Drop dead sessions from a previous server run.
+      setSessions([])
+      setActiveId('')
+      const auto = readJSON<boolean>('auto-login', true)
+      const last = readJSON<ConnFields | null>('last-conn', null)
+      if (auto && last && last.host) {
+        setFields(last)
+        // Fresh pool: the previous server run (if any) is gone.
+        await bootConnect(last, true)
+        return
+      }
       try {
-        return localStorage.getItem('sid')
+        localStorage.removeItem('sid')
       } catch {
-        return null
+        /* ignore */
       }
     })()
-    if (sid) void verifyStoredSession(sid)
     // Boot-only effect by design (guarded by ref, not deps).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -837,14 +935,15 @@ export default function App() {
   // Reopen last session's tabs on the first connection of this app load.
   const restored = useRef(false)
   useEffect(() => {
-    if (!connected || restored.current) return
+    if (!connected || restored.current || !activeId) return
     restored.current = true
     const stored = readStoredTabs()
+    const aliveIds = new Set(sessions.map((s) => s.id))
     // One-shot restore; loaders resolve into state asynchronously.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (stored.length) restoreStoredTabs(stored)
-    else newQueryTab()
-  }, [connected, newQueryTab, restoreStoredTabs])
+    if (stored.length) restoreStoredTabs(stored, aliveIds, activeId)
+    else newQueryTab(undefined, activeId)
+  }, [connected, activeId, sessions, newQueryTab, restoreStoredTabs])
 
   return (
     <div className="flex h-screen flex-col">
@@ -880,8 +979,11 @@ export default function App() {
         }}
         onDocs={() => openDocsTab()}
       />
-      {connected && (
+      {connected && active && (
         <div className="flex items-center gap-2 border-b bg-card px-2.5 py-1.5 text-[12px]">
+          <span className="truncate font-semibold" title={`${active.user}@${active.host}:${active.port}/${active.dbname}`}>
+            {active.user}@{active.host}/{active.dbname}
+          </span>
           <label className="flex cursor-pointer items-center gap-1.5">
             <input type="checkbox" checked={autocommit} onChange={(e) => setAutocommit(e.target.checked)} />
             autocommit
@@ -927,17 +1029,20 @@ export default function App() {
             }}
             onDisconnect={() => {
               disconnect()
-              setCredOpen(true)
             }}
             autoLogin={autoLogin}
             onAutoLogin={setAutoLogin}
             connected={connected}
+            sessions={sessions}
+            activeId={activeId}
+            onSwitch={(id) => setActiveId(id)}
+            onDisconnectOne={(id) => disconnect(id)}
           />
           <Explorer
             connected={connected}
             databases={databases}
             schemas={schemas}
-            currentDb={fields.dbname}
+            currentDb={active?.dbname ?? fields.dbname}
             detail={detail}
             onSwitchDb={switchDb}
             onOpenTable={openTableTab}
@@ -948,7 +1053,7 @@ export default function App() {
             onShowType={showType}
             onOpenBrowser={openBrowser}
             onOpenErd={openErd}
-            onRefresh={loadExplorer}
+            onRefresh={() => loadExplorer()}
             onNewQuery={newScopedQuery}
             onNewSchema={createSchema}
             onNewTable={createTable}
@@ -980,10 +1085,15 @@ export default function App() {
                   />
                 </span>
                 {t.title}
+                {t.kind !== 'docs' && (
+                  <span className="max-w-[80px] truncate text-[10px] font-normal text-muted-foreground" title={sessions.find((s) => s.id === (t as { sessionId?: string }).sessionId)?.dbname ?? ''}>
+                    {sessions.find((s) => s.id === (t as { sessionId?: string }).sessionId)?.dbname ?? ''}
+                  </span>
+                )}
               </button>
             ))}
             <button
-              onClick={() => newQueryTab()}
+              onClick={() => newQueryTab(undefined)}
               title="New query"
               className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap px-2 py-1.5 text-[12px] text-muted-foreground hover:text-foreground"
             >
@@ -995,7 +1105,7 @@ export default function App() {
             {cur?.kind === 'query' && (
               <QueryConsole
                 tab={cur}
-                inTxn={inTxn}
+                inTxn={!!inTxnMap[cur.sessionId]}
                 running={!!running[cur.id]}
                 onSqlChange={(sql) => updateTab(cur.id, (x) => (x.kind === 'query' ? { ...x, sql } : x))}
                 onRun={(sql) => runQuery(cur.id, sql)}
@@ -1016,14 +1126,14 @@ export default function App() {
             {cur?.kind === 'table' && (
               <TableWorkspace
                 tab={cur}
-                inTxn={inTxn}
+                inTxn={!!inTxnMap[cur.sessionId]}
                 onSubtab={(s) => {
                   updateTab(cur.id, (x) => (x.kind === 'table' ? { ...x, subtab: s } : x))
-                  if (s !== 'data') loadTableMeta(cur.id, cur.schema, cur.table)
+                  if (s !== 'data') loadTableMeta(cur.sessionId, cur.id, cur.schema, cur.table)
                 }}
-                onFilterChange={(filter, order) => loadTablePage(cur.id, cur.schema, cur.table, cur.limit, 0, filter, order)}
-                onApply={() => loadTablePage(cur.id, cur.schema, cur.table, cur.limit, cur.offset, cur.filter, cur.order)}
-                onPage={(d) => loadTablePage(cur.id, cur.schema, cur.table, cur.limit, Math.max(0, cur.offset + d * cur.limit), cur.filter, cur.order)}
+                onFilterChange={(filter, order) => loadTablePage(cur.sessionId, cur.id, cur.schema, cur.table, cur.limit, 0, filter, order)}
+                onApply={() => loadTablePage(cur.sessionId, cur.id, cur.schema, cur.table, cur.limit, cur.offset, cur.filter, cur.order)}
+                onPage={(d) => loadTablePage(cur.sessionId, cur.id, cur.schema, cur.table, cur.limit, Math.max(0, cur.offset + d * cur.limit), cur.filter, cur.order)}
                 onEditCell={async (col, orig) => {
                   const first = Object.entries(orig).find(([, v]) => v != null)
                   const v = await dialogs.prompt({
@@ -1065,7 +1175,10 @@ export default function App() {
                 }}
                 onDeleteRows={async (rows) => {
                   if (!rows.length) return
-                  if (!needSession(`${cur.schema}.${cur.table}`)) return
+                  if (!cur.sessionId) {
+                    toast.error('Session closed — reconnect to delete rows')
+                    return
+                  }
                   const ok = await dialogs.confirm({
                     title: `Delete ${rows.length} row${rows.length === 1 ? '' : 's'}?`,
                     description: 'This cannot be undone.',
@@ -1074,20 +1187,20 @@ export default function App() {
                   })
                   if (!ok) return
                   if (!autocommit) {
-                    const st = await apiClient.txn(session, 'status')
-                    if (!st.in_txn) await apiClient.txn(session, 'begin')
+                    const st = await apiClient.txn(cur.sessionId, 'status')
+                    if (!st.in_txn) await apiClient.txn(cur.sessionId, 'begin')
                   }
                   let failed = 0
-                  let inTxn = false
+                  let curTxn = false
                   for (const w of rows) {
-                    const j = await apiClient.rowOp({ session_id: session, schema: cur.schema, table: cur.table, op: 'delete', values: {}, where: w })
+                    const j = await apiClient.rowOp({ session_id: cur.sessionId, schema: cur.schema, table: cur.table, op: 'delete', values: {}, where: w })
                     if (j.error) failed++
-                    inTxn = !!j.in_txn
+                    curTxn = !!j.in_txn
                   }
-                  setInTxn(inTxn)
+                  markTxn(cur.sessionId, curTxn)
                   if (failed) toast.error(`Failed to delete ${failed} row${failed === 1 ? '' : 's'}`)
                   else toast.success(`Deleted ${rows.length} row${rows.length === 1 ? '' : 's'}`)
-                  loadTablePage(cur.id, cur.schema, cur.table, cur.limit, cur.offset, cur.filter, cur.order)
+                  loadTablePage(cur.sessionId, cur.id, cur.schema, cur.table, cur.limit, cur.offset, cur.filter, cur.order)
                 }}
                 onInsert={async () => {
                   if (!cur.result) return
@@ -1108,22 +1221,22 @@ export default function App() {
                     confirmText: op.toUpperCase(),
                   })
                   if (!ok) return
-                  const j = await apiClient.maintenance(session, cur.schema, cur.table, op)
+                  const j = await apiClient.maintenance(cur.sessionId, cur.schema, cur.table, op)
                   if (j.error) toast.error(j.error)
                   else {
                     toast.success('OK: ' + (j.result || op))
-                    loadTableMeta(cur.id, cur.schema, cur.table)
+                    loadTableMeta(cur.sessionId, cur.id, cur.schema, cur.table)
                   }
                 }}
                 onImport={async (columns, rows) => {
-                  const j = await apiClient.importRows({ session_id: session, schema: cur.schema, table: cur.table, columns, rows })
+                  const j = await apiClient.importRows({ session_id: cur.sessionId, schema: cur.schema, table: cur.table, columns, rows })
                   if (j.error) toast.error(j.error)
                   else {
                     toast.success(`Imported ${j.rows_affected} rows`)
-                    loadTablePage(cur.id, cur.schema, cur.table, cur.limit, cur.offset, cur.filter, cur.order)
+                    loadTablePage(cur.sessionId, cur.id, cur.schema, cur.table, cur.limit, cur.offset, cur.filter, cur.order)
                   }
                 }}
-                onOpenErd={() => openErd(cur.schema)}
+                onOpenErd={() => openErd(cur.schema, cur.sessionId)}
                 dialogs={dialogs}
               />
             )}
@@ -1131,7 +1244,7 @@ export default function App() {
               <BrowserView
                 tab={cur}
                 onReload={() =>
-                  api<Record<string, unknown>[] | { error: string }>(q(session, `${cur.url}?`)).then((j) => {
+                  api<Record<string, unknown>[] | { error: string }>(q(cur.sessionId, `${cur.url}?`)).then((j) => {
                     updateTab(cur.id, (x) =>
                       x.kind === 'browser' ? { ...x, rows: Array.isArray(j) ? j : null, error: (j as { error?: string }).error } : x,
                     )
@@ -1145,16 +1258,16 @@ export default function App() {
                 schemas={schemas.map((s) => s.schema)}
                 onSchema={(s) => {
                   updateTab(cur.id, (x) => (x.kind === 'erd' ? { ...x, schema: s, title: `ERD ${s}`, data: null } : x))
-                  api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(session, `/api/erd?schema=${encodeURIComponent(s)}`)).then((j) => {
+                  api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(cur.sessionId, `/api/erd?schema=${encodeURIComponent(s)}`)).then((j) => {
                     updateTab(cur.id, (x) => (x.kind === 'erd' ? { ...x, data: j } : x))
                   })
                 }}
                 onReload={() =>
-                  api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(session, `/api/erd?schema=${encodeURIComponent(cur.schema)}`)).then((j) => {
+                  api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(cur.sessionId, `/api/erd?schema=${encodeURIComponent(cur.schema)}`)).then((j) => {
                     updateTab(cur.id, (x) => (x.kind === 'erd' ? { ...x, data: j } : x))
                   })
                 }
-                onOpenTable={openTableTab}
+                onOpenTable={(schema, table) => openTableTab(schema, table, cur.sessionId)}
               />
             )}
             {cur?.kind === 'docs' && <DocsView />}
@@ -1184,7 +1297,9 @@ export default function App() {
       </ResizablePanelGroup>
       <Separator />
       <Card className="rounded-none border-0 border-t px-2.5 py-1 text-[11px] text-muted-foreground">
-        {connected ? `connected · ${fields.user}@${fields.host}:${fields.port}/${fields.dbname}` : 'disconnected'} · Ctrl+K search · Ctrl+Enter run
+        {connected && active
+          ? `${sessions.length} session${sessions.length === 1 ? '' : 's'} · ${active.user}@${active.host}:${active.port}/${active.dbname} · Ctrl+K search · Ctrl+Enter run`
+          : 'disconnected · Ctrl+K search · Ctrl+Enter run'}
       </Card>
       <SearchPalette key={paletteOpen ? 'open' : 'closed'} open={paletteOpen} onOpenChange={setPaletteOpen} session={session} onOpenTable={openTableTab} onShowFunc={showFunc} />
     </div>

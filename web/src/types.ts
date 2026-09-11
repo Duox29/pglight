@@ -1,5 +1,14 @@
 import type { QueryResult } from './lib/api'
 
+export interface SessionInfo {
+  id: string
+  host: string
+  port: string
+  user: string
+  dbname: string
+  sslmode: string
+}
+
 export interface SavedConnection {
   name: string
   host: string
@@ -57,6 +66,7 @@ export interface QueryTabT {
   id: string
   kind: 'query'
   title: string
+  sessionId: string
   sql: string
   limit: number
   results: (QueryResult & { statement?: string })[] | null
@@ -71,6 +81,7 @@ export interface TableTabT {
   id: string
   kind: 'table'
   title: string
+  sessionId: string
   schema: string
   table: string
   subtab: TableSubtab
@@ -99,6 +110,7 @@ export interface BrowserTabT {
   id: string
   kind: 'browser'
   title: string
+  sessionId: string
   url: string
   cols: string[]
   rows: Record<string, unknown>[] | null
@@ -115,6 +127,7 @@ export interface ErdTabT {
   id: string
   kind: 'erd'
   title: string
+  sessionId: string
   schema: string
   data: { nodes: string[]; edges: { fk: string; src_table: string; src_col: string; dst_schema: string; dst_table: string; dst_col: string }[] } | null
 }
@@ -136,6 +149,7 @@ export interface StoredTab {
   id: string
   kind: string
   title: string
+  sessionId?: string
   sql?: string
   limit?: number
   schema?: string
