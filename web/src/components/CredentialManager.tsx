@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plug, PlugZap, Save, Trash2, KeyRound, ChevronsUpDown } from 'lucide-react'
+import { Plug, PlugZap, RefreshCw, Save, Trash2, KeyRound, ChevronsUpDown } from 'lucide-react'
 import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
 import { Input } from './ui/input'
@@ -27,6 +27,9 @@ interface Props {
   activeId: string
   onSwitch: (id: string) => void
   onDisconnectOne: (id: string) => void
+  deadIds: Record<string, boolean>
+  onReconnectOne: (id: string) => void
+  onReconnectAll: () => void
 }
 
 export function CredentialManager(p: Props) {
@@ -58,27 +61,50 @@ export function CredentialManager(p: Props) {
         <div className="flex flex-col gap-1.5 px-2.5 pb-2.5">
           {p.sessions.length > 0 && (
             <div className="flex flex-col gap-1">
-              <div className="text-[11px] font-semibold text-muted-foreground">Active sessions ({p.sessions.length})</div>
-              {p.sessions.map((s) => (
-                <div
-                  key={s.id}
-                  className={`flex items-center gap-1.5 rounded border px-1.5 py-1 text-[11px] ${s.id === p.activeId ? 'border-foreground/30 bg-accent' : 'border-border'}`}
-                >
-                  <Tip content={`${s.user}@${s.host}:${s.port}/${s.dbname}`}>
-                    <button
-                      className="min-w-0 flex-1 truncate text-left hover:underline"
-                      onClick={() => p.onSwitch(s.id)}
-                    >
-                      {s.id === p.activeId ? '●' : '○'} {s.user}@{s.host}/{s.dbname}
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+                <span className="flex-1">Active sessions ({p.sessions.length})</span>
+                {Object.keys(p.deadIds).length > 0 && (
+                  <Tip content="Reconnect every lost session with its saved credentials">
+                    <button className="flex items-center gap-1 hover:text-foreground" onClick={p.onReconnectAll}>
+                      <RefreshCw className="h-3 w-3" /> Reconnect all
                     </button>
                   </Tip>
-                  <Tip content="Disconnect this session">
-                    <Button size="sm" variant="ghost" aria-label="Disconnect this session" onClick={() => p.onDisconnectOne(s.id)}>
-                      ✖
-                    </Button>
-                  </Tip>
-                </div>
-              ))}
+                )}
+              </div>
+              {p.sessions.map((s) => {
+                const dead = !!p.deadIds[s.id]
+                return (
+                  <div
+                    key={s.id}
+                    className={`flex items-center gap-1.5 rounded border px-1.5 py-1 text-[11px] ${s.id === p.activeId ? 'border-foreground/30 bg-accent' : 'border-border'}`}
+                  >
+                    <Tip content={`${s.user}@${s.host}:${s.port}/${s.dbname}${dead ? ' — pool lost (server restart?)' : ''}`}>
+                      <button
+                        className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left hover:underline"
+                        onClick={() => p.onSwitch(s.id)}
+                      >
+                        <span className={dead ? 'text-red-400' : s.id === p.activeId ? '' : 'opacity-60'}>{dead ? '○' : s.id === p.activeId ? '●' : '○'}</span>
+                        <span className="truncate">
+                          {s.user}@{s.host}/{s.dbname}
+                        </span>
+                        {dead && <span className="shrink-0 rounded bg-red-500/15 px-1 text-[10px] text-red-400">dead</span>}
+                      </button>
+                    </Tip>
+                    {dead && (
+                      <Tip content="Reconnect this session with its saved credentials">
+                        <Button size="sm" variant="ghost" aria-label="Reconnect this session" onClick={() => p.onReconnectOne(s.id)}>
+                          <RefreshCw className="h-3 w-3" />
+                        </Button>
+                      </Tip>
+                    )}
+                    <Tip content="Disconnect this session">
+                      <Button size="sm" variant="ghost" aria-label="Disconnect this session" onClick={() => p.onDisconnectOne(s.id)}>
+                        ✖
+                      </Button>
+                    </Tip>
+                  </div>
+                )
+              })}
             </div>
           )}
           <div className="flex gap-1.5">

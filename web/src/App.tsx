@@ -21,7 +21,8 @@ import { SidePanel } from './components/SidePanel'
 import { SearchPalette } from './components/SearchPalette'
 import { api, apiClient, q } from './lib/api'
 import { dropSnapshot, ensureSnapshot } from './lib/schemaCache'
-import { useLocalStorage } from './lib/storage'
+import { forgetSessionConn, readSessionConns, rememberSessionConn } from './lib/reconnect'
+import { onUnauthorized, useLocalStorage } from './lib/storage'
 import type {
   DbInfo,
   HistoryEntry,
@@ -146,6 +147,49 @@ export default function App() {
   // server-side). Used to match the backend in pg_stat_activity on Cancel.
   const runSql = useRef<Record<string, string>>({})
 
+  // Dead-session tracking: backend pools die on server restart while tabs
+  // persist. deadIds is state (badges); deadRef mirrors it for stable
+  // callbacks; retriedRef bounds auto-reconnect to one attempt per session.
+  const [deadIds, setDeadIds] = useState<Record<string, boolean>>({})
+  const [bootDone, setBootDone] = useState(false)
+  const deadRef = useRef<Record<string, boolean>>({})
+  const retriedRef = useRef<Record<string, boolean>>({})
+  const remapRef = useRef<Map<string, string>>(new Map())
+  const sessionsRef = useRef(sessions)
+  useEffect(() => {
+    sessionsRef.current = sessions
+  })
+  const reconnectOneRef = useRef<(sid: string, opts?: { silent?: boolean }) => Promise<string>>(() => Promise.resolve(''))
+  const reconnectAllRef = useRef<() => Promise<void>>(() => Promise.resolve())
+
+  const clearDead = useCallback((sid: string) => {
+    if (!sid || !deadRef.current[sid]) return
+    delete deadRef.current[sid]
+    setDeadIds((prev) => {
+      if (!prev[sid]) return prev
+      const n = { ...prev }
+      delete n[sid]
+      return n
+    })
+  }, [])
+
+  const markDead = useCallback((sid: string, opts?: { silent?: boolean }) => {
+    if (!sid || deadRef.current[sid]) return
+    const known = sessionsRef.current.some((s) => s.id === sid) || !!readSessionConns()[sid]
+    if (!known) return
+    deadRef.current[sid] = true
+    setDeadIds((prev) => (prev[sid] ? prev : { ...prev, [sid]: true }))
+    if (!opts?.silent) {
+      toast.error('Session lost (server restart?) — reconnect from Connections', {
+        action: { label: 'Reconnect', onClick: () => void reconnectOneRef.current(sid) },
+      })
+    }
+    if (readJSON<boolean>('auto-login', true) && !retriedRef.current[sid]) {
+      retriedRef.current[sid] = true
+      void reconnectOneRef.current(sid, { silent: true })
+    }
+  }, [])
+
   const cur = tabs.find((t) => t.id === activeTab) ?? null
   const updateTab = useCallback((id: string, fn: (t: Tab) => Tab) => {
     setTabs((prev) => prev.map((t) => (t.id === id ? fn(t) : t)))
@@ -153,7 +197,7 @@ export default function App() {
 
   /* ---------- connection (multi-session) ---------- */
   const bootConnect = useCallback(
-    async (f: ConnFields, fresh: boolean, dbnameOver?: string, sidOver?: string) => {
+    async (f: ConnFields, fresh: boolean, dbnameOver?: string, sidOver?: string, activate = true, quiet = false): Promise<string> => {
       const dbname = dbnameOver || f.dbname
       const j = await apiClient.connect({
         host: f.host,
@@ -165,33 +209,48 @@ export default function App() {
         session_id: fresh ? '' : sidOver || session || undefined,
       })
       if (j.error || !j.session_id) {
-        toast.error(j.error ?? 'Connect failed')
-        return false
+        if (!quiet) toast.error(j.error ?? 'Connect failed')
+        return ''
       }
       const sid = j.session_id
       const info: SessionInfo = j.info
         ? { id: sid, host: j.info.host, port: String(j.info.port ?? f.port), user: j.info.user || f.user, dbname: j.info.dbname || dbname, sslmode: j.info.sslmode || f.sslmode }
         : { id: sid, host: f.host, port: f.port, user: f.user, dbname, sslmode: f.sslmode }
       setSessions((prev) => (prev.some((s) => s.id === sid) ? prev.map((s) => (s.id === sid ? info : s)) : [...prev, info]))
-      setActiveId(sid)
+      if (activate) setActiveId(sid)
       markTxn(sid, !!j.info?.in_txn)
+      rememberSessionConn(sid, { ...f, dbname })
+      clearDead(sid)
       try {
         localStorage.setItem('last-conn', JSON.stringify({ ...f, dbname }))
       } catch {
         /* private mode etc. — autologin just won't persist */
       }
-      return true
+      return sid
     },
-    [session, setSessions, setActiveId, markTxn],
+    [session, setSessions, setActiveId, markTxn, clearDead],
   )
 
-  const connect = useCallback(
-    (fresh: boolean, dbnameOver?: string) => bootConnect(fields, fresh, dbnameOver),
-    [bootConnect, fields],
+  // Same connection target already has a pool? Reuse it — never spawn a
+  // duplicate pool (each pool holds up to 8 backends; duplicates pile up
+  // in pg_stat_activity fast).
+  const findSession = useCallback(
+    (host: string, port: string | number, user: string, dbname: string, sslmode: string) =>
+      sessions.find(
+        (s) =>
+          s.host === host &&
+          String(s.port) === String(port) &&
+          s.user === user &&
+          s.dbname === dbname &&
+          (s.sslmode || '') === (sslmode || ''),
+      ),
+    [sessions],
   )
 
   const dropSession = useCallback(
     (sid: string) => {
+      forgetSessionConn(sid)
+      clearDead(sid)
       const next = sessions.filter((s) => s.id !== sid)
       setSessions(next)
       if (sid === activeId) setActiveId(next[0]?.id ?? '')
@@ -202,7 +261,7 @@ export default function App() {
         return n
       })
     },
-    [activeId, sessions, setSessions, setActiveId],
+    [activeId, sessions, setSessions, setActiveId, clearDead],
   )
 
   const disconnect = useCallback(
@@ -221,6 +280,92 @@ export default function App() {
     const j = await apiClient.txn(session, 'status')
     markTxn(session, !!j.in_txn)
   }, [session, markTxn])
+
+  /* ---------- reconnect (dead session → fresh pool, tabs follow) ---------- */
+  // Table/browser/erd tab ids embed the session's short id; both move so
+  // openTableTab dedupe keeps working after a remap.
+  const remapTabsSession = useCallback(
+    (oldSid: string, newSid: string) => {
+      const short = (sid: string) => (sid.length > 6 ? sid.slice(-6) : sid)
+      const newId = (t: Tab): string => {
+        switch (t.kind) {
+          case 'table':
+            return `t_${short(newSid)}_${t.schema}_${t.table}`
+          case 'browser':
+            return `b_${t.id.split('__')[0].replace(/^b_/, '')}__${short(newSid)}`
+          case 'erd':
+            return `e_${t.schema}__${short(newSid)}`
+          default:
+            return t.id
+        }
+      }
+      const pairs = tabs
+        .filter((t) => (t as { sessionId?: string }).sessionId === oldSid && newId(t) !== t.id)
+        .map((t) => [t.id, newId(t)] as const)
+      setTabs((prev) =>
+        prev.map((t) => {
+          if ((t as { sessionId?: string }).sessionId !== oldSid || !('sessionId' in t)) return t
+          const hit = pairs.find(([o]) => o === t.id)
+          return { ...t, id: hit ? hit[1] : t.id, sessionId: newSid }
+        }),
+      )
+      if (pairs.length) setActiveTab((a) => pairs.find(([o]) => o === a)?.[1] ?? a)
+    },
+    [tabs],
+  )
+
+  const reconnectOne = useCallback(
+    async (oldSid: string, opts?: { silent?: boolean }): Promise<string> => {
+      const f = readSessionConns()[oldSid]
+      if (!f || !f.host) {
+        if (!opts?.silent) toast.error('No saved credentials for this session — connect manually')
+        return ''
+      }
+      const nid = await bootConnect({ ...f }, true, undefined, undefined, false, !!opts?.silent)
+      if (!nid) return ''
+      forgetSessionConn(oldSid)
+      dropSnapshot(oldSid)
+      remapTabsSession(oldSid, nid)
+      setSessions((prev) => prev.filter((s) => s.id !== oldSid))
+      setActiveId((a) => (a === oldSid ? nid : a))
+      clearDead(oldSid)
+      if (!opts?.silent) toast.success(`Reconnected ${f.user}@${f.host}/${f.dbname}`)
+      return nid
+    },
+    [bootConnect, remapTabsSession, clearDead, setSessions, setActiveId],
+  )
+
+  const reconnectAll = useCallback(async () => {
+    const ids = Object.keys(deadRef.current)
+    let ok = 0
+    for (const id of ids) {
+      const nid = await reconnectOne(id, { silent: true })
+      if (nid) ok++
+    }
+    if (ok) toast.success(`Reconnected ${ok} session${ok > 1 ? 's' : ''}`)
+    else toast.error('Reconnect failed — check credentials')
+  }, [reconnectOne])
+
+  const connect = useCallback(
+    (fresh: boolean, dbnameOver?: string) => {
+      if (fresh) {
+        const dbname = dbnameOver || fields.dbname
+        const hit = findSession(fields.host, fields.port, fields.user, dbname, fields.sslmode)
+        if (hit) {
+          if (deadIds[hit.id]) {
+            return reconnectOne(hit.id).then((nid) => {
+              if (nid) setActiveId(nid)
+              return nid
+            })
+          }
+          setActiveId(hit.id)
+          return Promise.resolve(hit.id)
+        }
+      }
+      return bootConnect(fields, fresh, dbnameOver)
+    },
+    [bootConnect, fields, findSession, deadIds, reconnectOne, setActiveId],
+  )
 
   const doTxn = useCallback(
     async (action: string) => {
@@ -294,12 +439,17 @@ export default function App() {
     async (name: string) => {
       if (!active) return
       if (name === active.dbname) return
-      const ok = await dialogs.confirm({
-        title: `Open "${name}" in a new session?`,
-        description: 'The current session stays open; tabs keep their own session.',
-        confirmText: 'Open',
-      })
-      if (!ok) return
+      // Same target already pooled? Just switch — no new session.
+      const hit = findSession(active.host, active.port, active.user, name, active.sslmode)
+      if (hit) {
+        if (deadIds[hit.id]) {
+          const nid = await reconnectOne(hit.id)
+          if (nid) setActiveId(nid)
+        } else setActiveId(hit.id)
+        return
+      }
+      // No confirm: clicking a database switches immediately in a new
+      // session; the current session stays open, tabs keep theirs.
       let password = fields.password
       if (!password) {
         const v = await dialogs.prompt({ title: `Password for ${active.user}@${active.host}`, description: `Opening ${name} as ${active.user}` })
@@ -308,7 +458,7 @@ export default function App() {
       }
       void bootConnect({ host: active.host, port: active.port, user: active.user, password, dbname: active.dbname, sslmode: active.sslmode }, true, name)
     },
-    [bootConnect, dialogs, active, fields.password],
+    [bootConnect, dialogs, active, fields.password, findSession, deadIds, reconnectOne, setActiveId],
   )
 
   /* ---------- object detail ---------- */
@@ -644,8 +794,13 @@ export default function App() {
       const seenIds = new Set<string>()
       let maxQ = 0
       for (const s of stored) {
-        // Tabs whose session died (server restart) remap to the fresh session.
-        const sid = s.sessionId && aliveIds.has(s.sessionId) ? s.sessionId : fallbackSid
+        // Tabs follow their own session 1:1 (remapped after reconnect).
+        // Dead sessions are KEPT (badged, reconnectable) — only tabs whose
+        // session is unknown entirely fall back, never silently to another DB.
+        const remapped = s.sessionId ? remapRef.current.get(s.sessionId) : undefined
+        const sid =
+          remapped ??
+          (s.sessionId && (aliveIds.has(s.sessionId) || deadRef.current[s.sessionId]) ? s.sessionId : fallbackSid)
         if (!sid) continue
         if (s.kind === 'query') {
           const m = /^q(\d+)$/.exec(s.id)
@@ -875,9 +1030,10 @@ export default function App() {
   }, [])
 
   // Reconcile stored sessions against the live server (a restart invalidates
-  // all pools). Adopts the server list when non-empty; otherwise autologin
-  // creates a fresh session from the last successful connection.
-  const reconcileSessions = useCallback(async () => {
+  // all pools). Adopts the server list when non-empty; stored sessions
+  // missing from the server are KEPT (badged dead, reconnectable) — never
+  // silently dropped. Returns the live sessions for the boot remap.
+  const reconcileSessions = useCallback(async (): Promise<SessionInfo[]> => {
     try {
       const j = await apiClient.listSessions()
       const alive = Array.isArray(j.sessions) ? j.sessions : []
@@ -890,15 +1046,18 @@ export default function App() {
           dbname: s.dbname || 'postgres',
           sslmode: s.sslmode || '',
         }))
-        setSessions(mapped)
+        setSessions((prev) => {
+          const ids = new Set(mapped.map((s) => s.id))
+          return [...mapped, ...prev.filter((s) => !ids.has(s.id))]
+        })
         for (const s of alive) if (s.in_txn) markTxn(s.id, true)
         setActiveId((prev) => (mapped.some((s) => s.id === prev) ? prev : (mapped[0]?.id ?? '')))
-        return true
+        return mapped
       }
     } catch {
-      /* server down — fall through to autologin */
+      /* server down — boot falls through to per-session reconnect */
     }
-    return false
+    return []
   }, [setSessions, setActiveId, markTxn])
 
   // Persist open tabs so a fresh start can reopen the last session. Skipped
@@ -918,31 +1077,84 @@ export default function App() {
     }
   }, [tabs, activeTab])
 
-  // Autologin + reconcile once on boot; tab restore runs in the effect below
-  // once a live session exists.
+  // Backend 401s (dead session) feed markDead: silent auto-retry once,
+  // toast with Reconnect action otherwise. Heartbeat catches server
+  // restarts while the page stays open (no failed query needed).
+  useEffect(() => {
+    reconnectOneRef.current = reconnectOne
+    reconnectAllRef.current = reconnectAll
+  })
+  useEffect(() => onUnauthorized((sid) => markDead(sid)), [markDead])
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const j = await apiClient.listSessions()
+        const alive = new Set((Array.isArray(j.sessions) ? j.sessions : []).map((s) => s.id))
+        for (const s of sessionsRef.current) {
+          if (!alive.has(s.id)) markDead(s.id)
+        }
+      } catch {
+        /* server down — retry on next tick, no toast spam */
+      }
+    }
+    const timer = setInterval(check, 30000)
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void check()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [markDead])
+
+  // Boot: reconcile, then reconnect each dead stored session 1:1 (parallel
+  // credentials from session-conns) so tabs keep their own DB. Tab restore
+  // runs in the effect below once bootDone flips.
   const booted = useRef(false)
   useEffect(() => {
     if (booted.current) return
     booted.current = true
     void (async () => {
       const alive = await reconcileSessions()
-      if (alive) return
-      // Drop dead sessions from a previous server run.
-      setSessions([])
-      setActiveId('')
+      const aliveIds = new Set(alive.map((s) => s.id))
+      const stored = sessionsRef.current
       const auto = readJSON<boolean>('auto-login', true)
-      const last = readJSON<ConnFields | null>('last-conn', null)
-      if (auto && last && last.host) {
-        setFields(last)
-        // Fresh pool: the previous server run (if any) is gone.
-        await bootConnect(last, true)
-        return
+      if (auto) {
+        for (const s of stored) {
+          if (aliveIds.has(s.id) || !readSessionConns()[s.id]) continue
+          const nid = await reconnectOneRef.current(s.id, { silent: true })
+          if (nid) {
+            remapRef.current.set(s.id, nid)
+            aliveIds.add(nid)
+          }
+        }
+        // First-ever run (nothing stored): legacy single last-conn.
+        if (!aliveIds.size && !stored.length) {
+          const last = readJSON<ConnFields | null>('last-conn', null)
+          if (last && last.host) {
+            setFields(last)
+            // Fresh pool: the previous server run (if any) is gone.
+            await bootConnect(last, true)
+          }
+        }
+        // Still-unmapped stored sessions are dead — badge, don't drop.
+        for (const s of stored) {
+          if (!aliveIds.has(s.id) && !remapRef.current.has(s.id)) markDead(s.id, { silent: true })
+        }
+        const lost = stored.filter((s) => !aliveIds.has(s.id))
+        if (lost.length && aliveIds.size) {
+          toast.error(`${lost.length} session${lost.length > 1 ? 's' : ''} lost (server restart?) — tabs kept`, {
+            action: { label: 'Reconnect all', onClick: () => void reconnectAllRef.current() },
+          })
+        }
       }
       try {
         localStorage.removeItem('sid')
       } catch {
-        /* ignore */
+        /* legacy key — ignore */
       }
+      setBootDone(true)
     })()
     // Boot-only effect by design (guarded by ref, not deps).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -951,7 +1163,7 @@ export default function App() {
   // Reopen last session's tabs on the first connection of this app load.
   const restored = useRef(false)
   useEffect(() => {
-    if (!connected || restored.current || !activeId) return
+    if (!connected || restored.current || !activeId || !bootDone) return
     restored.current = true
     const stored = readStoredTabs()
     const aliveIds = new Set(sessions.map((s) => s.id))
@@ -959,7 +1171,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (stored.length) restoreStoredTabs(stored, aliveIds, activeId)
     else newQueryTab(undefined, activeId)
-  }, [connected, activeId, sessions, newQueryTab, restoreStoredTabs])
+  }, [connected, activeId, sessions, bootDone, newQueryTab, restoreStoredTabs])
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -1067,6 +1279,9 @@ export default function App() {
             activeId={activeId}
             onSwitch={(id) => setActiveId(id)}
             onDisconnectOne={(id) => disconnect(id)}
+            deadIds={deadIds}
+            onReconnectOne={(id) => void reconnectOne(id)}
+            onReconnectAll={() => void reconnectAll()}
           />
           <Explorer
             connected={connected}

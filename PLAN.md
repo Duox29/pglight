@@ -58,6 +58,7 @@ Frontend (`web/`):
 - [x] Table workspace with sub-tabs: **Data | Columns | DDL | Indexes | Constraints | Triggers | Stats**. DDL uses server definition + reconstructed fallback.
 - [x] Query console upgrades: txn bar (autocommit toggle, Begin/Commit/Rollback, in-txn badge), Format button, Save-snippet, multi-result rendering (one grid per statement), per-result CSV/INSERT export. Statement timeout 1000s (`queryTimeout` in `internal/api/handlers.go`, console paths only). Cancel button (■): matches the tab's pool via `application_name=pglight:<session>` (`Manager.Add`) against active backends, SQL text only disambiguates concurrent runs; unique hit → `GET /api/cancel`, else toast pointing to Dashboard.
 - [x] Global search palette (Ctrl+K / button): jump to table/view/function, open DDL or data.
+- [x] Session survive-restart: per-session credentials (`session-conns`), boot 1:1 reconnect so tabs keep their own DB (dead sessions badged, never collapsed onto another DB), global 401 hook + 30s/focus heartbeat with one-shot auto-retry, per-session Reconnect / Reconnect-all in Connections, tab ids remapped on reconnect.
 - [x] Dashboard panel: Server | Activity | Locks | Stats tabs (auto-refresh activity/locks).
 - [x] ERD tab per schema: SVG FK graph (click node → open table).
 - [x] Import CSV into open table (file picker, header detection, batch POST), Export as INSERT statements, copy cell.
