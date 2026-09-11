@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Play, FileDown, Sparkles, Square, Star, Trash2, Wand2 } from 'lucide-react'
 import { Button } from './ui/button'
+import { Tip } from './ui/tooltip'
 import { Textarea } from './ui/textarea'
 import { Badge } from './ui/badge'
 import { Card } from './ui/card'
@@ -70,12 +71,20 @@ export function QueryConsole(p: Props) {
         }}
       />
       <div className="flex flex-wrap items-center gap-1.5">
-        <Button size="sm" onClick={runSelected} disabled={p.running} title="Run selection if any, else whole script">
-          <Play /> Run (Ctrl+Enter)
-        </Button>
-        <Button size="sm" variant="ghost" onClick={p.onCancel} disabled={!p.running} title="Cancel running query">
-          <Square />
-        </Button>
+        <Tip content="Run selection if any, else whole script">
+          <span className="inline-flex">
+            <Button size="sm" onClick={runSelected} disabled={p.running}>
+              <Play /> Run (Ctrl+Enter)
+            </Button>
+          </span>
+        </Tip>
+        <Tip content="Cancel running query">
+          <span className="inline-flex">
+            <Button size="sm" variant="ghost" onClick={p.onCancel} disabled={!p.running} aria-label="Cancel running query">
+              <Square />
+            </Button>
+          </span>
+        </Tip>
         <Button size="sm" variant="secondary" onClick={() => p.onExplain(false)}>
           Explain
         </Button>
@@ -114,9 +123,13 @@ export function QueryConsole(p: Props) {
         {t.results?.[0]?.stale && <Badge variant="secondary">Snapshot from last session — Run to refresh</Badge>}
         {p.inTxn && <Badge variant="warning">IN TXN</Badge>}
         <span className="flex-1" />
-        <Button size="sm" variant="ghost" onClick={p.onClearResults} disabled={!t.results && !t.error && !t.plan} title="Clear results">
-          <Trash2 />
-        </Button>
+        <Tip content="Clear results">
+          <span className="inline-flex">
+            <Button size="sm" variant="ghost" onClick={p.onClearResults} disabled={!t.results && !t.error && !t.plan} aria-label="Clear results">
+              <Trash2 />
+            </Button>
+          </span>
+        </Tip>
       </div>
         </div>
       </ResizablePanel>

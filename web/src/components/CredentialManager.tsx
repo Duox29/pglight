@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Plug, PlugZap, Save, Trash2, KeyRound, ChevronsUpDown } from 'lucide-react'
 import { Button } from './ui/button'
+import { Tip } from './ui/tooltip'
 import { Input } from './ui/input'
 import { Switch } from './ui/switch'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible'
@@ -63,16 +64,19 @@ export function CredentialManager(p: Props) {
                   key={s.id}
                   className={`flex items-center gap-1.5 rounded border px-1.5 py-1 text-[11px] ${s.id === p.activeId ? 'border-foreground/30 bg-accent' : 'border-border'}`}
                 >
-                  <button
-                    className="min-w-0 flex-1 truncate text-left hover:underline"
-                    title={`${s.user}@${s.host}:${s.port}/${s.dbname}`}
-                    onClick={() => p.onSwitch(s.id)}
-                  >
-                    {s.id === p.activeId ? '●' : '○'} {s.user}@{s.host}/{s.dbname}
-                  </button>
-                  <Button size="sm" variant="ghost" title="Disconnect this session" onClick={() => p.onDisconnectOne(s.id)}>
-                    ✖
-                  </Button>
+                  <Tip content={`${s.user}@${s.host}:${s.port}/${s.dbname}`}>
+                    <button
+                      className="min-w-0 flex-1 truncate text-left hover:underline"
+                      onClick={() => p.onSwitch(s.id)}
+                    >
+                      {s.id === p.activeId ? '●' : '○'} {s.user}@{s.host}/{s.dbname}
+                    </button>
+                  </Tip>
+                  <Tip content="Disconnect this session">
+                    <Button size="sm" variant="ghost" aria-label="Disconnect this session" onClick={() => p.onDisconnectOne(s.id)}>
+                      ✖
+                    </Button>
+                  </Tip>
                 </div>
               ))}
             </div>
@@ -96,18 +100,22 @@ export function CredentialManager(p: Props) {
                 ))}
               </SelectContent>
             </Select>
-            <Button
-              size="icon"
-              variant="ghost"
-              title="Delete selected saved connection"
-              disabled={savedKey === '' || !p.saved[Number(savedKey)]}
-              onClick={() => {
-                p.onDeleteSaved(Number(savedKey))
-                setSavedKey('')
-              }}
-            >
-              <Trash2 />
-            </Button>
+            <Tip content="Delete selected saved connection">
+              <span className="inline-flex">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Delete selected saved connection"
+                  disabled={savedKey === '' || !p.saved[Number(savedKey)]}
+                  onClick={() => {
+                    p.onDeleteSaved(Number(savedKey))
+                    setSavedKey('')
+                  }}
+                >
+                  <Trash2 />
+                </Button>
+              </span>
+            </Tip>
           </div>
           <div className="grid grid-cols-[1fr_64px] gap-1.5">
             {inp('host')}
@@ -136,12 +144,16 @@ export function CredentialManager(p: Props) {
             <Button size="sm" className="flex-1" onClick={p.onConnect}>
               {p.connected ? <PlugZap /> : <Plug />} Connect
             </Button>
-            <Button size="sm" variant="secondary" onClick={p.onSave} title="Save connection">
-              <Save />
-            </Button>
-            <Button size="sm" variant="ghost" onClick={p.onDisconnect} title="Disconnect">
-              ✖
-            </Button>
+            <Tip content="Save connection">
+              <Button size="sm" variant="secondary" onClick={p.onSave} aria-label="Save connection">
+                <Save />
+              </Button>
+            </Tip>
+            <Tip content="Disconnect">
+              <Button size="sm" variant="ghost" onClick={p.onDisconnect} aria-label="Disconnect">
+                ✖
+              </Button>
+            </Tip>
           </div>
           <label className="flex cursor-pointer items-center justify-between gap-2 text-[12px] text-muted-foreground">
             <span>Auto-connect on startup</span>

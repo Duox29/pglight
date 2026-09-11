@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { Input } from './ui/input'
 import { Button } from './ui/button'
+import { Tip } from './ui/tooltip'
 import { ScrollArea } from './ui/scroll-area'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './ui/context-menu'
 import type { DbInfo, ObjectDetail, SchemaGroup } from '@/types'
@@ -99,9 +100,11 @@ export function Explorer(p: Props) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex gap-1.5 p-2">
         <Input placeholder="Filter objects…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        <Button size="icon" variant="ghost" onClick={p.onRefresh} title="Refresh">
-          <RefreshCw />
-        </Button>
+        <Tip content="Refresh">
+          <Button size="icon" variant="ghost" onClick={p.onRefresh} aria-label="Refresh">
+            <RefreshCw />
+          </Button>
+        </Tip>
       </div>
       <ScrollArea className="min-h-0 flex-1 px-2">
         <div className="pb-2">
@@ -207,9 +210,15 @@ export function Explorer(p: Props) {
             <ServerCog className="h-3.5 w-3.5" /> Server objects
           </div>
           <div className={cn('ml-3', !p.connected && 'pointer-events-none opacity-40')} title={p.connected ? undefined : 'Connect to a database first'}>
-            <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" title="Installed Postgres extensions (pg_catalog)" onClick={() => p.onOpenBrowser('extensions', 'Extensions')}>○ Extensions</div>
-            <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" title="Users, groups and their attributes" onClick={() => p.onOpenBrowser('roles', 'Roles')}>○ Roles</div>
-            <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" title="Foreign-key graph of a schema" onClick={() => p.onOpenErd('public')}>○ ERD</div>
+            <Tip content="Installed Postgres extensions (pg_catalog)">
+              <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenBrowser('extensions', 'Extensions')}>○ Extensions</div>
+            </Tip>
+            <Tip content="Users, groups and their attributes">
+              <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenBrowser('roles', 'Roles')}>○ Roles</div>
+            </Tip>
+            <Tip content="Foreign-key graph of a schema">
+              <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenErd('public')}>○ ERD</div>
+            </Tip>
           </div>
         </div>
       </ScrollArea>

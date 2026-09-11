@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { RotateCcw, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from './ui/button'
+import { Tip } from './ui/tooltip'
 import { Input } from './ui/input'
 import { Switch } from './ui/switch'
 import { Card } from './ui/card'
@@ -135,9 +136,13 @@ export function SettingsPanel() {
               <Button size="sm" className="flex-1" onClick={save} disabled={saving}>
                 <Save /> Save
               </Button>
-              <Button size="sm" variant="secondary" onClick={reset} disabled={saving} title="Reset to defaults">
-                <RotateCcw /> Defaults
-              </Button>
+              <Tip content="Reset to defaults">
+                <span className="inline-flex">
+                  <Button size="sm" variant="secondary" onClick={reset} disabled={saving}>
+                    <RotateCcw /> Defaults
+                  </Button>
+                </span>
+              </Tip>
             </div>
           </div>
         )}

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Info, Loader2, Plus, X } from 'lucide-react'
+import { Check, Info, Loader2, Play, Plus, RotateCcw, X } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
+import { Badge } from './components/ui/badge'
 import { Button } from './components/ui/button'
 import { Card } from './components/ui/card'
+import { Switch } from './components/ui/switch'
+import { Tip, TooltipProvider } from './components/ui/tooltip'
 import { Separator } from './components/ui/separator'
 import { ConnectionBar, type ConnFields } from './components/ConnectionBar'
 import { CredentialManager } from './components/CredentialManager'
@@ -946,6 +949,7 @@ export default function App() {
   }, [connected, activeId, sessions, newQueryTab, restoreStoredTabs])
 
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="flex h-screen flex-col">
       <DialogHost dlg={dlg} />
       <Toaster
@@ -981,23 +985,36 @@ export default function App() {
       />
       {connected && active && (
         <div className="flex items-center gap-2 border-b bg-card px-2.5 py-1.5 text-[12px]">
-          <span className="truncate font-semibold" title={`${active.user}@${active.host}:${active.port}/${active.dbname}`}>
-            {active.user}@{active.host}/{active.dbname}
-          </span>
-          <label className="flex cursor-pointer items-center gap-1.5">
-            <input type="checkbox" checked={autocommit} onChange={(e) => setAutocommit(e.target.checked)} />
+          <Tip content={`${active.user}@${active.host}:${active.port}/${active.dbname}`}>
+            <span className="truncate font-semibold">
+              {active.user}@{active.host}/{active.dbname}
+            </span>
+          </Tip>
+          <Separator orientation="vertical" className="h-4" />
+          <label className="flex cursor-pointer items-center gap-1.5 text-muted-foreground">
+            <Switch checked={autocommit} onCheckedChange={setAutocommit} aria-label="Autocommit" />
             autocommit
           </label>
-          <Button size="sm" variant="ghost" onClick={() => doTxn('begin')}>
-            Begin
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => doTxn('commit')}>
-            Commit
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => doTxn('rollback')}>
-            Rollback
-          </Button>
-          <span className="text-muted-foreground">{inTxn ? '● open transaction — Commit or Rollback' : 'no txn'}</span>
+          <Separator orientation="vertical" className="h-4" />
+          <Tip content="Begin transaction">
+            <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="Begin transaction" onClick={() => doTxn('begin')} disabled={inTxn}>
+              <Play />
+            </Button>
+          </Tip>
+          <Tip content="Commit transaction">
+            <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="Commit transaction" onClick={() => doTxn('commit')} disabled={!inTxn}>
+              <Check />
+            </Button>
+          </Tip>
+          <Tip content="Rollback transaction">
+            <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="Rollback transaction" onClick={() => doTxn('rollback')} disabled={!inTxn}>
+              <RotateCcw />
+            </Button>
+          </Tip>
+          <Badge variant="outline" className="gap-1.5 font-normal">
+            <span className={cn('h-2 w-2 rounded-full', inTxn ? 'bg-amber-500' : 'bg-emerald-500')} />
+            {inTxn ? 'open transaction — Commit or Rollback' : 'no transaction'}
+          </Badge>
         </div>
       )}
       <ResizablePanelGroup direction="horizontal" autoSaveId="pglight-main-layout" className="min-h-0 flex-1">
@@ -1075,30 +1092,35 @@ export default function App() {
                   t.id === activeTab ? 'bg-background font-semibold' : 'bg-muted text-muted-foreground hover:text-foreground',
                 )}
               >
-                <span title="Close tab" className="flex shrink-0">
-                  <X
-                    className="h-3 w-3 opacity-60 hover:opacity-100"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      closeTab(t.id)
-                    }}
-                  />
-                </span>
+                <Tip content="Close tab">
+                  <span className="flex shrink-0">
+                    <X
+                      className="h-3 w-3 opacity-60 hover:opacity-100"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        closeTab(t.id)
+                      }}
+                    />
+                  </span>
+                </Tip>
                 {t.title}
                 {t.kind !== 'docs' && (
-                  <span className="max-w-[80px] truncate text-[10px] font-normal text-muted-foreground" title={sessions.find((s) => s.id === (t as { sessionId?: string }).sessionId)?.dbname ?? ''}>
-                    {sessions.find((s) => s.id === (t as { sessionId?: string }).sessionId)?.dbname ?? ''}
-                  </span>
+                  <Tip content={sessions.find((s) => s.id === (t as { sessionId?: string }).sessionId)?.dbname ?? ''}>
+                    <span className="max-w-[80px] truncate text-[10px] font-normal text-muted-foreground">
+                      {sessions.find((s) => s.id === (t as { sessionId?: string }).sessionId)?.dbname ?? ''}
+                    </span>
+                  </Tip>
                 )}
               </button>
             ))}
-            <button
-              onClick={() => newQueryTab(undefined)}
-              title="New query"
-              className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap px-2 py-1.5 text-[12px] text-muted-foreground hover:text-foreground"
-            >
-              <Plus className="h-3.5 w-3.5" /> Query
-            </button>
+            <Tip content="New query">
+              <button
+                onClick={() => newQueryTab(undefined)}
+                className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap px-2 py-1.5 text-[12px] text-muted-foreground hover:text-foreground"
+              >
+                <Plus className="h-3.5 w-3.5" /> Query
+              </button>
+            </Tip>
           </div>
           <div className="min-h-0 flex-1 overflow-auto p-3">
             {!cur && <div className="text-muted-foreground">{connected ? 'Open a table or run a query.' : 'Connect to a database to begin.'}</div>}
@@ -1303,5 +1325,6 @@ export default function App() {
       </Card>
       <SearchPalette key={paletteOpen ? 'open' : 'closed'} open={paletteOpen} onOpenChange={setPaletteOpen} session={session} onOpenTable={openTableTab} onShowFunc={showFunc} />
     </div>
+    </TooltipProvider>
   )
 }

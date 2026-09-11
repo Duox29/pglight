@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, FileDown, Plus, RefreshCw, Upload, Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from './ui/button'
+import { Tip } from './ui/tooltip'
 import { Input } from './ui/input'
 import { Badge } from './ui/badge'
 import { Card } from './ui/card'
@@ -194,9 +195,11 @@ export function TableWorkspace(p: Props) {
               </>
             )}
             <span className="flex-1" />
-            <Button size="sm" variant="ghost" onClick={p.onApply} title="Reload">
-              <RefreshCw />
-            </Button>
+            <Tip content="Reload">
+              <Button size="sm" variant="ghost" onClick={p.onApply} aria-label="Reload">
+                <RefreshCw />
+              </Button>
+            </Tip>
           </div>
           <ErrorText message={t.error} />
           {t.result ? (
@@ -229,7 +232,6 @@ export function TableWorkspace(p: Props) {
                           {r.map((c, ci) => (
                             <TableCell
                               key={ci}
-                              title="Click to copy · Ctrl-click to select · Shift-click for range · Right-click for menu"
                               className="cursor-text bg-sky-950/30"
                               onDoubleClick={() => p.onEditCell(t.result!.columns[ci], orig)}
                               onClick={(e) => {
@@ -249,9 +251,11 @@ export function TableWorkspace(p: Props) {
                           ))}
                           <TableCell>
                             <div className="flex gap-1">
-                              <Button size="sm" variant="ghost" title="Copy row as INSERT" onClick={() => p.onCopyInsert(orig)}>
-                                ⧉
-                              </Button>
+                              <Tip content="Copy row as INSERT">
+                                <Button size="sm" variant="ghost" aria-label="Copy row as INSERT" onClick={() => p.onCopyInsert(orig)}>
+                                  ⧉
+                                </Button>
+                              </Tip>
                               <Button size="sm" variant="ghost" onClick={() => p.onDeleteRow(orig)}>
                                 del
                               </Button>

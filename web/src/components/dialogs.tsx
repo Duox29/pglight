@@ -12,6 +12,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
+import { Tip } from './ui/tooltip'
 
 /** Promise-based popups (shadcn AlertDialog / Dialog) replacing native confirm()/prompt(). */
 
@@ -140,9 +141,9 @@ function FormHost({ dlg }: { dlg: PendingDialog }) {
         >
           {(dlg.fields ?? []).map((f) => (
             <label key={f.key} className="grid grid-cols-[140px_1fr] items-center gap-2 text-[12px]">
-              <span className="truncate text-muted-foreground" title={f.label}>
-                {f.label}
-              </span>
+              <Tip content={f.label}>
+                <span className="truncate text-muted-foreground">{f.label}</span>
+              </Tip>
               <Input
                 placeholder={f.placeholder}
                 value={values[f.key] ?? ''}

@@ -28,7 +28,6 @@ export function DataGrid({
               key={i}
               onClick={onSort ? () => onSort(i) : undefined}
               className={onSort ? 'cursor-pointer select-none hover:text-foreground' : undefined}
-              title={onSort ? 'Click to sort' : c}
             >
               {c}
               {onSort ? ' ⇅' : ''}
@@ -42,7 +41,6 @@ export function DataGrid({
             {r.map((c, ci) => (
               <TableCell
                 key={ci}
-                title={c == null ? 'NULL' : String(c)}
                 onClick={onCellClick ? () => onCellClick(c, data.columns[ci]) : undefined}
                 className={`${c == null ? 'italic text-muted-foreground' : ''} ${cellClassName?.(c) ?? ''} ${onCellClick ? 'cursor-pointer' : ''}`}
               >

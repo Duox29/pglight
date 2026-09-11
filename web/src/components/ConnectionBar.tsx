@@ -1,5 +1,6 @@
 import { BookOpen, Database, Search, History, Star, LayoutDashboard, Settings } from 'lucide-react'
 import { Button } from './ui/button'
+import { Tip } from './ui/tooltip'
 
 export interface ConnFields {
   host: string
@@ -34,12 +35,16 @@ export function ConnectionBar(props: {
       <Button size="sm" variant="ghost" onClick={() => props.onPanel('server')}>
         <LayoutDashboard /> Dashboard
       </Button>
-      <Button size="sm" variant="ghost" onClick={() => props.onPanel('settings')} title="Settings">
-        <Settings />
-      </Button>
-      <Button size="sm" variant="ghost" onClick={props.onDocs} title="Documentation">
-        <BookOpen /> Docs
-      </Button>
+      <Tip content="Settings">
+        <Button size="sm" variant="ghost" onClick={() => props.onPanel('settings')} aria-label="Settings">
+          <Settings />
+        </Button>
+      </Tip>
+      <Tip content="Documentation">
+        <Button size="sm" variant="ghost" onClick={props.onDocs} aria-label="Documentation">
+          <BookOpen /> Docs
+        </Button>
+      </Tip>
     </header>
   )
 }
