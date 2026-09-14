@@ -123,7 +123,11 @@ export interface ErdTabT {
   title: string
   sessionId: string
   schema: string
-  data: { nodes: string[]; edges: { fk: string; src_table: string; src_col: string; dst_schema: string; dst_table: string; dst_col: string }[] } | null
+  data: {
+    nodes: string[]
+    edges: { fk: string; src_table: string; src_col: string; dst_schema: string; dst_table: string; dst_col: string }[]
+    columns?: Record<string, { name: string; type?: string; pk?: boolean; fk?: boolean }[]>
+  } | null
 }
 
 export type Tab = QueryTabT | TableTabT | BrowserTabT | ErdTabT | DocsTabT

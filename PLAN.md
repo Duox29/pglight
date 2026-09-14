@@ -91,7 +91,7 @@ GET  /api/constraints?session_id=&schema=&table=
 GET  /api/view-def?session_id=&schema=&name=
 GET  /api/func-def?session_id=&schema=&name=
 GET  /api/table-stats?session_id=&schema=&table=
-GET  /api/erd?session_id=&schema=
+GET  /api/erd?session_id=&schema=  (also returns `columns: {table: [{name,type,pk,fk}]}` for the ERD canvas — additive, nodes/edges unchanged)
 GET  /api/search?session_id=&q=
 POST /api/maintenance       {session_id,schema,table,op}
 POST /api/import            {session_id,schema,table,columns,rows,on_conflict_do_nothing}
@@ -130,8 +130,8 @@ tables/views/matviews/foreign/functions/sequences/types + server objects),
 `QueryConsole` (multi-result, EXPLAIN text plan, formatter, per-result
 CSV/JSON/INSERT export), `TableWorkspace` (Data/Columns/DDL/Indexes/
 Constraints/Triggers/Stats sub-tabs, cell edit/duplicate/delete, CSV import,
-VACUUM/ANALYZE/REINDEX), `BrowserView` (extensions/roles), `ErdView` (FK
-graph SVG), `SidePanel` (history/snippets/server/activity/locks/stats with
+VACUUM/ANALYZE/REINDEX), `BrowserView` (extensions/roles), `ErdView` (React Flow
+FK canvas: `components/erd/` — column-level edges, auto-layout, drag persistence, search, minimap), `SidePanel` (history/snippets/server/activity/locks/stats with
 auto-refresh), `SearchPalette` (Ctrl+K global search dialog), last-session restore (open tabs +
 active tab + autocommit persist to localStorage; autologin from last successful
 connection with an opt-out Switch in Connections).

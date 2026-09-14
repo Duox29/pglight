@@ -1120,14 +1120,68 @@ func (h *Handler) ERD(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+	// Per-table columns with PK flags + FK columns derived from edges, so the
+	// ERD canvas can render PK/FK badges without one query per table. One
+	// capped catalog query for all tables in the schema (additive: nodes and
+	// edges keep their existing shapes).
+	_, crows, err := queryJSON(q, ctx, `
+		SELECT c.table_name, c.column_name, c.data_type,
+			CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END AS is_pk
+		FROM information_schema.columns c
+		LEFT JOIN (
+			SELECT tc.table_schema, tc.table_name, kcu.column_name
+			FROM information_schema.table_constraints tc
+			JOIN information_schema.key_column_usage kcu
+				ON kcu.constraint_name=tc.constraint_name AND kcu.table_schema=tc.table_schema
+			WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_schema=$1
+		) pk ON pk.table_schema=c.table_schema AND pk.table_name=c.table_name AND pk.column_name=c.column_name
+		WHERE c.table_schema=$1
+		ORDER BY c.table_name, c.ordinal_position
+		LIMIT 5000`, schema)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
 	nn := []string{}
 	for _, n := range nodes {
 		nn = append(nn, fmt.Sprint(n[0]))
 	}
+	fkCols := map[string]map[string]bool{}
+	for _, e := range edges {
+		if len(e) < 3 {
+			continue
+		}
+		src, col := fmt.Sprint(e[1]), fmt.Sprint(e[2])
+		if fkCols[src] == nil {
+			fkCols[src] = map[string]bool{}
+		}
+		fkCols[src][col] = true
+	}
+	cols := map[string][]map[string]any{}
+	for _, r := range crows {
+		if len(r) < 4 {
+			continue
+		}
+		tbl, col := fmt.Sprint(r[0]), fmt.Sprint(r[1])
+		isPK := r[3] == true
+		if s, ok := r[3].(string); ok {
+			isPK = strings.EqualFold(s, "t") || strings.EqualFold(s, "true")
+		}
+		cols[tbl] = append(cols[tbl], map[string]any{
+			"name": col, "type": fmt.Sprint(r[2]),
+			"pk": isPK, "fk": fkCols[tbl][col],
+		})
+	}
+	for _, n := range nn {
+		if cols[n] == nil {
+			cols[n] = []map[string]any{}
+		}
+	}
 	writeJSON(w, 200, map[string]any{
-		"schema": schema,
-		"nodes":  nn,
-		"edges":  rowsToMaps([]string{"fk", "src_table", "src_col", "dst_schema", "dst_table", "dst_col"}, edges),
+		"schema":  schema,
+		"nodes":   nn,
+		"edges":   rowsToMaps([]string{"fk", "src_table", "src_col", "dst_schema", "dst_table", "dst_col"}, edges),
+		"columns": cols,
 	})
 }
 
