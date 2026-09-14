@@ -8,6 +8,7 @@ import { ConnectionBar, type ConnFields } from './components/ConnectionBar'
 import { CredentialManager } from './components/CredentialManager'
 import { DialogHost, createDialogs, type PendingDialog } from './components/dialogs'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './components/ui/resizable'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './components/ui/context-menu'
 import { Explorer } from './components/Explorer'
 import { QueryConsole, explainToText } from './components/QueryConsole'
 import { TableWorkspace } from './components/TableWorkspace'
@@ -820,23 +821,89 @@ export default function App() {
     },
     [activeTab],
   )
-  /* ---------- tab strip: vertical wheel scrolls horizontally, no scrollbar ---------- */
+  const closeOthers = useCallback((id: string) => {
+    setTabs((prev) => (prev.some((t) => t.id === id) ? prev.filter((t) => t.id === id) : prev))
+    setActiveTab(id)
+  }, [])
+
+  const closeRight = useCallback(
+    (id: string) => {
+      setTabs((prev) => {
+        const i = prev.findIndex((t) => t.id === id)
+        if (i < 0) return prev
+        const next = prev.slice(0, i + 1)
+        if (activeTab !== id && !next.some((t) => t.id === activeTab)) setActiveTab(id)
+        return next
+      })
+    },
+    [activeTab],
+  )
+
+  const closeLeft = useCallback(
+    (id: string) => {
+      setTabs((prev) => {
+        const i = prev.findIndex((t) => t.id === id)
+        if (i <= 0) return prev
+        const next = prev.slice(i)
+        if (!next.some((t) => t.id === activeTab)) setActiveTab(id)
+        return next
+      })
+    },
+    [activeTab],
+  )
+
+  const closeAllTabs = useCallback(() => {
+    setTabs([])
+    setActiveTab(null)
+  }, [])
+  /* ---------- tab strip: smooth wheel scroll, no scrollbar ---------- */
   const tablistRef = useRef<HTMLDivElement>(null)
+  const wheelTarget = useRef<number | null>(null)
+  const wheelRaf = useRef(0)
 
   useEffect(() => {
     const bar = tablistRef.current
     if (!bar) return
+    const step = () => {
+      if (wheelTarget.current == null) return
+      const diff = wheelTarget.current - bar.scrollLeft
+      if (Math.abs(diff) < 0.5) {
+        bar.scrollLeft = wheelTarget.current
+        wheelTarget.current = null
+        return
+      }
+      bar.scrollLeft += diff * 0.25
+      wheelRaf.current = requestAnimationFrame(step)
+    }
+    const kick = () => {
+      cancelAnimationFrame(wheelRaf.current)
+      wheelRaf.current = requestAnimationFrame(step)
+    }
     // React attaches wheel listeners as passive at the root, so preventDefault
     // needs a native non-passive listener.
     const onWheel = (e: WheelEvent) => {
       if (bar.scrollWidth <= bar.clientWidth + 1) return
       if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
       e.preventDefault()
-      bar.scrollLeft += e.deltaY
+      const unit = e.deltaMode === 1 ? 16 : 1
+      const dy = e.deltaY * unit
+      // Trackpads emit small fractional deltas that are already smooth —
+      // apply directly. Notched wheels get eased toward a target.
+      if (Math.abs(dy) < 40) {
+        wheelTarget.current = null
+        cancelAnimationFrame(wheelRaf.current)
+        bar.scrollLeft += dy
+        return
+      }
+      if (wheelTarget.current == null) wheelTarget.current = bar.scrollLeft
+      wheelTarget.current = Math.min(Math.max(wheelTarget.current + dy, 0), bar.scrollWidth - bar.clientWidth)
+      kick()
     }
     bar.addEventListener('wheel', onWheel, { passive: false })
     return () => {
       bar.removeEventListener('wheel', onWheel)
+      cancelAnimationFrame(wheelRaf.current)
+      wheelTarget.current = null
     }
   }, [])
   /* ---------- object alter (sequences / functions / types) ---------- */
@@ -1600,46 +1667,65 @@ export default function App() {
               const sid = (t as { sessionId?: string }).sessionId
               const db = sessions.find((s) => s.id === sid)?.dbname ?? ''
               const dirty = t.kind === 'query' && !t.results && !t.error && t.sql !== DEFAULT_SQL
+              const idx = tabs.findIndex((x) => x.id === t.id)
               return (
-                <button
-                  key={t.id}
-                  role="tab"
-                  aria-selected={t.id === activeTab}
-                  onClick={() => setActiveTab(t.id)}
-                  onMouseDown={(e) => {
-                    if (e.button === 1) {
-                      e.preventDefault()
-                      closeTab(t.id)
-                    }
-                  }}
-                  className={cn(
-                    'group flex items-center gap-1.5 whitespace-nowrap rounded-t-md border border-b-0 px-2.5 py-1.5 text-[12px]',
-                    t.id === activeTab ? 'bg-background font-semibold' : 'bg-muted text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  <span aria-hidden className={cn('h-1.5 w-1.5 rounded-full', t.id === activeTab ? 'bg-primary' : dirty ? 'bg-amber-500' : 'bg-transparent')} />
-                  <Tip content="Close tab (middle-click also closes)">
-                    <span className="flex shrink-0">
-                      <X
-                        className="h-3 w-3 opacity-60 hover:opacity-100"
-                        onClick={(e) => {
-                          e.stopPropagation()
+                <ContextMenu key={t.id}>
+                  <ContextMenuTrigger asChild>
+                    <button
+                      role="tab"
+                      aria-selected={t.id === activeTab}
+                      onClick={() => setActiveTab(t.id)}
+                      onMouseDown={(e) => {
+                        if (e.button === 1) {
+                          e.preventDefault()
                           closeTab(t.id)
-                        }}
-                      />
-                    </span>
-                  </Tip>
-                  <Tip content={t.kind === 'query' ? `${t.title} · ${db || 'no session'}` : `${t.title}`}>
-                    <span className="max-w-[160px] truncate">{t.title}</span>
-                  </Tip>
-                  {t.kind !== 'docs' && db && (
-                    <Tip content={`Session database: ${db}`}>
-                      <span className="max-w-[80px] truncate rounded bg-muted px-1 text-[10px] font-normal text-muted-foreground">
-                        {db}
-                      </span>
-                    </Tip>
-                  )}
-                </button>
+                        }
+                      }}
+                      className={cn(
+                        'group flex items-center gap-1.5 whitespace-nowrap rounded-t-md border border-b-0 px-2.5 py-1.5 text-[12px]',
+                        t.id === activeTab ? 'bg-background font-semibold' : 'bg-muted text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      <span aria-hidden className={cn('h-1.5 w-1.5 rounded-full', t.id === activeTab ? 'bg-primary' : dirty ? 'bg-amber-500' : 'bg-transparent')} />
+                      <Tip content="Close tab (middle-click also closes)">
+                        <span className="flex shrink-0">
+                          <X
+                            className="h-3 w-3 opacity-60 hover:opacity-100"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              closeTab(t.id)
+                            }}
+                          />
+                        </span>
+                      </Tip>
+                      <Tip content={t.kind === 'query' ? `${t.title} · ${db || 'no session'}` : `${t.title}`}>
+                        <span className="max-w-[160px] truncate">{t.title}</span>
+                      </Tip>
+                      {t.kind !== 'docs' && db && (
+                        <Tip content={`Session database: ${db}`}>
+                          <span className="max-w-[80px] truncate rounded bg-muted px-1 text-[10px] font-normal text-muted-foreground">
+                            {db}
+                          </span>
+                        </Tip>
+                      )}
+                    </button>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem onSelect={() => closeTab(t.id)}>Close</ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem disabled={tabs.length < 2} onSelect={() => closeOthers(t.id)}>
+                      Close Others
+                    </ContextMenuItem>
+                    <ContextMenuItem disabled={idx < 0 || idx >= tabs.length - 1} onSelect={() => closeRight(t.id)}>
+                      Close to the Right
+                    </ContextMenuItem>
+                    <ContextMenuItem disabled={idx <= 0} onSelect={() => closeLeft(t.id)}>
+                      Close to the Left
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onSelect={closeAllTabs}>Close All</ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               )
             })}
             <Tip content="New query (Ctrl+K then Enter)">
