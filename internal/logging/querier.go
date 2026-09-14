@@ -12,12 +12,25 @@ import (
 
 // Querier wraps a db.Querier and logs every statement. It is applied in one
 // place (api.Handler.q) so all query paths are covered without touching
-// individual handlers. QueryRow is passed through: it only hits the network
-// on Scan, so timing it here would mislead.
+// individual handlers. QueryRow is wrapped because pgx performs its network
+// work when Scan is called, not when QueryRow is requested.
 type Querier struct {
 	Inner   db.Querier
 	Log     *Logger
 	Session string
+}
+
+type loggedRow struct {
+	inner pgx.Row
+	log   *Logger
+	sql   string
+	start time.Time
+}
+
+func (r loggedRow) Scan(dest ...any) error {
+	err := r.inner.Scan(dest...)
+	r.log.LogQuery(r.sql, time.Since(r.start).Milliseconds(), err)
+	return err
 }
 
 func Wrap(inner db.Querier, log *Logger, session string) db.Querier {
@@ -42,5 +55,5 @@ func (q Querier) Exec(ctx context.Context, sql string, args ...any) (pgconn.Comm
 }
 
 func (q Querier) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
-	return q.Inner.QueryRow(ctx, sql, args...)
+	return loggedRow{inner: q.Inner.QueryRow(ctx, sql, args...), log: q.Log, sql: sql, start: time.Now()}
 }

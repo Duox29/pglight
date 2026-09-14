@@ -23,12 +23,13 @@ type Querier interface {
 // Explicit txns (DataGrip/pgAdmin-style) pin a single pooled connection so that
 // subsequent queries in the same session see uncommitted data.
 type Manager struct {
-	mu      sync.RWMutex
-	pools   map[string]*pgxpool.Pool
-	txConns map[string]*pgxpool.Conn
-	txs     map[string]pgx.Tx
-	seen    map[string]time.Time
-	metas   map[string]ConnMeta
+	mu       sync.RWMutex
+	pools    map[string]*pgxpool.Pool
+	txConns  map[string]*pgxpool.Conn
+	txs      map[string]pgx.Tx
+	seen     map[string]time.Time
+	metas    map[string]ConnMeta
+	txnLocks map[string]*sync.Mutex
 }
 
 // ConnMeta is display-only connection info for a session (no password).
@@ -50,11 +51,12 @@ type SessionInfo struct {
 
 func New() *Manager {
 	return &Manager{
-		pools:   make(map[string]*pgxpool.Pool),
-		txConns: make(map[string]*pgxpool.Conn),
-		txs:     make(map[string]pgx.Tx),
-		seen:    make(map[string]time.Time),
-		metas:   make(map[string]ConnMeta),
+		pools:    make(map[string]*pgxpool.Pool),
+		txConns:  make(map[string]*pgxpool.Conn),
+		txs:      make(map[string]pgx.Tx),
+		seen:     make(map[string]time.Time),
+		metas:    make(map[string]ConnMeta),
+		txnLocks: make(map[string]*sync.Mutex),
 	}
 }
 
@@ -63,6 +65,20 @@ func (m *Manager) touch(id string) {
 	m.mu.Lock()
 	m.seen[id] = time.Now()
 	m.mu.Unlock()
+}
+
+// txnLock serializes lifecycle operations for one session without holding the
+// global Manager mutex across PostgreSQL I/O. It prevents Begin/Commit/Rollback/
+// Close from racing each other while unrelated sessions remain concurrent.
+func (m *Manager) txnLock(id string) *sync.Mutex {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if l, ok := m.txnLocks[id]; ok {
+		return l
+	}
+	l := &sync.Mutex{}
+	m.txnLocks[id] = l
+	return l
 }
 
 func ConnString(host string, port int, user, password, dbname, sslmode string) string {
@@ -83,13 +99,22 @@ func ConnString(host string, port int, user, password, dbname, sslmode string) s
 }
 
 func (m *Manager) Add(id, connStr string) error {
+	lock := m.txnLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cfg, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
 		return err
 	}
-	cfg.MaxConns = 8
+	// A GUI session rarely needs many simultaneous PostgreSQL backends. Keep
+	// the default footprint small while allowing pgxpool to grow under load.
+	cfg.MinConns = 0
+	cfg.MaxConns = 4
+	cfg.MaxConnIdleTime = 5 * time.Minute
+	cfg.MaxConnLifetime = 1 * time.Hour
 	// Tag every backend of this pool so /api/activity (and the console
 	// Cancel button) can attribute running queries to this session.
 	app := "pglight:" + id
@@ -109,17 +134,24 @@ func (m *Manager) Add(id, connStr string) error {
 		return err
 	}
 	m.mu.Lock()
-	if old, ok := m.pools[id]; ok {
-		old.Close()
-	}
-	if c, ok := m.txConns[id]; ok {
-		c.Release()
-		delete(m.txConns, id)
-		delete(m.txs, id)
-	}
+	oldPool := m.pools[id]
+	oldConn := m.txConns[id]
+	oldTx := m.txs[id]
+	delete(m.txConns, id)
+	delete(m.txs, id)
 	m.pools[id] = pool
 	m.seen[id] = time.Now()
 	m.mu.Unlock()
+
+	if oldTx != nil {
+		_ = oldTx.Rollback(context.Background())
+	}
+	if oldConn != nil {
+		oldConn.Release()
+	}
+	if oldPool != nil {
+		oldPool.Close()
+	}
 	return nil
 }
 
@@ -153,22 +185,30 @@ func (m *Manager) Get(id string) (*pgxpool.Pool, bool) {
 }
 
 func (m *Manager) Close(id string) {
+	lock := m.txnLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if tx, ok := m.txs[id]; ok {
-		_ = tx.Rollback(context.Background())
-		delete(m.txs, id)
-	}
-	if c, ok := m.txConns[id]; ok {
-		c.Release()
-		delete(m.txConns, id)
-	}
-	if p, ok := m.pools[id]; ok {
-		p.Close()
-		delete(m.pools, id)
-	}
+	tx := m.txs[id]
+	conn := m.txConns[id]
+	pool := m.pools[id]
+	delete(m.txs, id)
+	delete(m.txConns, id)
+	delete(m.pools, id)
 	delete(m.seen, id)
 	delete(m.metas, id)
+	m.mu.Unlock()
+
+	if tx != nil {
+		_ = tx.Rollback(context.Background())
+	}
+	if conn != nil {
+		conn.Release()
+	}
+	if pool != nil {
+		pool.Close()
+	}
 }
 
 // SetMeta stores display-only connection info for a session (no password).
@@ -226,15 +266,21 @@ func (m *Manager) InTxn(id string) bool {
 
 // Begin starts an explicit transaction for the session.
 func (m *Manager) Begin(ctx context.Context, id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	lock := m.txnLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+
+	m.mu.RLock()
 	pool, ok := m.pools[id]
+	_, inTxn := m.txs[id]
+	m.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("not connected")
 	}
-	if _, ok := m.txs[id]; ok {
+	if inTxn {
 		return fmt.Errorf("transaction already open")
 	}
+
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return err
@@ -244,47 +290,66 @@ func (m *Manager) Begin(ctx context.Context, id string) error {
 		conn.Release()
 		return err
 	}
+
+	m.mu.Lock()
+	// The per-session lifecycle lock prevents another Begin/Close from
+	// changing this state while the PostgreSQL operation was in flight.
 	m.txConns[id] = conn
 	m.txs[id] = tx
 	m.seen[id] = time.Now()
+	m.mu.Unlock()
 	return nil
 }
 
 // Commit commits the session transaction and releases the pinned connection.
 func (m *Manager) Commit(ctx context.Context, id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	lock := m.txnLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+
+	m.mu.RLock()
 	tx, ok := m.txs[id]
+	conn := m.txConns[id]
+	m.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("no open transaction")
 	}
-	conn := m.txConns[id]
+
 	err := tx.Commit(ctx)
 	if conn != nil {
 		conn.Release()
 	}
+	m.mu.Lock()
 	delete(m.txs, id)
 	delete(m.txConns, id)
 	m.seen[id] = time.Now()
+	m.mu.Unlock()
 	return err
 }
 
 // Rollback aborts the session transaction and releases the pinned connection.
 func (m *Manager) Rollback(ctx context.Context, id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	lock := m.txnLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+
+	m.mu.RLock()
 	tx, ok := m.txs[id]
+	conn := m.txConns[id]
+	m.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("no open transaction")
 	}
-	conn := m.txConns[id]
+
 	err := tx.Rollback(ctx)
 	if conn != nil {
 		conn.Release()
 	}
+	m.mu.Lock()
 	delete(m.txs, id)
 	delete(m.txConns, id)
 	m.seen[id] = time.Now()
+	m.mu.Unlock()
 	return err
 }
 

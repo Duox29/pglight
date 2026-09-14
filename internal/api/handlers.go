@@ -24,7 +24,12 @@ type Handler struct {
 
 // queryTimeout caps user query execution (console, table ops). Long enough
 // for analytical statements; the console Cancel button ends them sooner.
-const queryTimeout = 1000 * time.Second
+const (
+	queryTimeout       = 120 * time.Second
+	metadataTimeout    = 10 * time.Second
+	tableDataTimeout   = 30 * time.Second
+	maintenanceTimeout = 120 * time.Second
+)
 
 type connectReq struct {
 	Host     string `json:"host"`
@@ -644,19 +649,12 @@ func (h *Handler) TableData(w http.ResponseWriter, r *http.Request) {
 			where += " ORDER BY " + strings.Join(safe, ", ")
 		}
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	var total int64
-	_ = qq.QueryRow(ctx, fmt.Sprintf("SELECT count(*) FROM %s%s", qt, whereClauseOnly(where))).Scan(&total)
-	sql := fmt.Sprintf("SELECT * FROM %s%s LIMIT %d OFFSET %d", qt, where, limit, offset)
-	h.execQuery(w, r, qq, sid, sql, total)
-}
-
-func whereClauseOnly(where string) string {
-	if i := strings.Index(strings.ToUpper(where), " ORDER BY "); i >= 0 {
-		return where[:i]
-	}
-	return where
+	// Fetch one extra row instead of running a potentially expensive COUNT(*).
+	// The extra row gives the UI an exact has_more signal while keeping this
+	// endpoint to one database round-trip.
+	fetchLimit := limit + 1
+	sql := fmt.Sprintf("SELECT * FROM %s%s LIMIT %d OFFSET %d", qt, where, fetchLimit, offset)
+	h.execQuery(w, r, qq, sid, sql, -1, limit)
 }
 
 type queryReq struct {
@@ -826,6 +824,7 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 401, map[string]string{"error": "not connected"})
 		return
 	}
+	qq = logging.Wrap(qq, h.Log, id)
 	sql := strings.TrimSpace(req.SQL)
 	if sql == "" {
 		writeJSON(w, 400, map[string]string{"error": "empty sql"})
@@ -933,6 +932,7 @@ func (h *Handler) Explain(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 401, map[string]string{"error": "not connected"})
 		return
 	}
+	qq = logging.Wrap(qq, h.Log, id)
 	if strings.TrimSpace(req.SQL) == "" {
 		writeJSON(w, 400, map[string]string{"error": "empty sql"})
 		return
@@ -1234,6 +1234,7 @@ func (h *Handler) Maintenance(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 401, map[string]string{"error": "not connected"})
 		return
 	}
+	qq = logging.Wrap(qq, h.Log, id)
 	if req.Table == "" {
 		writeJSON(w, 400, map[string]string{"error": "table required"})
 		return
@@ -1449,6 +1450,7 @@ func (h *Handler) RowOp(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 401, map[string]string{"error": "not connected"})
 		return
 	}
+	qq = logging.Wrap(qq, h.Log, id)
 	if req.Schema == "" {
 		req.Schema = "public"
 	}
@@ -1578,6 +1580,7 @@ func (h *Handler) AlterTable(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 401, map[string]string{"error": "not connected"})
 		return
 	}
+	qq = logging.Wrap(qq, h.Log, id)
 	schema := strings.TrimSpace(req.Schema)
 	if schema == "" {
 		schema = "public"
@@ -2030,7 +2033,7 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"version": snap.Version, "tables": snap.Tables, "functions": snap.Funcs, "fks": snap.FKs, "keywords": kw, "in_txn": h.Mgr.InTxn(sid)})
 }
 
-func (h *Handler) execQuery(w http.ResponseWriter, r *http.Request, qq db.Querier, sid string, sql string, total int64) {
+func (h *Handler) execQuery(w http.ResponseWriter, r *http.Request, qq db.Querier, sid string, sql string, total int64, visibleLimit ...int) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
@@ -2060,16 +2063,24 @@ func (h *Handler) execQuery(w http.ResponseWriter, r *http.Request, qq db.Querie
 			}
 		}
 		data = append(data, vals)
-		if len(data) >= 1000 {
+		if len(data) >= 1001 {
 			break
 		}
 	}
 	cmd := rows.CommandTag()
+	hasMore := false
+	if len(visibleLimit) > 0 && visibleLimit[0] > 0 && len(data) > visibleLimit[0] {
+		hasMore = true
+		data = data[:visibleLimit[0]]
+	}
 	out := map[string]any{
 		"columns": cols, "types": types, "rows": data,
 		"rows_affected": cmd.RowsAffected(),
 		"duration_ms":   time.Since(start).Milliseconds(),
 		"in_txn":        h.Mgr.InTxn(sid),
+	}
+	if len(visibleLimit) > 0 {
+		out["has_more"] = hasMore
 	}
 	if out["rows"] == nil {
 		out["rows"] = [][]any{}
