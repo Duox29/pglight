@@ -16,6 +16,7 @@ import '@xyflow/react/dist/style.css'
 import { Spline, Slash, Workflow } from 'lucide-react'
 import { toast } from 'sonner'
 import { EmptyNote } from './ui/feedback'
+import { Tip } from './ui/tooltip'
 import ErdTableNode, { type ErdTableNodeT } from './erd/ErdTableNode'
 import ErdRelationEdge, { type ErdRelationEdgeT } from './erd/ErdRelationEdge'
 import { ErdToolbar } from './erd/ErdToolbar'
@@ -308,45 +309,48 @@ function ErdCanvasInner(props: {
           <Background gap={24} size={1} color="#1a1f2a" />
           <Panel position="top-left">
             <div className="flex overflow-hidden rounded-full border border-[#2a2f3a] bg-[#13161c]/95 shadow-sm" role="group" aria-label="Relation line style">
-              <button
-                type="button"
-                onClick={() => setLine('bezier')}
-                aria-label="Curved relation lines"
-                aria-pressed={line === 'bezier'}
-                title="Curved lines"
-                className={cn(
-                  'flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                  line === 'bezier' && 'bg-[#1f6feb]/20 text-foreground',
-                )}
-              >
-                <Spline className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setLine('straight')}
-                aria-label="Straight relation lines"
-                aria-pressed={line === 'straight'}
-                title="Straight lines"
-                className={cn(
-                  'flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                  line === 'straight' && 'bg-[#1f6feb]/20 text-foreground',
-                )}
-              >
-                <Slash className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setLine('smoothstep')}
-                aria-label="Orthogonal relation lines"
-                aria-pressed={line === 'smoothstep'}
-                title="Orthogonal lines"
-                className={cn(
-                  'flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                  line === 'smoothstep' && 'bg-[#1f6feb]/20 text-foreground',
-                )}
-              >
-                <Workflow className="h-3.5 w-3.5" />
-              </button>
+              <Tip content="Curved lines">
+                <button
+                  type="button"
+                  onClick={() => setLine('bezier')}
+                  aria-label="Curved relation lines"
+                  aria-pressed={line === 'bezier'}
+                  className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                    line === 'bezier' && 'bg-[#1f6feb]/20 text-foreground',
+                  )}
+                >
+                  <Spline className="h-3.5 w-3.5" />
+                </button>
+              </Tip>
+              <Tip content="Straight lines">
+                <button
+                  type="button"
+                  onClick={() => setLine('straight')}
+                  aria-label="Straight relation lines"
+                  aria-pressed={line === 'straight'}
+                  className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                    line === 'straight' && 'bg-[#1f6feb]/20 text-foreground',
+                  )}
+                >
+                  <Slash className="h-3.5 w-3.5" />
+                </button>
+              </Tip>
+              <Tip content="Orthogonal lines">
+                <button
+                  type="button"
+                  onClick={() => setLine('smoothstep')}
+                  aria-label="Orthogonal relation lines"
+                  aria-pressed={line === 'smoothstep'}
+                  className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                    line === 'smoothstep' && 'bg-[#1f6feb]/20 text-foreground',
+                  )}
+                >
+                  <Workflow className="h-3.5 w-3.5" />
+                </button>
+              </Tip>
             </div>
           </Panel>
           <Controls

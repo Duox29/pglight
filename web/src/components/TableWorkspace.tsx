@@ -6,7 +6,6 @@ import { Tip } from './ui/tooltip'
 import { Input } from './ui/input'
 import { Badge } from './ui/badge'
 import { Card } from './ui/card'
-import { TxnControls } from './TxnControls'
 import { Switch } from './ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
@@ -20,12 +19,6 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, Con
 
 interface Props {
   tab: TableTabT
-  inTxn: boolean
-  autocommit: boolean
-  connLabel: string
-  connTip: string
-  onAutocommit: (v: boolean) => void
-  onTxn: (action: string) => void
   onSubtab: (s: TableSubtab) => void
   onFilterChange: (filter: string, order: string) => void
   onApply: () => void
@@ -166,14 +159,6 @@ export function TableWorkspace(p: Props) {
           </div>
         </div>
         <span className="flex-1" />
-        <TxnControls
-          connLabel={p.connLabel}
-          connTip={p.connTip}
-          inTxn={p.inTxn}
-          autocommit={p.autocommit}
-          onAutocommit={p.onAutocommit}
-          onTxn={p.onTxn}
-        />
         <Tabs value={t.subtab === 'constraints' || t.subtab === 'triggers' ? 'columns' : t.subtab} onValueChange={(v) => p.onSubtab(v as TableSubtab)}>
           <TabsList aria-label="Table sections">
             <TabsTrigger value="data">Data</TabsTrigger>
@@ -297,29 +282,29 @@ export function TableWorkspace(p: Props) {
                           }}
                         >
                           {r.map((c, ci) => (
-                            <TableCell
-                              key={ci}
-                              className="cursor-text bg-sky-950/30"
-                              onDoubleClick={() => p.onEditCell(t.result!.columns[ci], orig)}
-                              onClick={(e) => {
-                                if (e.detail > 1) return
-                                if (e.ctrlKey || e.metaKey) {
-                                  toggleRow(ri, r)
-                                  return
-                                }
-                                if (e.shiftKey) {
-                                  rangeTo(ri)
-                                  return
-                                }
-                              }}
-                              onContextMenu={(e) => {
-                                e.preventDefault()
-                                if (c != null && navigator.clipboard) navigator.clipboard.writeText(String(c))
-                              }}
-                              title="Double-click to edit · right-click copies cell"
-                            >
-                              {c == null ? <span className="italic text-muted-foreground">NULL</span> : String(c).slice(0, 200)}
-                            </TableCell>
+                            <Tip key={ci} content="Double-click to edit · right-click copies cell">
+                              <TableCell
+                                className="cursor-text bg-sky-950/30"
+                                onDoubleClick={() => p.onEditCell(t.result!.columns[ci], orig)}
+                                onClick={(e) => {
+                                  if (e.detail > 1) return
+                                  if (e.ctrlKey || e.metaKey) {
+                                    toggleRow(ri, r)
+                                    return
+                                  }
+                                  if (e.shiftKey) {
+                                    rangeTo(ri)
+                                    return
+                                  }
+                                }}
+                                onContextMenu={(e) => {
+                                  e.preventDefault()
+                                  if (c != null && navigator.clipboard) navigator.clipboard.writeText(String(c))
+                                }}
+                              >
+                                {c == null ? <span className="italic text-muted-foreground">NULL</span> : String(c).slice(0, 200)}
+                              </TableCell>
+                            </Tip>
                           ))}
                           <TableCell>
                             <div className="flex gap-1">

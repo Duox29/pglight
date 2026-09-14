@@ -1,6 +1,8 @@
+import { Fragment } from 'react'
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './table'
 import { EmptyNote } from './feedback'
+import { Tip } from './tooltip'
 
 export interface GridData {
   columns: string[]
@@ -77,27 +79,27 @@ export function DataGrid({
       <TableHeader>
         <TableRow className="hover:bg-transparent">
           {data.columns.map((c, i) => (
-            <TableHead
-              key={i}
-              onClick={onSort ? () => onSort(i) : undefined}
-              title={data.types?.[i] ? `${c} · ${data.types[i]}` : c}
-              className={`${onSort ? 'cursor-pointer select-none hover:text-foreground' : ''} ${sort?.column === i ? 'text-foreground' : ''} ${isNumericType(data.types?.[i]) ? 'text-right' : ''}`}
-            >
-              <span className="inline-flex items-center gap-1">
-                {c}
-                {data.types?.[i] && <span className="font-normal opacity-60">{data.types[i]}</span>}
-                {onSort &&
-                  (sort?.column === i ? (
-                    sort.direction === 'asc' ? (
-                      <ArrowUp className="h-3 w-3" />
+            <Tip key={i} content={data.types?.[i] ? `${c} · ${data.types[i]}` : c}>
+              <TableHead
+                onClick={onSort ? () => onSort(i) : undefined}
+                className={`${onSort ? 'cursor-pointer select-none hover:text-foreground' : ''} ${sort?.column === i ? 'text-foreground' : ''} ${isNumericType(data.types?.[i]) ? 'text-right' : ''}`}
+              >
+                <span className="inline-flex items-center gap-1">
+                  {c}
+                  {data.types?.[i] && <span className="font-normal opacity-60">{data.types[i]}</span>}
+                  {onSort &&
+                    (sort?.column === i ? (
+                      sort.direction === 'asc' ? (
+                        <ArrowUp className="h-3 w-3" />
+                      ) : (
+                        <ArrowDown className="h-3 w-3" />
+                      )
                     ) : (
-                      <ArrowDown className="h-3 w-3" />
-                    )
-                  ) : (
-                    <ChevronsUpDown className="h-3 w-3 opacity-40" />
-                  ))}
-              </span>
-            </TableHead>
+                      <ChevronsUpDown className="h-3 w-3 opacity-40" />
+                    ))}
+                </span>
+              </TableHead>
+            </Tip>
           ))}
         </TableRow>
       </TableHeader>
@@ -107,15 +109,21 @@ export function DataGrid({
             {r.map((c, ci) => {
               const t = data.types?.[ci]
               const json = c != null && isJsonType(c, t)
-              return (
+              const full = c == null ? 'NULL' : json ? String(c).slice(0, 2000) : String(c).slice(0, 500)
+              const cell = (
                 <TableCell
-                  key={ci}
                   onClick={onCellClick ? () => onCellClick(c, data.columns[ci]) : undefined}
-                  title={c == null ? 'NULL' : json ? String(c).slice(0, 2000) : String(c).slice(0, 500)}
                   className={`${c == null ? 'italic text-muted-foreground' : ''} ${cellClassName?.(c) ?? ''} ${onCellClick ? 'cursor-pointer' : ''} ${isNumericType(t) ? 'text-right font-mono' : ''} ${isBoolType(t) ? 'text-center' : ''} ${json ? 'font-mono text-[11px]' : ''}`}
                 >
                   {c == null ? 'NULL' : isBoolType(t) ? (c === true || c === 't' || c === 'true' ? 'true' : c === false || c === 'f' || c === 'false' ? 'false' : String(c)) : String(c).slice(0, 300)}
                 </TableCell>
+              )
+              return full.length > 40 ? (
+                <Tip key={ci} content={<span className="break-all font-mono text-[11px]">{full}</span>}>
+                  {cell}
+                </Tip>
+              ) : (
+                <Fragment key={ci}>{cell}</Fragment>
               )
             })}
           </TableRow>

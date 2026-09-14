@@ -5,7 +5,6 @@ import { Card } from './components/ui/card'
 import { Tip, TooltipProvider } from './components/ui/tooltip'
 import { Separator } from './components/ui/separator'
 import { ConnectionBar, type ConnFields } from './components/ConnectionBar'
-import { TxnControls } from './components/TxnControls'
 import { CredentialManager } from './components/CredentialManager'
 import { DialogHost, createDialogs, type PendingDialog } from './components/dialogs'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './components/ui/resizable'
@@ -121,7 +120,6 @@ export default function App() {
   const session = active?.id ?? ''
   const connected = !!active
   const [inTxnMap, setInTxnMap] = useState<Record<string, boolean>>({})
-  const inTxn = active ? !!inTxnMap[active.id] : false
   const markTxn = useCallback((sid: string, v: boolean) => {
     setInTxnMap((m) => (m[sid] === v ? m : { ...m, [sid]: v }))
   }, [])
@@ -1280,18 +1278,6 @@ export default function App() {
         }}
         onDocs={() => openDocsTab()}
       />
-      {connected && active && cur && (cur.kind === 'browser' || cur.kind === 'erd') && (
-        <div className="flex items-center gap-2 border-b bg-card px-2.5 py-1.5 text-[12px]">
-          <TxnControls
-            connLabel={`${active.user}@${active.host}/${active.dbname}`}
-            connTip={`${active.user}@${active.host}:${active.port}/${active.dbname}`}
-            inTxn={(cur as { sessionId?: string }).sessionId ? !!inTxnMap[(cur as { sessionId?: string }).sessionId as string] : inTxn}
-            autocommit={autocommit}
-            onAutocommit={setAutocommit}
-            onTxn={(a) => void doTxn(a, (cur as { sessionId?: string }).sessionId as string)}
-          />
-        </div>
-      )}
       <ResizablePanelGroup direction="horizontal" autoSaveId="pglight-main-layout" className="min-h-0 flex-1">
         <ResizablePanel defaultSize={20} minSize={12} maxSize={32} className="min-h-0">
         <aside className="flex h-full min-h-0 flex-col border-r bg-card">
@@ -1371,7 +1357,6 @@ export default function App() {
                       closeTab(t.id)
                     }
                   }}
-                  title={t.kind === 'query' ? `${t.title} · ${db || 'no session'}` : `${t.title}`}
                   className={cn(
                     'group flex items-center gap-1.5 whitespace-nowrap rounded-t-md border border-b-0 px-2.5 py-1.5 text-[12px]',
                     t.id === activeTab ? 'bg-background font-semibold' : 'bg-muted text-muted-foreground hover:text-foreground',
@@ -1389,7 +1374,9 @@ export default function App() {
                       />
                     </span>
                   </Tip>
-                  <span className="max-w-[160px] truncate">{t.title}</span>
+                  <Tip content={t.kind === 'query' ? `${t.title} · ${db || 'no session'}` : `${t.title}`}>
+                    <span className="max-w-[160px] truncate">{t.title}</span>
+                  </Tip>
                   {t.kind !== 'docs' && db && (
                     <Tip content={`Session database: ${db}`}>
                       <span className="max-w-[80px] truncate rounded bg-muted px-1 text-[10px] font-normal text-muted-foreground">
@@ -1435,7 +1422,6 @@ export default function App() {
             {cur?.kind === 'table' && (
               <TableWorkspace
                 tab={cur}
-                {...txnFor(cur.sessionId)}
                 onSubtab={(s) => {
                   updateTab(cur.id, (x) => (x.kind === 'table' ? { ...x, subtab: s } : x))
                   if (s !== 'data') loadTableMeta(cur.sessionId, cur.id, cur.schema, cur.table)

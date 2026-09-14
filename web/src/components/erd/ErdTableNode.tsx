@@ -7,6 +7,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from '../ui/context-menu'
+import { Tip } from '../ui/tooltip'
 import { cn } from '@/lib/utils'
 import { ERD_MAX_COLUMNS, dstHandle, srcHandle, type ErdTable } from './erdMapper'
 import { ERD_NODE_WIDTH } from './erdLayout'
@@ -34,7 +35,6 @@ function ErdTableNodeInner({ data, selected }: NodeProps<ErdTableNodeT>) {
       <ContextMenuTrigger asChild>
         <div
           style={{ width: ERD_NODE_WIDTH }}
-          title={`${table.schema}.${table.name}`}
           className={cn(
             'overflow-hidden rounded-lg border bg-[#13161c] text-left shadow-sm transition-colors',
             selected
@@ -67,11 +67,8 @@ function ErdTableNodeInner({ data, selected }: NodeProps<ErdTableNodeT>) {
             </div>
           )}
           {shown.map((c) => (
-            <div
-              key={c.name}
-              title={`${c.name}${c.type ? ` ${c.type}` : ''}${c.pk ? ' PK' : ''}${c.fk ? ' FK' : ''}`}
-              className="relative flex h-5 items-center gap-1.5 px-2.5 text-[12px]"
-            >
+            <Tip key={c.name} content={`${c.name}${c.type ? ` ${c.type}` : ''}${c.pk ? ' PK' : ''}${c.fk ? ' FK' : ''}`}>
+              <div className="relative flex h-5 items-center gap-1.5 px-2.5 text-[12px]">
               {c.pk && <KeyRound className="h-3 w-3 shrink-0 text-amber-400/90" aria-label="primary key" />}
               {c.fk && <Link2 className="h-3 w-3 shrink-0 text-sky-400/90" aria-label="foreign key" />}
               {!c.pk && !c.fk && <span className="w-3 shrink-0" />}
@@ -103,7 +100,8 @@ function ErdTableNodeInner({ data, selected }: NodeProps<ErdTableNodeT>) {
                   />
                 </>
               )}
-            </div>
+              </div>
+            </Tip>
           ))}
           {hidden > 0 && (
             <div className="flex h-5 items-center px-2.5 text-[11px] text-muted-foreground">

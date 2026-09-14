@@ -85,10 +85,14 @@ Gate before finishing any change: `go run ./scripts/check` (gofmt, vet, build,
    callbacks out — no cross-component imports.
 6. **Grids**: result/object tables use `<DataGrid>` or `ui/table` parts; cell
    values truncate (`max-w-[320px]`), NULL renders italic.
-7. **TS strict**: no `any`, no unused imports/locals, `@/` path alias (kept in
+7. **Tooltips — one global style**: always `<Tip>` (`components/ui/tooltip.tsx`,
+   dark `bg-popover` card). NEVER native `title=` (OS white box) on any element —
+   dense cells/rows (DataGrid, TableWorkspace, ERD nodes) wrap truncated content
+   with `<Tip>` too; CodeMirror autocomplete inherits `--popover` tokens.
+8. **TS strict**: no `any`, no unused imports/locals, `@/` path alias (kept in
    sync in `tsconfig.json` + `vite.config.ts`). ESLint must pass;
    `eslint-disable` needs a one-line reason comment, never a blanket disable.
-8. **New view checklist**: component in `components/` → wire into `App.tsx`
+9. **New view checklist**: component in `components/` → wire into `App.tsx`
    tabs/side/explorer → reuse `ui/*` + `dialogs`/`toast` → `npm run build`.
 
 ## 4. Test DB rules

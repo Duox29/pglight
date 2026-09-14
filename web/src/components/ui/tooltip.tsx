@@ -14,7 +14,7 @@ const TooltipContent = React.forwardRef<
     <TooltipPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
-      className={cn('z-50 overflow-hidden rounded-md border bg-card px-2 py-1 text-[12px] text-foreground shadow-md', className)}
+      className={cn('z-50 max-h-[300px] max-w-[420px] overflow-auto break-words rounded-md border border-border bg-popover px-2.5 py-1.5 text-[12px] leading-relaxed text-popover-foreground shadow-lg', className)}
       {...props}
     />
   </TooltipPrimitive.Portal>
@@ -26,16 +26,18 @@ function Tip({
   children,
   side,
   align,
+  className,
 }: {
   content: React.ReactNode
   children: React.ReactNode
   side?: React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>['side']
   align?: React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>['align']
+  className?: string
 }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent side={side} align={align}>
+      <TooltipContent side={side} align={align} className={className}>
         {content}
       </TooltipContent>
     </Tooltip>
