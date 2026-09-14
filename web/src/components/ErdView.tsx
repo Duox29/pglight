@@ -13,7 +13,7 @@ import {
   useReactFlow,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Spline, Slash } from 'lucide-react'
+import { Spline, Slash, Workflow } from 'lucide-react'
 import { toast } from 'sonner'
 import { EmptyNote } from './ui/feedback'
 import ErdTableNode, { type ErdTableNodeT } from './erd/ErdTableNode'
@@ -333,6 +333,19 @@ function ErdCanvasInner(props: {
                 )}
               >
                 <Slash className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setLine('smoothstep')}
+                aria-label="Orthogonal relation lines"
+                aria-pressed={line === 'smoothstep'}
+                title="Orthogonal lines"
+                className={cn(
+                  'flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                  line === 'smoothstep' && 'bg-[#1f6feb]/20 text-foreground',
+                )}
+              >
+                <Workflow className="h-3.5 w-3.5" />
               </button>
             </div>
           </Panel>

@@ -17,7 +17,7 @@ export interface ErdEdgeDto {
 }
 
 /** Line shape for relation edges, switched from the canvas toolbar. */
-export type ErdLineType = 'bezier' | 'straight'
+export type ErdLineType = 'bezier' | 'straight' | 'smoothstep'
 
 export interface ErdDataDto {
   nodes: string[]

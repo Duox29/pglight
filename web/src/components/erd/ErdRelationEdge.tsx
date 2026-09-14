@@ -3,6 +3,7 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   getBezierPath,
+  getSmoothStepPath,
   getStraightPath,
   type Edge,
   type EdgeProps,
@@ -31,15 +32,13 @@ function ErdRelationEdgeInner({
   data,
   markerEnd,
 }: EdgeProps<ErdRelationEdgeT>) {
-  const getPath = data?.line === 'straight' ? getStraightPath : getBezierPath
-  const [path, labelX, labelY] = getPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
-  })
+  const line = data?.line ?? 'bezier'
+  const [path, labelX, labelY] =
+    line === 'straight'
+      ? getStraightPath({ sourceX, sourceY, targetX, targetY })
+      : line === 'smoothstep'
+        ? getSmoothStepPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, borderRadius: 8 })
+        : getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
 
   return (
     <>
