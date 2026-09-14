@@ -494,6 +494,135 @@ func (h *Handler) FuncDef(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, rowsToMaps([]string{"schema", "name", "def", "lang", "kind"}, data))
 }
 
+func (h *Handler) SeqDef(w http.ResponseWriter, r *http.Request) {
+	q, _, ok := h.q(r)
+	if !ok {
+		writeJSON(w, 401, map[string]string{"error": "not connected"})
+		return
+	}
+	schema, name := r.URL.Query().Get("schema"), r.URL.Query().Get("name")
+	if name == "" {
+		writeJSON(w, 400, map[string]string{"error": "name required"})
+		return
+	}
+	if schema == "" {
+		schema = "public"
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	_, data, err := queryJSON(q, ctx, `SELECT data_type, start_value, minimum_value, maximum_value, increment, cycle_option FROM information_schema.sequences WHERE sequence_schema=$1 AND sequence_name=$2`, schema, name)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if len(data) == 0 {
+		writeJSON(w, 400, map[string]string{"error": "sequence not found"})
+		return
+	}
+	str := func(v any) string {
+		if v == nil {
+			return ""
+		}
+		return fmt.Sprint(v)
+	}
+	dataType, startVal, minVal, maxVal, incr, cycle := str(data[0][0]), str(data[0][1]), str(data[0][2]), str(data[0][3]), str(data[0][4]), str(data[0][5])
+	var cacheSize int64 = 1
+	_ = q.QueryRow(ctx, `SELECT seqcache FROM pg_sequence WHERE seqrelid=($1||'.'||$2)::regclass`, schema, name).Scan(&cacheSize)
+	var lastVal string
+	_ = q.QueryRow(ctx, `SELECT last_value::text FROM `+pgx.Identifier{schema, name}.Sanitize()).Scan(&lastVal)
+	qi := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	var sb strings.Builder
+	sb.WriteString("CREATE SEQUENCE " + qi(schema) + "." + qi(name))
+	if startVal != "" {
+		sb.WriteString(" START WITH " + startVal)
+	}
+	if incr != "" {
+		sb.WriteString(" INCREMENT BY " + incr)
+	}
+	if minVal != "" {
+		sb.WriteString(" MINVALUE " + minVal)
+	} else {
+		sb.WriteString(" NO MINVALUE")
+	}
+	if maxVal != "" && maxVal != "9223372036854775807" {
+		sb.WriteString(" MAXVALUE " + maxVal)
+	} else {
+		sb.WriteString(" NO MAXVALUE")
+	}
+	sb.WriteString(fmt.Sprintf(" CACHE %d", cacheSize))
+	if strings.EqualFold(cycle, "yes") {
+		sb.WriteString(" CYCLE")
+	} else {
+		sb.WriteString(" NO CYCLE")
+	}
+	sb.WriteString(";")
+	writeJSON(w, 200, map[string]any{
+		"schema": schema, "name": name,
+		"data_type": dataType, "start_value": startVal,
+		"minimum_value": minVal, "maximum_value": maxVal,
+		"increment": incr, "cycle_option": cycle,
+		"cache_size": cacheSize, "last_value": lastVal,
+		"definition": sb.String(),
+	})
+}
+
+func (h *Handler) TypeDef(w http.ResponseWriter, r *http.Request) {
+	q, _, ok := h.q(r)
+	if !ok {
+		writeJSON(w, 401, map[string]string{"error": "not connected"})
+		return
+	}
+	schema, name := r.URL.Query().Get("schema"), r.URL.Query().Get("name")
+	if name == "" {
+		writeJSON(w, 400, map[string]string{"error": "name required"})
+		return
+	}
+	if schema == "" {
+		schema = "public"
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	_, data, err := queryJSON(q, ctx, `SELECT
+		CASE t.typtype WHEN 'e' THEN 'enum' WHEN 'd' THEN 'domain' WHEN 'c' THEN 'composite' WHEN 'b' THEN 'base' WHEN 'p' THEN 'pseudo' ELSE t.typtype::text END,
+		COALESCE(obj_description(t.oid,'pg_type'),''),
+		COALESCE(CASE WHEN t.typtype='e' THEN (SELECT string_agg(enumlabel, chr(31) ORDER BY enumsortorder) FROM pg_enum WHERE enumtypid=t.oid) ELSE '' END, '')
+		FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace
+		WHERE n.nspname=$1 AND t.typname=$2 AND t.typtype IN ('e','d','c') AND t.oid NOT IN (SELECT reltype FROM pg_class WHERE relkind IN ('r','v','m','f','p'))`, schema, name)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if len(data) == 0 {
+		writeJSON(w, 400, map[string]string{"error": "type not found"})
+		return
+	}
+	str := func(v any) string {
+		if v == nil {
+			return ""
+		}
+		return fmt.Sprint(v)
+	}
+	kind, comment, labels := str(data[0][0]), str(data[0][1]), str(data[0][2])
+	qi := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	var def, display string
+	if kind == "enum" {
+		vals := []string{}
+		if labels != "" {
+			for _, l := range strings.Split(labels, "\x1f") {
+				vals = append(vals, `'`+strings.ReplaceAll(l, `'`, `''`)+`'`)
+			}
+		}
+		def = fmt.Sprintf("CREATE TYPE %s.%s AS ENUM (%s);", qi(schema), qi(name), strings.Join(vals, ", "))
+	} else {
+		_ = q.QueryRow(ctx, `SELECT format_type(t.oid, NULL) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname=$1 AND t.typname=$2`, schema, name).Scan(&display)
+	}
+	writeJSON(w, 200, map[string]any{
+		"schema": schema, "name": name,
+		"kind": kind, "comment": comment, "labels": strings.ReplaceAll(labels, "\x1f", ", "),
+		"definition": def, "display": display,
+	})
+}
+
 func (h *Handler) Constraints(w http.ResponseWriter, r *http.Request) {
 	q, _, ok := h.q(r)
 	if !ok {

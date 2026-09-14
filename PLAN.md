@@ -90,6 +90,8 @@ GET  /api/triggers?session_id=&schema=&table=
 GET  /api/constraints?session_id=&schema=&table=
 GET  /api/view-def?session_id=&schema=&name=
 GET  /api/func-def?session_id=&schema=&name=
+GET  /api/seq-def?session_id=&schema=&name=   → {schema,name,data_type,start_value,minimum_value,maximum_value,increment,cycle_option,cache_size,last_value,definition}
+GET  /api/type-def?session_id=&schema=&name=  → {schema,name,kind,comment,labels,definition,display} (definition set for enums; display=format_type for the rest)
 GET  /api/table-stats?session_id=&schema=&table=
 GET  /api/erd?session_id=&schema=  (also returns `columns: {table: [{name,type,pk,fk}]}` for the ERD canvas — additive, nodes/edges unchanged)
 GET  /api/search?session_id=&q=

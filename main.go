@@ -50,6 +50,8 @@ func main() {
 	mux.HandleFunc("/api/constraints", h.Constraints)
 	mux.HandleFunc("/api/view-def", h.ViewDef)
 	mux.HandleFunc("/api/func-def", h.FuncDef)
+	mux.HandleFunc("/api/seq-def", h.SeqDef)
+	mux.HandleFunc("/api/type-def", h.TypeDef)
 	mux.HandleFunc("/api/table-stats", h.TableStats)
 	mux.HandleFunc("/api/erd", h.ERD)
 	mux.HandleFunc("/api/search", h.Search)

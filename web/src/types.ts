@@ -130,7 +130,22 @@ export interface ErdTabT {
   } | null
 }
 
-export type Tab = QueryTabT | TableTabT | BrowserTabT | ErdTabT | DocsTabT
+export type ObjectKind = 'function' | 'sequence' | 'type'
+
+export interface ObjectTabT {
+  id: string
+  kind: 'object'
+  title: string
+  sessionId: string
+  objectKind: ObjectKind
+  schema: string
+  name: string
+  def: string | null
+  details: Record<string, unknown> | null
+  error?: string
+}
+
+export type Tab = QueryTabT | TableTabT | BrowserTabT | ErdTabT | DocsTabT | ObjectTabT
 
 export type SideView = 'history' | 'snippets' | 'server' | 'activity' | 'locks' | 'stats' | 'settings' | 'logs'
 
@@ -158,4 +173,6 @@ export interface StoredTab {
   offset?: number
   key?: string
   snapshot?: QuerySnapshot
+  objectKind?: ObjectKind
+  name?: string
 }

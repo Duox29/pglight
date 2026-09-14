@@ -14,6 +14,7 @@ import { TableWorkspace } from './components/TableWorkspace'
 import { BrowserView } from './components/BrowserView'
 import { DocsView } from './components/DocsView'
 import { ErdView } from './components/ErdView'
+import { ObjectView } from './components/ObjectView'
 import { SidePanel } from './components/SidePanel'
 import { SearchPalette } from './components/SearchPalette'
 import { api, apiClient, q, type QueryResult } from './lib/api'
@@ -26,6 +27,7 @@ import type {
   SavedConnection,
   SchemaGroup,
   SessionInfo,
+  ObjectKind,
   SideView,
   Snippet,
   StoredTab,
@@ -84,6 +86,8 @@ function slimTab(t: Tab): StoredTab | null {
       return { id: t.id, kind: t.kind, title: t.title, sessionId, key: t.id.split('__')[0].replace(/^b_/, '') }
     case 'erd':
       return { id: t.id, kind: t.kind, title: t.title, sessionId, schema: t.schema }
+    case 'object':
+      return { id: t.id, kind: t.kind, title: t.title, sessionId, schema: t.schema, name: t.name, objectKind: t.objectKind }
     case 'docs':
       return { id: 'docs', kind: 'docs', title: 'Docs' }
   }
@@ -303,6 +307,10 @@ export default function App() {
             return `b_${t.id.split('__')[0].replace(/^b_/, '')}__${short(newSid)}`
           case 'erd':
             return `e_${t.schema}__${short(newSid)}`
+          case 'object': {
+            const shortName = t.name.split('(')[0]
+            return `o_${t.objectKind}_${t.schema}_${shortName}__${short(newSid)}`
+          }
           default:
             return t.id
         }
@@ -753,6 +761,56 @@ export default function App() {
     },
     [activeId],
   )
+  /* ---------- object tabs (functions / sequences / types) ---------- */
+  const loadObjectDef = useCallback(
+    async (sid: string, id: string, kind: ObjectKind, schema: string, name: string) => {
+      if (!sid) return
+      try {
+        if (kind === 'function') {
+          const rows = await api<({ schema?: string; name?: string; def?: string; lang?: string; kind?: string } & Record<string, unknown>)[] | { error: string }>(
+            q(sid, `/api/func-def?schema=${encodeURIComponent(schema)}&name=${encodeURIComponent(name)}`),
+          )
+          if (!Array.isArray(rows)) throw new Error(rows.error || 'Failed to load function definition')
+          const row = rows[0] as (Record<string, unknown> & { def?: unknown }) | undefined
+          if (!row) throw new Error(`Function ${schema}.${name} not found`)
+          const def = typeof row.def === 'string' ? row.def : null
+          setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'object' ? { ...t, def, details: { ...row }, error: undefined } : t)))
+        } else {
+          const url = kind === 'sequence' ? '/api/seq-def' : '/api/type-def'
+          const j = await api<Record<string, unknown> & { definition?: unknown; error?: string }>(
+            q(sid, `${url}?schema=${encodeURIComponent(schema)}&name=${encodeURIComponent(name)}`),
+          )
+          if (typeof j.error === 'string' && j.error) throw new Error(j.error)
+          const def = typeof j.definition === 'string' ? j.definition : null
+          setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'object' ? { ...t, def, details: { ...j }, error: undefined } : t)))
+        }
+      } catch (e) {
+        setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'object' ? { ...t, def: null, error: e instanceof Error ? e.message : String(e) } : t)))
+      }
+    },
+    [],
+  )
+
+  const openObjectTab = useCallback(
+    (kind: ObjectKind, schema: string, name: string, sidOver?: string) => {
+      const sid = sidOver ?? activeId
+      if (!sid) {
+        toast.error(`Connect to a database first — cannot open ${schema}.${name}`)
+        return
+      }
+      const shortName = name.split('(')[0]
+      const id = `o_${kind}_${schema}_${shortName}__${shortSid(sid)}`
+      setTabs((prev) =>
+        prev.find((t) => t.id === id)
+          ? prev
+          : [...prev, { id, kind: 'object', title: name, sessionId: sid, objectKind: kind, schema, name, def: null, details: null }],
+      )
+      setActiveTab(id)
+      void loadObjectDef(sid, id, kind, schema, name)
+    },
+    [activeId, loadObjectDef],
+  )
+
 
   /* ---------- last-session restore (tabs + autologin) ---------- */
   const restoreStoredTabs = useCallback(
@@ -798,6 +856,12 @@ export default function App() {
           if (seenIds.has(id)) continue
           seenIds.add(id)
           rebuilt.push({ id, kind: 'erd', title: `ERD ${s.schema}`, sessionId: sid, schema: s.schema, data: null })
+        } else if (s.kind === 'object' && s.schema && s.name && s.objectKind) {
+          const shortName = s.name.split('(')[0]
+          const id = `o_${s.objectKind}_${s.schema}_${shortName}__${shortSid(sid)}`
+          if (seenIds.has(id)) continue
+          seenIds.add(id)
+          rebuilt.push({ id, kind: 'object', title: s.name, sessionId: sid, objectKind: s.objectKind, schema: s.schema, name: s.name, def: null, details: null })
         } else if (s.kind === 'docs') {
           if (seenIds.has('docs')) continue
           seenIds.add('docs')
@@ -846,10 +910,12 @@ export default function App() {
               setTabs((prev) => prev.map((x) => (x.id === t.id && x.kind === 'erd' ? { ...x, data: null } : x)))
               toast.error(e instanceof Error ? e.message : String(e))
             })
+        } else if (t.kind === 'object') {
+          void loadObjectDef(sid, t.id, t.objectKind, t.schema, t.name)
         }
       }
     },
-    [loadTablePage, loadTableMeta, newQueryTab],
+    [loadTablePage, loadTableMeta, loadObjectDef, newQueryTab],
   )
 
   const openDocsTab = useCallback(() => {
@@ -1328,6 +1394,7 @@ export default function App() {
             onOpenTable={openTableTab}
             onOpenBrowser={openBrowser}
             onOpenErd={openErd}
+            onOpenObject={openObjectTab}
             onRefresh={() => loadExplorer()}
             onNewQuery={newScopedQuery}
             onNewSchema={createSchema}
@@ -1601,6 +1668,19 @@ export default function App() {
                     })
                 }
                 onOpenTable={(schema, table) => openTableTab(schema, table, cur.sessionId)}
+              />
+            )}
+            {cur?.kind === 'object' && (
+              <ObjectView
+                tab={cur}
+                onReload={() => loadObjectDef(cur.sessionId, cur.id, cur.objectKind, cur.schema, cur.name)}
+                onCopy={copyName}
+                onOpenQuery={() =>
+                  newQueryTab(
+                    cur.def ?? `-- ${cur.objectKind} ${cur.schema}.${cur.name}\nSELECT 1;`,
+                    cur.sessionId,
+                  )
+                }
               />
             )}
             {cur?.kind === 'docs' && <DocsView />}

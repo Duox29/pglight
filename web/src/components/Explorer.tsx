@@ -20,7 +20,7 @@ import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
 import { ScrollArea } from './ui/scroll-area'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './ui/context-menu'
-import type { DbInfo, SchemaGroup } from '@/types'
+import type { DbInfo, ObjectKind, SchemaGroup } from '@/types'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -32,6 +32,7 @@ interface Props {
   onOpenTable: (schema: string, table: string) => void
   onOpenBrowser: (key: 'extensions' | 'roles', title: string) => void
   onOpenErd: (schema: string) => void
+  onOpenObject: (kind: ObjectKind, schema: string, name: string) => void
   onRefresh: () => void
   onNewQuery: (scope: { db?: string; schema?: string; table?: string }) => void
   onNewSchema: (db: string) => void
@@ -189,8 +190,9 @@ export function Explorer(p: Props) {
                 <ContextMenuItem onSelect={p.onRefresh}>Refresh</ContextMenuItem>
               </ContextMenuContent>
             )
-            const slimMenu = (name: string) => (
+            const objectMenu = (kind: ObjectKind) => (name: string) => (
               <ContextMenuContent>
+                <ContextMenuItem onSelect={() => p.onOpenObject(kind, s.schema, name)}>View definition</ContextMenuItem>
                 <ContextMenuItem onSelect={() => p.onNewQuery({ schema: s.schema })}>New Query</ContextMenuItem>
                 <ContextMenuItem onSelect={() => p.onCopy(`${s.schema}.${name}`)}>Copy name</ContextMenuItem>
                 <ContextMenuItem onSelect={p.onRefresh}>Refresh</ContextMenuItem>
@@ -224,9 +226,9 @@ export function Explorer(p: Props) {
                     <Group icon={<Eye className="h-3 w-3" />} label="Views" items={V} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><Eye className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="truncate">{n}</span></span>} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
                     <Group icon={<Layers className="h-3 w-3" />} label="MatViews" items={M} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><Layers className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="truncate">{n}</span></span>} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
                     <Group icon={<Network className="h-3 w-3" />} label="Foreign" items={F} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><Network className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="truncate">{n}</span></span>} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
-                    <Group icon={<FunctionSquare className="h-3 w-3" />} label="Functions" items={Fn} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><FunctionSquare className="h-3 w-3 shrink-0 text-purple-400/70" /><span className="truncate">{n}</span></span>} menu={slimMenu} />
-                    <Group icon={<Hash className="h-3 w-3" />} label="Sequences" items={Sq} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><Hash className="h-3 w-3 shrink-0 text-amber-400/70" /><span className="truncate">{n}</span></span>} menu={slimMenu} />
-                    <Group icon={<Shapes className="h-3 w-3" />} label="Types" items={Ty} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><Shapes className="h-3 w-3 shrink-0 text-cyan-400/70" /><span className="truncate">{n}</span></span>} menu={slimMenu} />
+                    <Group icon={<FunctionSquare className="h-3 w-3" />} label="Functions" items={Fn} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><FunctionSquare className="h-3 w-3 shrink-0 text-purple-400/70" /><span className="truncate">{n}</span></span>} onOpen={(n) => p.onOpenObject('function', s.schema, n)} menu={objectMenu('function')} />
+                    <Group icon={<Hash className="h-3 w-3" />} label="Sequences" items={Sq} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><Hash className="h-3 w-3 shrink-0 text-amber-400/70" /><span className="truncate">{n}</span></span>} onOpen={(n) => p.onOpenObject('sequence', s.schema, n)} menu={objectMenu('sequence')} />
+                    <Group icon={<Shapes className="h-3 w-3" />} label="Types" items={Ty} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><Shapes className="h-3 w-3 shrink-0 text-cyan-400/70" /><span className="truncate">{n}</span></span>} onOpen={(n) => p.onOpenObject('type', s.schema, n)} menu={objectMenu('type')} />
                   </div>
                 )}
               </div>
