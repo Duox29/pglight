@@ -3,6 +3,7 @@ import {
   Background,
   Controls,
   MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   getConnectedEdges,
@@ -12,13 +13,14 @@ import {
   useReactFlow,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { Spline, Slash } from 'lucide-react'
 import { toast } from 'sonner'
 import { EmptyNote } from './ui/feedback'
 import ErdTableNode, { type ErdTableNodeT } from './erd/ErdTableNode'
 import ErdRelationEdge, { type ErdRelationEdgeT } from './erd/ErdRelationEdge'
 import { ErdToolbar } from './erd/ErdToolbar'
 import { layoutTables, type ErdPos } from './erd/erdLayout'
-import { dstHandle, mapErd, srcHandle, type ErdDataDto } from './erd/erdMapper'
+import { dstHandle, mapErd, srcHandle, type ErdDataDto, type ErdLineType } from './erd/erdMapper'
 import { clearErdLayout, loadErdLayout, saveErdLayout } from './erd/erdStorage'
 import type { ErdTabT } from '@/types'
 import { cn } from '@/lib/utils'
@@ -55,6 +57,7 @@ function ErdCanvasInner(props: {
 
   const [query, setQuery] = useState('')
   const [focusId, setFocusId] = useState<string | null>(null)
+  const [line, setLine] = useState<ErdLineType>('bezier')
   const [selected, setSelected] = useState<{ nodes: string[]; edges: string[] }>({
     nodes: [],
     edges: [],
@@ -127,7 +130,7 @@ function ErdCanvasInner(props: {
       sourceHandle: srcHandle(r.sourceColumn),
       targetHandle: dstHandle(r.targetColumn),
       markerEnd: { type: 'arrowclosed' as const, color: '#1f6feb' },
-      data: { label: r.labeled ? r.sourceColumn : '', dimmed: false },
+      data: { label: r.labeled ? r.sourceColumn : '', dimmed: false, line },
       style: { stroke: '#1f6feb', strokeWidth: 1.5 },
     }))
     return { nodes, edges }
@@ -137,6 +140,14 @@ function ErdCanvasInner(props: {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>(initial.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>(initial.edges)
+
+  // Toolbar line switch: push the shape into every edge's data (no rebuild).
+  useEffect(() => {
+    setEdges((prev) => {
+      if (prev.every((e) => (e.data?.line ?? 'bezier') === line)) return prev
+      return prev.map((e) => ({ ...e, data: { label: e.data?.label ?? '', dimmed: e.data?.dimmed ?? false, line } }))
+    })
+  }, [line, setEdges])
 
   useOnSelectionChange({ onChange: onSelectionChange })
 
@@ -195,13 +206,13 @@ function ErdCanvasInner(props: {
           !active ||
           (selected.nodes.length === 1 ? relIds.has(e.id) : true) &&
             (selectedRel ? e.id === selectedRel.id : true)
-        const dd = e.data ?? { label: '', dimmed: false }
+        const dd = e.data ?? { label: '', dimmed: false, line }
         const dimmed: boolean = active && !keep
-        if ((dd.dimmed ?? false) === dimmed && e.selected === selected.edges.includes(e.id)) return e
-        return { ...e, selected: selected.edges.includes(e.id), data: { label: dd.label ?? '', dimmed } }
+        if ((dd.dimmed ?? false) === dimmed && (dd.line ?? 'bezier') === line && e.selected === selected.edges.includes(e.id)) return e
+        return { ...e, selected: selected.edges.includes(e.id), data: { label: dd.label ?? '', dimmed, line: dd.line ?? line } }
       }),
     )
-  }, [selected, neighborIds, selectedRel, matchIds, focusId, graph, setNodes, setEdges])
+  }, [selected, neighborIds, selectedRel, matchIds, focusId, graph, setNodes, setEdges, line])
 
   const persistDrag = useCallback(() => {
     if (Object.keys(dragPos.current).length === 0) return
@@ -295,6 +306,36 @@ function ErdCanvasInner(props: {
           className="[&_.react-flow__attribution]:hidden [&_.react-flow__pane]:!touch-none"
         >
           <Background gap={24} size={1} color="#1a1f2a" />
+          <Panel position="top-left">
+            <div className="flex overflow-hidden rounded-full border border-[#2a2f3a] bg-[#13161c]/95 shadow-sm" role="group" aria-label="Relation line style">
+              <button
+                type="button"
+                onClick={() => setLine('bezier')}
+                aria-label="Curved relation lines"
+                aria-pressed={line === 'bezier'}
+                title="Curved lines"
+                className={cn(
+                  'flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                  line === 'bezier' && 'bg-[#1f6feb]/20 text-foreground',
+                )}
+              >
+                <Spline className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setLine('straight')}
+                aria-label="Straight relation lines"
+                aria-pressed={line === 'straight'}
+                title="Straight lines"
+                className={cn(
+                  'flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                  line === 'straight' && 'bg-[#1f6feb]/20 text-foreground',
+                )}
+              >
+                <Slash className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </Panel>
           <Controls
             showInteractive={false}
             className={cn(
@@ -305,13 +346,15 @@ function ErdCanvasInner(props: {
           <MiniMap
             pannable
             zoomable
-            className="!border-[#2a2f3a] !bg-[#0b0d11]/90"
+            nodeBorderRadius={6}
+            bgColor="#0b0d11"
             maskColor="rgba(11,13,17,0.7)"
             nodeColor="#2a2f3a"
+            style={{ borderRadius: 9999 }}
           />
         </ReactFlow>
         {(matchIds || selected.nodes.length === 1 || selectedRel) && (
-          <div className="pointer-events-none absolute left-2 top-2 max-w-[70%] truncate rounded border border-[#2a2f3a] bg-[#13161c]/95 px-2 py-1 text-[11px] text-muted-foreground">
+          <div className="pointer-events-none absolute left-2 top-14 max-w-[70%] truncate rounded border border-[#2a2f3a] bg-[#13161c]/95 px-2 py-1 text-[11px] text-muted-foreground">
             {matchIds && !selectedRel && selected.nodes.length !== 1
               ? `${shownCounts} matching table${shownCounts === 1 ? '' : 's'} — Enter to focus`
               : selectedRel

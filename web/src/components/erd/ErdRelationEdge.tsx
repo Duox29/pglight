@@ -3,13 +3,18 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   getBezierPath,
+  getStraightPath,
   type Edge,
   type EdgeProps,
 } from '@xyflow/react'
+import type { ErdLineType } from './erdMapper'
+
 export interface ErdRelationEdgeData extends Record<string, unknown> {
   /** Source column label, shown only when several FKs link the same table pair. */
   label: string
   dimmed: boolean
+  /** Line shape, driven by the canvas toolbar (config, not a separate edge type). */
+  line: ErdLineType
 }
 
 export type ErdRelationEdgeT = Edge<ErdRelationEdgeData, 'erdRelation'>
@@ -26,7 +31,8 @@ function ErdRelationEdgeInner({
   data,
   markerEnd,
 }: EdgeProps<ErdRelationEdgeT>) {
-  const [path, labelX, labelY] = getBezierPath({
+  const getPath = data?.line === 'straight' ? getStraightPath : getBezierPath
+  const [path, labelX, labelY] = getPath({
     sourceX,
     sourceY,
     sourcePosition,

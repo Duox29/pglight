@@ -16,6 +16,9 @@ export interface ErdEdgeDto {
   dst_col: string
 }
 
+/** Line shape for relation edges, switched from the canvas toolbar. */
+export type ErdLineType = 'bezier' | 'straight'
+
 export interface ErdDataDto {
   nodes: string[]
   edges: ErdEdgeDto[]
