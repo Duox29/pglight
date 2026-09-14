@@ -28,6 +28,35 @@ function isJsonType(v: unknown, t?: string) {
   const s = v.trim()
   return (s.startsWith('{') && s.endsWith('}')) || (s.startsWith('[') && s.endsWith(']'))
 }
+
+function toBool(v: unknown): boolean {
+  return v === true || v === 't' || v === 'true' || v === 'TRUE' || v === '1' || v === 1
+}
+
+/** Type-aware cell comparator: numerics numerically, bools false<true, NULLs last. */
+export function compareGridValues(a: unknown, b: unknown, type?: string): number {
+  if (a == null && b == null) return 0
+  if (a == null) return 1
+  if (b == null) return -1
+  if (isNumericType(type)) {
+    const na = Number(a)
+    const nb = Number(b)
+    if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb
+    if (Number.isFinite(na) !== Number.isFinite(nb)) return Number.isFinite(na) ? -1 : 1
+  } else if (isBoolType(type)) {
+    const ba = toBool(a)
+    const bb = toBool(b)
+    if (ba !== bb) return Number(ba) - Number(bb)
+    return 0
+  }
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })
+}
+
+/** Sort grid rows by column using the column's Postgres type. NULLs always last. */
+export function sortGridRows(rows: unknown[][], sort: { column: number; direction: 'asc' | 'desc' }, types?: string[]): unknown[][] {
+  const cmp = (a: unknown[], b: unknown[]) => compareGridValues(a[sort.column], b[sort.column], types?.[sort.column])
+  return [...rows].sort((a, b) => (sort.direction === 'asc' ? cmp(a, b) : -cmp(a, b)))
+}
 /** Prebuilt result grid: sticky header, truncated cells, NULL styling. */
 export function DataGrid({
   data,

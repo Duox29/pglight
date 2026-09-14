@@ -83,7 +83,8 @@ function lexSql(s: string): SqlTok[] {
       out.push({ text: s.slice(i, j), code: false })
       i = j
     } else if (c === '$') {
-      const tag = /^\$[A-Za-z_][\w$]*\$/.exec(s.slice(i))
+      // Dollar-quoted string: $$...$$ or $tag$...$tag$ (tag may be empty).
+      const tag = /^\$(?:[A-Za-z_][\w$]*)?\$/.exec(s.slice(i))
       if (tag) {
         flush()
         const close = s.indexOf(tag[0], i + tag[0].length)

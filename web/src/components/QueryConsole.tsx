@@ -6,7 +6,7 @@ import { SqlEditor, type SqlEditorHandle } from './SqlEditor'
 import { ensureSnapshot } from '@/lib/schemaCache'
 import { Badge } from './ui/badge'
 import { Card } from './ui/card'
-import { DataGrid } from './ui/data-grid'
+import { DataGrid, sortGridRows } from './ui/data-grid'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './ui/resizable'
 import { ErrorText } from './ui/feedback'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
@@ -170,10 +170,7 @@ export function QueryConsole(p: Props) {
           ) : (
             <>
               <DataGrid
-                data={{ columns: res.columns, types: res.types, rows: sort == null ? res.rows : [...res.rows].sort((a, b) => {
-                  const cmp = String(a[sort.column] ?? '').localeCompare(String(b[sort.column] ?? ''))
-                  return sort.direction === 'asc' ? cmp : -cmp
-                })}}
+                data={{ columns: res.columns, types: res.types, rows: sort == null ? res.rows : sortGridRows(res.rows, sort, res.types) }}
                 sort={sort}
                 onSort={(i) => {
                   setSort((prev) => (prev?.column === i ? { column: i, direction: prev.direction === 'asc' ? 'desc' : 'asc' } : { column: i, direction: 'asc' }))
