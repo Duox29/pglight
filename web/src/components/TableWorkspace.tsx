@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, FileDown, Plus, RefreshCw, Upload, Copy } from 'lucide-react'
+import { ArrowLeft, ArrowRight, FileDown, Pencil, Plus, RefreshCw, Trash2, Upload, Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
@@ -11,6 +11,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { ErrorText, EmptyNote } from './ui/feedback'
 import type { TableSubtab, TableTabT } from '@/types'
 import type { DialogsApi } from './dialogs'
+import { ColumnDialog, ConstraintDialog, type ColumnValues } from './ColumnEditor'
+import { IndexDialog, TriggerDialog } from './IndexTriggerEditor'
 import { download, parseCSV, resultToCSV, resultToInserts } from '@/lib/format'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from './ui/context-menu'
 
@@ -31,12 +33,43 @@ interface Props {
   onMaintenance: (op: string) => void
   onImport: (columns: string[], rows: unknown[][]) => void
   onOpenErd: () => void
+  onAlter: (p: {
+    op: string
+    column?: string
+    new_name?: string
+    type?: string
+    nullable?: boolean
+    default?: string
+    drop_default?: boolean
+    constraint?: string
+    def?: string
+    cascade?: boolean
+    index?: string
+    unique?: boolean
+    method?: string
+    columns?: string[]
+    include?: string[]
+    where?: string
+    trigger?: string
+    timing?: string
+    events?: string[]
+    for_each?: string
+    function?: string
+    when?: string
+    update_of?: string[]
+  }) => Promise<void>
+  onRenameTable: () => void
   dialogs: DialogsApi
 }
 
 export function TableWorkspace(p: Props) {
   const { tab: t } = p
   const fileRef = useRef<HTMLInputElement>(null)
+  const [colDlg, setColDlg] = useState<{ mode: 'add' | 'edit'; initial: ColumnValues } | null>(null)
+  const [conDlg, setConDlg] = useState(false)
+  const [idxDlg, setIdxDlg] = useState(false)
+  const [trgDlg, setTrgDlg] = useState(false)
+  const colNames = (t.cols ?? []).map((c) => String(c['name'] ?? '')).filter(Boolean)
   // Bulk row selection, keyed by serialized row content so it survives
   // reloads/paging. Identical duplicate rows share one key (known limit).
   const [sel, setSel] = useState<Set<string>>(new Set())
@@ -294,23 +327,106 @@ export function TableWorkspace(p: Props) {
 
       <Tabs value={t.subtab}>
         <TabsContent value="columns">
+          <div className="mb-2 flex items-center gap-1.5">
+            <span className="text-[12px] text-muted-foreground">{t.cols ? `${t.cols.length} columns` : ''} · double-click a row to edit</span>
+            <span className="flex-1" />
+            <Button size="sm" variant="ghost" onClick={p.onRenameTable}>
+              <Pencil /> Rename table
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setColDlg({ mode: 'add', initial: { name: '', type: '', nullable: true, defDefault: '' } })}
+            >
+              <Plus /> Column
+            </Button>
+          </div>
           {t.cols ? (
             <Table>
               <TableHeader>
-                <TableRow>{['name', 'type', 'nullable', 'default', 'pk', 'comment'].map((c) => <TableHead key={c}>{c}</TableHead>)}</TableRow>
+                <TableRow>
+                  {['name', 'type', 'nullable', 'default', 'pk', 'comment'].map((c) => <TableHead key={c}>{c}</TableHead>)}
+                  <TableHead className="w-[76px]">actions</TableHead>
+                </TableRow>
               </TableHeader>
               <TableBody>
-                {t.cols.map((c, i) => (
-                  <TableRow key={i}>
-                    {['name', 'type', 'nullable', 'default', 'pk', 'comment'].map((k) => (
-                      <TableCell key={k}>{c[k] == null ? '' : String(c[k])}</TableCell>
-                    ))}
-                  </TableRow>
-                ))}
+                {t.cols.map((c, i) => {
+                  const nm = String(c['name'] ?? '')
+                  const nullable = String(c['nullable'] ?? '').toUpperCase() === 'YES' || c['nullable'] === true
+                  const initial: ColumnValues = {
+                    name: nm,
+                    type: String(c['type'] ?? ''),
+                    nullable,
+                    defDefault: c['default'] == null ? '' : String(c['default']),
+                  }
+                  return (
+                    <TableRow key={i} className="cursor-pointer" onDoubleClick={() => setColDlg({ mode: 'edit', initial })}>
+                      {['name', 'type', 'nullable', 'default', 'pk', 'comment'].map((k) => (
+                        <TableCell key={k} className="max-w-[320px] truncate">{c[k] == null ? '' : String(c[k])}</TableCell>
+                      ))}
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Tip content="Edit column (rename / type / nullable / default)">
+                            <Button size="sm" variant="ghost" aria-label={`Edit ${nm}`} onClick={() => setColDlg({ mode: 'edit', initial })}>
+                              <Pencil />
+                            </Button>
+                          </Tip>
+                          <Tip content={`Drop column ${nm}`}>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              aria-label={`Drop ${nm}`}
+                              onClick={async () => {
+                                const ok = await p.dialogs.confirm({
+                                  title: `Drop column ${nm}?`,
+                                  description: `${t.schema}.${t.table}.${nm} will be removed. This cannot be undone.`,
+                                  confirmText: 'Drop',
+                                  danger: true,
+                                })
+                                if (ok) p.onAlter({ op: 'drop_column', column: nm })
+                              }}
+                            >
+                              <Trash2 />
+                            </Button>
+                          </Tip>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
               </TableBody>
             </Table>
           ) : (
             <EmptyNote text="Loading columns…" />
+          )}
+          {colDlg && (
+            <ColumnDialog
+              open
+              onOpenChange={(v) => { if (!v) setColDlg(null) }}
+              mode={colDlg.mode}
+              initial={colDlg.initial}
+              onSubmit={async (nv) => {
+                if (colDlg.mode === 'add') {
+                  await p.onAlter({ op: 'add_column', column: nv.name, type: nv.type, nullable: nv.nullable, default: nv.defDefault })
+                  return
+                }
+                const orig = colDlg.initial
+                let cur = orig.name
+                if (nv.name !== orig.name) {
+                  await p.onAlter({ op: 'rename_column', column: cur, new_name: nv.name })
+                  cur = nv.name
+                }
+                if (nv.type !== orig.type) await p.onAlter({ op: 'alter_type', column: cur, type: nv.type })
+                if (nv.nullable !== orig.nullable) await p.onAlter({ op: 'set_nullable', column: cur, nullable: nv.nullable })
+                if (nv.defDefault !== orig.defDefault) {
+                  if (!nv.defDefault) await p.onAlter({ op: 'set_default', column: cur, drop_default: true })
+                  else await p.onAlter({ op: 'set_default', column: cur, default: nv.defDefault })
+                }
+                if (nv.name === orig.name && nv.type === orig.type && nv.nullable === orig.nullable && nv.defDefault === orig.defDefault) {
+                  toast.info('No changes')
+                }
+              }}
+            />
           )}
         </TabsContent>
         <TabsContent value="ddl">
@@ -342,19 +458,65 @@ export function TableWorkspace(p: Props) {
           )}
         </TabsContent>
         <TabsContent value="indexes">
+          <div className="mb-2 flex items-center gap-1.5">
+            <span className="text-[12px] text-muted-foreground">{t.ddl ? `${t.ddl.indexes?.length ?? 0} indexes` : ''}</span>
+            <span className="flex-1" />
+            <Button size="sm" variant="secondary" onClick={() => setIdxDlg(true)}>
+              <Plus /> Index
+            </Button>
+          </div>
           {t.ddl ? (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>name</TableHead>
                   <TableHead>definition</TableHead>
+                  <TableHead className="w-[96px]">actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {(t.ddl.indexes ?? []).map((x, i) => (
                   <TableRow key={i}>
-                    <TableCell>{x.name}</TableCell>
+                    <TableCell className="max-w-[240px] truncate">{x.name}</TableCell>
                     <TableCell className="font-mono">{x.def}</TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <Tip content={`Rename index ${x.name}`}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Rename ${x.name}`}
+                            onClick={async () => {
+                              const v = await p.dialogs.prompt({ title: `Rename index ${x.name}`, defaultValue: x.name })
+                              if (v == null) return
+                              const nn = v.trim()
+                              if (!nn || nn === x.name) return
+                              p.onAlter({ op: 'rename_index', index: x.name, new_name: nn })
+                            }}
+                          >
+                            <Pencil />
+                          </Button>
+                        </Tip>
+                        <Tip content={`Drop index ${x.name}`}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Drop ${x.name}`}
+                            onClick={async () => {
+                              const ok = await p.dialogs.confirm({
+                                title: `Drop index ${x.name}?`,
+                                description: 'Queries may get slower. This cannot be undone.',
+                                confirmText: 'Drop',
+                                danger: true,
+                              })
+                              if (ok) p.onAlter({ op: 'drop_index', index: x.name })
+                            }}
+                          >
+                            <Trash2 />
+                          </Button>
+                        </Tip>
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -362,8 +524,31 @@ export function TableWorkspace(p: Props) {
           ) : (
             <EmptyNote text="Loading…" />
           )}
+          {idxDlg && (
+            <IndexDialog
+              open
+              onOpenChange={(v) => { if (!v) setIdxDlg(false) }}
+              columns={colNames}
+              onSubmit={(iv) => p.onAlter({
+                op: 'create_index',
+                index: iv.name || undefined,
+                unique: iv.unique,
+                method: iv.method,
+                columns: iv.keys,
+                include: iv.include.length ? iv.include : undefined,
+                where: iv.where || undefined,
+              })}
+            />
+          )}
         </TabsContent>
         <TabsContent value="constraints">
+          <div className="mb-2 flex items-center gap-1.5">
+            <span className="text-[12px] text-muted-foreground">{t.constraints ? `${t.constraints.length} constraints` : ''}</span>
+            <span className="flex-1" />
+            <Button size="sm" variant="secondary" onClick={() => setConDlg(true)}>
+              <Plus /> Constraint
+            </Button>
+          </div>
           {t.constraints ? (
             <Table>
               <TableHeader>
@@ -371,6 +556,7 @@ export function TableWorkspace(p: Props) {
                   <TableHead>name</TableHead>
                   <TableHead>type</TableHead>
                   <TableHead>definition</TableHead>
+                  <TableHead className="w-[52px]">actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -379,6 +565,26 @@ export function TableWorkspace(p: Props) {
                     <TableCell>{x.name}</TableCell>
                     <TableCell>{x.type}</TableCell>
                     <TableCell className="font-mono">{x.def}</TableCell>
+                    <TableCell>
+                      <Tip content={`Drop constraint ${x.name}`}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label={`Drop ${x.name}`}
+                          onClick={async () => {
+                            const ok = await p.dialogs.confirm({
+                              title: `Drop constraint ${x.name}?`,
+                              description: 'This cannot be undone.',
+                              confirmText: 'Drop',
+                              danger: true,
+                            })
+                            if (ok) p.onAlter({ op: 'drop_constraint', constraint: x.name })
+                          }}
+                        >
+                          <Trash2 />
+                        </Button>
+                      </Tip>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -386,29 +592,100 @@ export function TableWorkspace(p: Props) {
           ) : (
             <EmptyNote text="Loading…" />
           )}
+          {conDlg && (
+            <ConstraintDialog
+              open
+              onOpenChange={(v) => { if (!v) setConDlg(false) }}
+              onSubmit={(cv) => p.onAlter({ op: 'add_constraint', constraint: cv.name || undefined, def: cv.def })}
+            />
+          )}
         </TabsContent>
         <TabsContent value="triggers">
+          <div className="mb-2 flex items-center gap-1.5">
+            <span className="text-[12px] text-muted-foreground">{t.triggers ? `${t.triggers.length} triggers` : ''}</span>
+            <span className="flex-1" />
+            <Button size="sm" variant="secondary" onClick={() => setTrgDlg(true)}>
+              <Plus /> Trigger
+            </Button>
+          </div>
           {t.triggers ? (
             <Table>
               <TableHeader>
                 <TableRow>
                   {['name', 'table', 'event', 'timing', 'statement'].map((c) => <TableHead key={c}>{c}</TableHead>)}
+                  <TableHead>status</TableHead>
+                  <TableHead className="w-[96px]">actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {t.triggers.map((x, i) => (
-                  <TableRow key={i}>
-                    <TableCell>{x.name}</TableCell>
-                    <TableCell>{x.table}</TableCell>
-                    <TableCell>{x.event}</TableCell>
-                    <TableCell>{x.timing}</TableCell>
-                    <TableCell className="font-mono">{x.statement}</TableCell>
-                  </TableRow>
-                ))}
+                {t.triggers.map((x, i) => {
+                  const disabled = (x.enabled ?? 'O') === 'D'
+                  return (
+                    <TableRow key={i}>
+                      <TableCell className="max-w-[200px] truncate">{x.name}</TableCell>
+                      <TableCell>{x.table}</TableCell>
+                      <TableCell>{x.event}</TableCell>
+                      <TableCell>{x.timing}</TableCell>
+                      <TableCell className="max-w-[320px] truncate font-mono">{x.statement}</TableCell>
+                      <TableCell>
+                        <Badge variant={disabled ? 'secondary' : 'success'}>{disabled ? 'disabled' : 'enabled'}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Tip content={disabled ? `Enable trigger ${x.name}` : `Disable trigger ${x.name}`}>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              aria-label={`${disabled ? 'Enable' : 'Disable'} ${x.name}`}
+                              onClick={() => p.onAlter({ op: disabled ? 'enable_trigger' : 'disable_trigger', trigger: x.name })}
+                            >
+                              {disabled ? 'on' : 'off'}
+                            </Button>
+                          </Tip>
+                          <Tip content={`Drop trigger ${x.name}`}>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              aria-label={`Drop ${x.name}`}
+                              onClick={async () => {
+                                const ok = await p.dialogs.confirm({
+                                  title: `Drop trigger ${x.name}?`,
+                                  description: 'This cannot be undone.',
+                                  confirmText: 'Drop',
+                                  danger: true,
+                                })
+                                if (ok) p.onAlter({ op: 'drop_trigger', trigger: x.name })
+                              }}
+                            >
+                              <Trash2 />
+                            </Button>
+                          </Tip>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
               </TableBody>
             </Table>
           ) : (
             <EmptyNote text="Loading…" />
+          )}
+          {trgDlg && (
+            <TriggerDialog
+              open
+              onOpenChange={(v) => { if (!v) setTrgDlg(false) }}
+              columns={colNames}
+              onSubmit={(tv) => p.onAlter({
+                op: 'create_trigger',
+                trigger: tv.name,
+                timing: tv.timing,
+                events: tv.events,
+                for_each: tv.forEach,
+                function: tv.function,
+                update_of: tv.updateOf.length ? tv.updateOf : undefined,
+                when: tv.when || undefined,
+              })}
+            />
           )}
         </TabsContent>
         <TabsContent value="stats">

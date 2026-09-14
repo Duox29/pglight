@@ -102,7 +102,7 @@ export interface TableTabT {
     triggers?: { name: string; def: string }[]
   } | null
   constraints: { name: string; type: string; def: string }[] | null
-  triggers: { name: string; table: string; event: string; timing: string; statement: string }[] | null
+  triggers: { name: string; table: string; event: string; timing: string; statement: string; enabled?: string }[] | null
   stats: Record<string, unknown> | null
 }
 

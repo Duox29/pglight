@@ -1017,6 +1017,74 @@ export default function App() {
     [tabs, markTxn, autocommit, loadTablePage],
   )
 
+  const alterTable = useCallback(
+    async (
+      tabId: string,
+      p: {
+        op: string
+        column?: string
+        new_name?: string
+        type?: string
+        nullable?: boolean
+        default?: string
+        drop_default?: boolean
+        constraint?: string
+        def?: string
+        cascade?: boolean
+        index?: string
+        unique?: boolean
+        method?: string
+        columns?: string[]
+        include?: string[]
+        where?: string
+        trigger?: string
+        timing?: string
+        events?: string[]
+        for_each?: string
+        function?: string
+        when?: string
+        update_of?: string[]
+      },
+    ) => {
+      const t = tabs.find((x) => x.id === tabId)
+      if (!t || t.kind !== 'table' || !t.sessionId) return
+      const sid = t.sessionId
+      const j = await apiClient.alterTable({ session_id: sid, schema: t.schema, table: t.table, ...p })
+      if (j.error) {
+        toast.error(j.error)
+        return
+      }
+      markTxn(sid, !!j.in_txn)
+      if (p.op === 'rename_table' && p.new_name) {
+        const nn = p.new_name
+        const nid = `t_${shortSid(sid)}_${t.schema}_${nn}`
+        setTabs((prev) => prev.map((x) => (x.id === tabId && x.kind === 'table' ? { ...x, id: nid, table: nn, title: nn } : x)))
+        setActiveTab(nid)
+        loadTablePage(sid, nid, t.schema, nn, t.limit, 0, t.filter, t.order)
+        loadTableMeta(sid, nid, t.schema, nn)
+      } else {
+        loadTablePage(sid, t.id, t.schema, t.table, t.limit, t.offset, t.filter, t.order)
+        loadTableMeta(sid, t.id, t.schema, t.table)
+      }
+      toast.success('Table altered')
+      loadExplorer(sid)
+    },
+    [tabs, markTxn, loadTablePage, loadTableMeta, loadExplorer],
+  )
+
+  const renameTable = useCallback(
+    async (tabId: string) => {
+      const t = tabs.find((x) => x.id === tabId)
+      if (!t || t.kind !== 'table') return
+      const v = await dialogs.prompt({ title: `Rename ${t.schema}.${t.table}`, defaultValue: t.table })
+      if (v == null) return
+      const nn = v.trim()
+      if (!nn || nn === t.table) return
+      alterTable(tabId, { op: 'rename_table', new_name: nn })
+    },
+    [tabs, dialogs, alterTable],
+  )
+
   /* ---------- global keys ---------- */
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -1487,6 +1555,8 @@ export default function App() {
                   }
                 }}
                 onOpenErd={() => openErd(cur.schema, cur.sessionId)}
+                onAlter={(pl) => alterTable(cur.id, pl)}
+                onRenameTable={() => renameTable(cur.id)}
                 dialogs={dialogs}
               />
             )}

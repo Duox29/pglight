@@ -123,6 +123,39 @@ export const apiClient = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(p),
     }),
+  alterTable: (p: {
+    session_id: string
+    schema: string
+    table: string
+    op: string
+    column?: string
+    new_name?: string
+    type?: string
+    nullable?: boolean
+    default?: string
+    drop_default?: boolean
+    constraint?: string
+    def?: string
+    cascade?: boolean
+    index?: string
+    unique?: boolean
+    method?: string
+    columns?: string[]
+    include?: string[]
+    where?: string
+    trigger?: string
+    timing?: string
+    events?: string[]
+    for_each?: string
+    function?: string
+    when?: string
+    update_of?: string[]
+  }) =>
+    api<{ ok?: boolean; in_txn?: boolean; error?: string }>('/api/alter-table', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(p),
+    }),
   cancel: (session: string, pid: number, kill?: boolean) =>
     api<{ ok?: boolean; error?: string }>(`/api/cancel?session_id=${encodeURIComponent(session)}&pid=${pid}${kill ? '&kill=1' : ''}`),
   getSettings: () => api<{ logging: LoggingConfig }>(`/api/settings`),

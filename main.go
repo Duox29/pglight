@@ -55,6 +55,7 @@ func main() {
 	mux.HandleFunc("/api/search", h.Search)
 	mux.HandleFunc("/api/maintenance", h.Maintenance)
 	mux.HandleFunc("/api/import", h.Import)
+	mux.HandleFunc("/api/alter-table", h.AlterTable)
 	mux.HandleFunc("/api/settings", h.Settings)
 	mux.HandleFunc("/api/logs", h.Logs)
 

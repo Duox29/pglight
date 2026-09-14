@@ -71,16 +71,17 @@ function Group(props: {
         <div className="ml-3">
           {props.items.map((t) => (
             <ContextMenu key={t.name}>
-              <ContextMenuTrigger asChild>
-                <div
-                  className="cursor-pointer truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent"
-                  title="Click to open · double-click for definition"
-                  onClick={() => props.onOpen(t.name)}
-                  onDoubleClick={() => props.onDetail?.(t.name)}
-                >
-                  {props.render(t.name)}
-                </div>
-              </ContextMenuTrigger>
+              <Tip content="Click to open · double-click for definition">
+                <ContextMenuTrigger asChild>
+                  <div
+                    className="cursor-pointer truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent"
+                    onClick={() => props.onOpen(t.name)}
+                    onDoubleClick={() => props.onDetail?.(t.name)}
+                  >
+                    {props.render(t.name)}
+                  </div>
+                </ContextMenuTrigger>
+              </Tip>
               {props.menu?.(t.name)}
             </ContextMenu>
           ))}
@@ -117,19 +118,20 @@ export function Explorer(p: Props) {
               .slice(0, 60)
               .map((d) => (
                 <ContextMenu key={d.name}>
-                  <ContextMenuTrigger asChild>
-                    <div
-                      className={cn(
-                        'cursor-pointer truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent',
-                        d.name === p.currentDb && 'font-semibold text-foreground',
-                      )}
-                      title="Click to reconnect to this database"
-                      onClick={() => p.onSwitchDb(d.name)}
-                    >
-                      {d.name === p.currentDb ? '●' : '○'} {d.name}
-                      <span className="text-muted-foreground"> {d.size ?? ''}</span>
-                    </div>
-                  </ContextMenuTrigger>
+                  <Tip content="Click to reconnect to this database">
+                    <ContextMenuTrigger asChild>
+                      <div
+                        className={cn(
+                          'cursor-pointer truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent',
+                          d.name === p.currentDb && 'font-semibold text-foreground',
+                        )}
+                        onClick={() => p.onSwitchDb(d.name)}
+                      >
+                        {d.name === p.currentDb ? '●' : '○'} {d.name}
+                        <span className="text-muted-foreground"> {d.size ?? ''}</span>
+                      </div>
+                    </ContextMenuTrigger>
+                  </Tip>
                   <ContextMenuContent>
                     <ContextMenuItem onSelect={() => p.onNewQuery({ db: d.name })}>New Query</ContextMenuItem>
                     <ContextMenuItem disabled={!p.connected} onSelect={() => p.onNewSchema(d.name)}>New Schema…</ContextMenuItem>
@@ -209,17 +211,27 @@ export function Explorer(p: Props) {
           <div className="flex items-center gap-1 px-1 py-1 text-[12px] font-semibold text-sky-300">
             <ServerCog className="h-3.5 w-3.5" /> Server objects
           </div>
-          <div className={cn('ml-3', !p.connected && 'pointer-events-none opacity-40')} title={p.connected ? undefined : 'Connect to a database first'}>
-            <Tip content="Installed Postgres extensions (pg_catalog)">
-              <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenBrowser('extensions', 'Extensions')}>○ Extensions</div>
+          {p.connected ? (
+            <div className="ml-3">
+              <Tip content="Installed Postgres extensions (pg_catalog)">
+                <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenBrowser('extensions', 'Extensions')}>○ Extensions</div>
+              </Tip>
+              <Tip content="Users, groups and their attributes">
+                <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenBrowser('roles', 'Roles')}>○ Roles</div>
+              </Tip>
+              <Tip content="Foreign-key graph of a schema">
+                <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenErd('public')}>○ ERD</div>
+              </Tip>
+            </div>
+          ) : (
+            <Tip content="Connect to a database first">
+              <div className="ml-3 opacity-40">
+                <div className="cursor-not-allowed rounded px-1.5 py-0.5 text-[12px]" aria-disabled>○ Extensions</div>
+                <div className="cursor-not-allowed rounded px-1.5 py-0.5 text-[12px]" aria-disabled>○ Roles</div>
+                <div className="cursor-not-allowed rounded px-1.5 py-0.5 text-[12px]" aria-disabled>○ ERD</div>
+              </div>
             </Tip>
-            <Tip content="Users, groups and their attributes">
-              <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenBrowser('roles', 'Roles')}>○ Roles</div>
-            </Tip>
-            <Tip content="Foreign-key graph of a schema">
-              <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenErd('public')}>○ ERD</div>
-            </Tip>
-          </div>
+          )}
         </div>
       </ScrollArea>
       <ScrollArea className="max-h-[38%] border-t px-3 py-2">

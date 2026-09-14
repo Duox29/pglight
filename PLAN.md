@@ -55,7 +55,7 @@ Backend (`internal/db`, `internal/api`):
 
 Frontend (`web/`):
 - [x] Explorer: Databases node + per-schema groups (Tables/Views/MatViews/Foreign/Functions/Sequences/Types) + global Extensions/Roles nodes. Lazy per-schema loading, filter, counts. Right-click context menus (Radix `ui/context-menu`) at database/schema/table tiers: scoped New Query (`SET search_path` + `SELECT … LIMIT 100`), New Schema/Table dialogs, Open Data, View Definition, Export CSV/INSERTs (≤1000 rows), Copy name, Refresh. No new backend endpoints.
-- [x] Table workspace with sub-tabs: **Data | Columns | DDL | Indexes | Constraints | Triggers | Stats**. DDL uses server definition + reconstructed fallback.
+- [x] Table workspace with sub-tabs: **Data | Columns | DDL | Indexes | Constraints | Triggers | Stats**. DDL uses server definition + reconstructed fallback. Columns tab edits via `POST /api/alter-table`: add/drop/rename column, change type (smart-suggest input, custom enums accepted), toggle nullable, set/drop default, rename table; Constraints tab adds/drops CHECK|UNIQUE|PK|FK|EXCLUDE; Indexes tab creates (unique, btree|hash|gin|gist|spgist|brin, multi-key ASC/DESC, expression keys, INCLUDE, partial WHERE, live SQL preview)/renames/drops; Triggers tab creates (BEFORE|AFTER|INSTEAD OF, INSERT|UPDATE|DELETE|TRUNCATE, ROW|STATEMENT, function, UPDATE OF cols, WHEN)/enables/disables/drops with status badge (`GET /api/triggers` now also returns `enabled` O|D|R|A).
 - [x] Query console upgrades: txn bar (autocommit toggle, Begin/Commit/Rollback, in-txn badge), Format button, Save-snippet, multi-result rendering (one grid per statement), per-result CSV/INSERT export. Statement timeout 1000s (`queryTimeout` in `internal/api/handlers.go`, console paths only). Cancel button (■): matches the tab's pool via `application_name=pglight:<session>` (`Manager.Add`) against active backends, SQL text only disambiguates concurrent runs; unique hit → `GET /api/cancel`, else toast pointing to Dashboard.
 - [x] Global search palette (Ctrl+K / button): jump to table/view/function, open DDL or data.
 - [x] Session survive-restart: per-session credentials (`session-conns`), boot 1:1 reconnect so tabs keep their own DB (dead sessions badged, never collapsed onto another DB), global 401 hook + 30s/focus heartbeat with one-shot auto-retry, per-session Reconnect / Reconnect-all in Connections, tab ids remapped on reconnect.
@@ -95,6 +95,7 @@ GET  /api/erd?session_id=&schema=
 GET  /api/search?session_id=&q=
 POST /api/maintenance       {session_id,schema,table,op}
 POST /api/import            {session_id,schema,table,columns,rows,on_conflict_do_nothing}
+POST /api/alter-table       {session_id,schema,table,op,…} — columns: add_column|drop_column|rename_column|alter_type|set_nullable|set_default|rename_table (types validated via to_regtype, custom enums ok); constraints: add_constraint|drop_constraint; indexes: create_index{index?,unique,method,columns[],include[],where}|drop_index|rename_index (CREATE INDEX takes an unqualified name — always lands in the table's schema); triggers: create_trigger{trigger,timing,events[],for_each,function,update_of[],when}|drop_trigger|enable_trigger|disable_trigger
 POST /api/query             (now multi-statement aware → {results[]} when >1)
 GET  /api/settings          → {logging: {enabled,level,log_http,log_query,slow_ms,max_entries}}
 POST /api/settings          {logging: {...}} (normalized + persisted to data/logging.json)
@@ -102,7 +103,7 @@ GET  /api/logs?limit=&level=&category= → {entries[]} (newest first; /api/logs 
 DELETE /api/logs            clear the ring buffer
 ```
 
-All txn-aware: `/api/query`, `/api/explain`, `/api/table-data`, `/api/row`, `/api/import`.
+All txn-aware: `/api/query`, `/api/explain`, `/api/table-data`, `/api/row`, `/api/import`, `/api/alter-table`.
 
 ## Frontend stack (Phase 2 — shadcn)
 
