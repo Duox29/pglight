@@ -18,7 +18,7 @@ import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
 import { ScrollArea } from './ui/scroll-area'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './ui/context-menu'
-import type { DbInfo, ObjectDetail, SchemaGroup } from '@/types'
+import type { DbInfo, SchemaGroup } from '@/types'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -26,14 +26,8 @@ interface Props {
   schemas: SchemaGroup[]
   currentDb: string
   connected: boolean
-  detail: ObjectDetail | null
   onSwitchDb: (name: string) => void
   onOpenTable: (schema: string, table: string) => void
-  onShowDDL: (schema: string, table: string) => void
-  onShowView: (schema: string, name: string) => void
-  onShowFunc: (schema: string, name: string) => void
-  onShowSeq: (schema: string, name: string) => void
-  onShowType: (schema: string, name: string) => void
   onOpenBrowser: (key: 'extensions' | 'roles', title: string) => void
   onOpenErd: (schema: string) => void
   onRefresh: () => void
@@ -49,8 +43,7 @@ function Group(props: {
   label: string
   items: { name: string }[]
   render: (name: string) => React.ReactNode
-  onOpen: (name: string) => void
-  onDetail?: (name: string) => void
+  onOpen?: (name: string) => void
   menu?: (name: string) => React.ReactNode
 }) {
   const [open, setOpen] = useState(true)
@@ -71,17 +64,22 @@ function Group(props: {
         <div className="ml-3">
           {props.items.map((t) => (
             <ContextMenu key={t.name}>
-              <Tip content="Click to open · double-click for definition">
+              {props.onOpen ? (
+                <Tip content="Click to open">
+                  <ContextMenuTrigger asChild>
+                    <div
+                      className="cursor-pointer truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent"
+                      onClick={() => props.onOpen?.(t.name)}
+                    >
+                      {props.render(t.name)}
+                    </div>
+                  </ContextMenuTrigger>
+                </Tip>
+              ) : (
                 <ContextMenuTrigger asChild>
-                  <div
-                    className="cursor-pointer truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent"
-                    onClick={() => props.onOpen(t.name)}
-                    onDoubleClick={() => props.onDetail?.(t.name)}
-                  >
-                    {props.render(t.name)}
-                  </div>
+                  <div className="truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent">{props.render(t.name)}</div>
                 </ContextMenuTrigger>
-              </Tip>
+              )}
               {props.menu?.(t.name)}
             </ContextMenu>
           ))}
@@ -154,11 +152,10 @@ export function Explorer(p: Props) {
             const total = T.length + V.length + M.length + F.length + Fn.length + Sq.length + Ty.length
             if (f && !total && !s.schema.toLowerCase().includes(f)) return null
             const isOpen = openSchemas[s.schema] ?? true
-            const fullMenu = (onDetail: (name: string) => void) => (name: string) => (
+            const fullMenu = (name: string) => (
               <ContextMenuContent>
                 <ContextMenuItem onSelect={() => p.onOpenTable(s.schema, name)}>Open Data</ContextMenuItem>
                 <ContextMenuItem onSelect={() => p.onNewQuery({ schema: s.schema, table: name })}>New Query</ContextMenuItem>
-                <ContextMenuItem onSelect={() => onDetail(name)}>View Definition</ContextMenuItem>
                 <ContextMenuSeparator />
                 <ContextMenuItem onSelect={() => p.onExport(s.schema, name, 'csv')}>Export CSV</ContextMenuItem>
                 <ContextMenuItem onSelect={() => p.onExport(s.schema, name, 'sql')}>Export INSERTs</ContextMenuItem>
@@ -196,13 +193,13 @@ export function Explorer(p: Props) {
                 </ContextMenu>
                 {isOpen && (
                   <div className="ml-2">
-                    <Group icon={<Table2 className="h-3 w-3" />} label="Tables" items={T} render={(n) => `▦ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} onDetail={(n) => p.onShowDDL(s.schema, n)} menu={fullMenu((n) => p.onShowDDL(s.schema, n))} />
-                    <Group icon={<Eye className="h-3 w-3" />} label="Views" items={V} render={(n) => `👁 ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} onDetail={(n) => p.onShowView(s.schema, n)} menu={fullMenu((n) => p.onShowView(s.schema, n))} />
-                    <Group icon={<Layers className="h-3 w-3" />} label="MatViews" items={M} render={(n) => `▦ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} onDetail={(n) => p.onShowView(s.schema, n)} menu={fullMenu((n) => p.onShowView(s.schema, n))} />
-                    <Group icon={<Network className="h-3 w-3" />} label="Foreign" items={F} render={(n) => `⛓ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} onDetail={(n) => p.onShowDDL(s.schema, n)} menu={fullMenu((n) => p.onShowDDL(s.schema, n))} />
-                    <Group icon={<FunctionSquare className="h-3 w-3" />} label="Functions" items={Fn} render={(n) => `ƒ ${n}`} onOpen={(n) => p.onShowFunc(s.schema, n)} onDetail={(n) => p.onShowFunc(s.schema, n)} menu={slimMenu} />
-                    <Group icon={<Hash className="h-3 w-3" />} label="Sequences" items={Sq} render={(n) => `🔢 ${n}`} onOpen={(n) => p.onShowSeq(s.schema, n)} menu={slimMenu} />
-                    <Group icon={<Shapes className="h-3 w-3" />} label="Types" items={Ty} render={(n) => `◈ ${n}`} onOpen={(n) => p.onShowType(s.schema, n)} menu={slimMenu} />
+                    <Group icon={<Table2 className="h-3 w-3" />} label="Tables" items={T} render={(n) => `▦ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
+                    <Group icon={<Eye className="h-3 w-3" />} label="Views" items={V} render={(n) => `👁 ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
+                    <Group icon={<Layers className="h-3 w-3" />} label="MatViews" items={M} render={(n) => `▦ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
+                    <Group icon={<Network className="h-3 w-3" />} label="Foreign" items={F} render={(n) => `⛓ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
+                    <Group icon={<FunctionSquare className="h-3 w-3" />} label="Functions" items={Fn} render={(n) => `ƒ ${n}`} menu={slimMenu} />
+                    <Group icon={<Hash className="h-3 w-3" />} label="Sequences" items={Sq} render={(n) => `🔢 ${n}`} menu={slimMenu} />
+                    <Group icon={<Shapes className="h-3 w-3" />} label="Types" items={Ty} render={(n) => `◈ ${n}`} menu={slimMenu} />
                   </div>
                 )}
               </div>
@@ -233,10 +230,6 @@ export function Explorer(p: Props) {
             </Tip>
           )}
         </div>
-      </ScrollArea>
-      <ScrollArea className="max-h-[38%] border-t px-3 py-2">
-        <div className="mb-1 text-[12px] font-semibold">{p.detail?.title ?? 'Object'}</div>
-        <div className="text-[12px]">{p.detail?.body ?? <span className="text-muted-foreground">Select a table</span>}</div>
       </ScrollArea>
     </div>
   )

@@ -19,14 +19,13 @@ import { DocsView } from './components/DocsView'
 import { ErdView } from './components/ErdView'
 import { SidePanel } from './components/SidePanel'
 import { SearchPalette } from './components/SearchPalette'
-import { api, apiClient, q } from './lib/api'
+import { api, apiClient, q, type QueryResult } from './lib/api'
 import { dropSnapshot, ensureSnapshot } from './lib/schemaCache'
 import { forgetSessionConn, readSessionConns, rememberSessionConn } from './lib/reconnect'
 import { onUnauthorized, useLocalStorage } from './lib/storage'
 import type {
   DbInfo,
   HistoryEntry,
-  ObjectDetail,
   SavedConnection,
   SchemaGroup,
   SessionInfo,
@@ -43,6 +42,13 @@ import { download, resultToCSV, resultToInserts, resultToJSON } from './lib/form
 const DEFAULT_SQL = 'SELECT * FROM information_schema.tables LIMIT 20;'
 
 const qi = (s: string) => `"${s.replace(/"/g, '""')}"`
+
+/** Primary-key columns from /api/columns metadata, or [] when the table has no safe row identity. */
+function pkOf(t: TableTabT): string[] {
+  const cols = t.cols ?? []
+  const pks = cols.filter((c) => String(c['pk'] ?? '').toLowerCase() === 't' || c['pk'] === true).map((c) => String(c['name'] ?? ''))
+  return pks.filter(Boolean)
+}
 
 // Mirrors the backend complete-cache DDL detector (ddlRe): after a
 // schema-changing run the editor snapshot is dropped and refetched once.
@@ -130,12 +136,17 @@ export default function App() {
   const [autoLogin, setAutoLogin] = useLocalStorage<boolean>('auto-login', true)
   const [databases, setDatabases] = useState<DbInfo[]>([])
   const [schemas, setSchemas] = useState<SchemaGroup[]>([])
-  const [detail, setDetail] = useState<ObjectDetail | null>(null)
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const [running, setRunning] = useState<Record<string, boolean>>({})
   const [history, setHistory] = useLocalStorage<HistoryEntry[]>('hist', [])
   const [snippets, setSnippets] = useLocalStorage<Snippet[]>('snippets', [])
+  // SQL actually sent per running tab (may be a selection, LIMIT-wrapped
+  // server-side). Used to match the backend in pg_stat_activity on Cancel.
+  const runSql = useRef<Record<string, string>>({})
+  // Monotonic token: stale tab loads (browser/ERD/restore) check it before
+  // writing into tab state so a late response cannot overwrite newer tabs.
+  const loadSeq = useRef(0)
   const [sideOpen, setSideOpen] = useState(false)
   const [sideView, setSideView] = useState<SideView>('history')
   const [credOpen, setCredOpen] = useLocalStorage<boolean>('conn-panel-open', true)
@@ -143,10 +154,6 @@ export default function App() {
   const dialogs = useMemo(() => createDialogs(setDlg), [])
   const [paletteOpen, setPaletteOpen] = useState(false)
   const tabSeq = useRef(0)
-  // SQL actually sent per running tab (may be a selection, LIMIT-wrapped
-  // server-side). Used to match the backend in pg_stat_activity on Cancel.
-  const runSql = useRef<Record<string, string>>({})
-
   // Dead-session tracking: backend pools die on server restart while tabs
   // persist. deadIds is state (badges); deadRef mirrors it for stable
   // callbacks; retriedRef bounds auto-reconnect to one attempt per session.
@@ -267,7 +274,7 @@ export default function App() {
   const disconnect = useCallback(
     (sid?: string) => {
       const target = sid ?? activeId
-      if (target) apiClient.disconnect(target)
+      if (target) apiClient.disconnect(target).catch(() => undefined)
       if (target) dropSnapshot(target)
       if (target) dropSession(target)
       if (sessions.length <= 1) setCredOpen(true)
@@ -277,8 +284,12 @@ export default function App() {
 
   const refreshTxn = useCallback(async () => {
     if (!session) return
-    const j = await apiClient.txn(session, 'status')
-    markTxn(session, !!j.in_txn)
+    try {
+      const j = await apiClient.txn(session, 'status')
+      markTxn(session, !!j.in_txn)
+    } catch {
+      /* heartbeat stays stale; next run surfaces it */
+    }
   }, [session, markTxn])
 
   /* ---------- reconnect (dead session → fresh pool, tabs follow) ---------- */
@@ -339,8 +350,12 @@ export default function App() {
     const ids = Object.keys(deadRef.current)
     let ok = 0
     for (const id of ids) {
-      const nid = await reconnectOne(id, { silent: true })
-      if (nid) ok++
+      try {
+        const nid = await reconnectOne(id, { silent: true })
+        if (nid) ok++
+      } catch {
+        /* keep going — remaining sessions still get their attempt */
+      }
     }
     if (ok) toast.success(`Reconnected ${ok} session${ok > 1 ? 's' : ''}`)
     else toast.error('Reconnect failed — check credentials')
@@ -370,9 +385,13 @@ export default function App() {
   const doTxn = useCallback(
     async (action: string) => {
       if (!session) return
-      const j = await apiClient.txn(session, action)
-      if (j.error) toast.error(j.error)
-      markTxn(session, !!j.in_txn)
+      try {
+        const j = await apiClient.txn(session, action)
+        if (j.error) toast.error(j.error)
+        markTxn(session, !!j.in_txn)
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e))
+      }
     },
     [session, markTxn],
   )
@@ -381,11 +400,19 @@ export default function App() {
   const loadExplorer = useCallback(async (sidOver?: string) => {
     const sid = sidOver ?? activeId
     if (!sid) return
-    const [sch, tbl, dbs] = await Promise.all([
-      api<unknown>(q(sid, '/api/schemas?')),
-      api<unknown>(q(sid, '/api/tables?')),
-      api<unknown>(q(sid, '/api/databases?')),
-    ])
+    let sch: unknown
+    let tbl: unknown
+    let dbs: unknown
+    try {
+      ;[sch, tbl, dbs] = await Promise.all([
+        api<unknown>(q(sid, '/api/schemas?')),
+        api<unknown>(q(sid, '/api/tables?')),
+        api<unknown>(q(sid, '/api/databases?')),
+      ])
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+      return
+    }
     const [views, matviews, foreign, functions, sequences, types] = await Promise.all(
       (['views', 'matviews', 'foreign', 'functions', 'sequences', 'types'] as const).map((k) =>
         api<unknown>(q(sid, `/api/objects?kind=${k}`)).catch(() => []),
@@ -461,102 +488,6 @@ export default function App() {
     [bootConnect, dialogs, active, fields.password, findSession, deadIds, reconnectOne, setActiveId],
   )
 
-  /* ---------- object detail ---------- */
-  const showDDL = useCallback(
-    async (schema: string, table: string) => {
-      if (!session) return
-      const j = await api<Record<string, unknown>>(q(session, `/api/ddl?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`))
-      if ((j as { error?: string }).error) {
-        setDetail({ title: `${schema}.${table}`, kind: 'table', body: <span className="text-red-400">{(j as { error: string }).error}</span> })
-        return
-      }
-      const d = j as unknown as { ddl: string; owner?: string; comment?: string; constraints?: { def: string }[]; indexes?: { def: string }[] }
-      setDetail({
-        title: `${schema}.${table}`,
-        kind: 'table',
-        body: (
-          <div className="flex flex-col gap-1.5">
-            {d.owner && <div className="text-muted-foreground">owner: {d.owner}{d.comment ? ` · ${d.comment}` : ''}</div>}
-            <pre className="overflow-auto rounded bg-muted p-2 font-mono text-[11px]">{d.ddl}</pre>
-            <b className="text-[11px]">Constraints</b>
-            <pre className="overflow-auto font-mono text-[11px]">{(d.constraints ?? []).map((c) => c.def).join('\n') || '—'}</pre>
-            <b className="text-[11px]">Indexes</b>
-            <pre className="overflow-auto font-mono text-[11px]">{(d.indexes ?? []).map((c) => c.def).join('\n') || '—'}</pre>
-          </div>
-        ),
-      })
-    },
-    [session],
-  )
-
-  const showView = useCallback(
-    async (schema: string, name: string) => {
-      if (!session) return
-      const j = await api<{ definition?: string; error?: string }>(q(session, `/api/view-def?schema=${encodeURIComponent(schema)}&name=${encodeURIComponent(name)}`))
-      setDetail({
-        title: `${schema}.${name}`,
-        kind: 'view',
-        body: j.error ? <span className="text-red-400">{j.error}</span> : <pre className="overflow-auto rounded bg-muted p-2 font-mono text-[11px]">{j.definition}</pre>,
-      })
-    },
-    [session],
-  )
-
-  const showFunc = useCallback(
-    async (schema: string, name: string) => {
-      if (!session) return
-      const j = await api<{ name: string; lang: string; def: string }[] | { error: string }>(
-        q(session, `/api/func-def?schema=${encodeURIComponent(schema)}&name=${encodeURIComponent(name)}`),
-      )
-      setDetail({
-        title: name,
-        kind: 'function',
-        body: Array.isArray(j) ? (
-          <div className="flex flex-col gap-1.5">
-            {j.map((f, i) => (
-              <div key={i}>
-                <b className="text-[11px]">{f.name}</b> <span className="text-muted-foreground">{f.lang}</span>
-                <pre className="overflow-auto rounded bg-muted p-2 font-mono text-[11px]">{f.def}</pre>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <span className="text-red-400">{(j as { error: string }).error}</span>
-        ),
-      })
-    },
-    [session],
-  )
-
-  const showSeq = useCallback((schema: string, name: string) => {
-    setDetail({
-      title: `${schema}.${name}`,
-      kind: 'sequence',
-      body: <pre className="overflow-auto rounded bg-muted p-2 font-mono text-[11px]">{`SELECT * FROM ${schema}.${name};\n-- nextval('${schema}.${name}')`}</pre>,
-    })
-  }, [])
-
-  const showType = useCallback(
-    async (schema: string, name: string) => {
-      if (!session) return
-      const j = await api<{ name: string; kind: string; labels: string; comment: string }[]>(q(session, `/api/types?schema=${encodeURIComponent(schema)}`))
-      const t = Array.isArray(j) ? j.find((x) => x.name === name) : undefined
-      setDetail({
-        title: `${schema}.${name}`,
-        kind: 'type',
-        body: t ? (
-          <div>
-            <span className="text-muted-foreground">{t.kind}</span>
-            <pre className="overflow-auto rounded bg-muted p-2 font-mono text-[11px]">{t.labels || t.comment}</pre>
-          </div>
-        ) : (
-          <span className="text-muted-foreground">no info</span>
-        ),
-      })
-    },
-    [session],
-  )
-
   /* ---------- tabs (each bound to the session active at creation) ---------- */
   const shortSid = (sid: string) => (sid.length > 6 ? sid.slice(-6) : sid)
   const newQueryTab = useCallback(
@@ -578,9 +509,15 @@ export default function App() {
   const loadTablePage = useCallback(
     async (sid: string, id: string, schema: string, table: string, limit: number, offset: number, filter: string, order: string) => {
       if (!sid) return
-      const j = await api<import('./lib/api').QueryResult & { total?: number; in_txn?: boolean; error?: string }>(
-        q(sid, `/api/table-data?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}&limit=${limit}&offset=${offset}&filter=${encodeURIComponent(filter)}&order=${encodeURIComponent(order)}`),
-      )
+      let j: QueryResult & { total?: number; in_txn?: boolean; error?: string }
+      try {
+        j = await api<QueryResult & { total?: number; in_txn?: boolean; error?: string }>(
+          q(sid, `/api/table-data?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}&limit=${limit}&offset=${offset}&filter=${encodeURIComponent(filter)}&order=${encodeURIComponent(order)}`),
+        )
+      } catch (e) {
+        setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'table' ? { ...t, error: e instanceof Error ? e.message : String(e) } : t)))
+        return
+      }
       if (j.error) {
         setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'table' ? { ...t, error: j.error } : t)))
         return
@@ -727,7 +664,7 @@ export default function App() {
   const exportTable = useCallback(
     async (schema: string, table: string, fmt: 'csv' | 'sql') => {
       if (!needSession(`${schema}.${table}`)) return
-      const j = await api<{ columns?: string[]; rows?: unknown[][]; error?: string }>(
+      const j = await api<{ columns?: string[]; types?: string[]; rows?: unknown[][]; error?: string }>(
         q(session, `/api/table-data?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}&limit=1000&offset=0&filter=&order=`),
       )
       if (j.error) {
@@ -737,7 +674,7 @@ export default function App() {
       const columns = j.columns ?? []
       const rows = (j.rows ?? []) as unknown[][]
       if (fmt === 'csv') download(resultToCSV(columns, rows), `${schema}.${table}.csv`, 'text/csv')
-      else download(resultToInserts(columns, rows, `${qi(schema)}.${qi(table)}`), `${schema}.${table}.sql`, 'text/sql')
+      else download(resultToInserts(columns, rows, `${qi(schema)}.${qi(table)}`, j.types), `${schema}.${table}.sql`, 'text/sql')
     },
     [session, needSession],
   )
@@ -761,11 +698,18 @@ export default function App() {
       const id = `b_${key}__${shortSid(sid)}`
       const url = key === 'extensions' ? '/api/extensions' : '/api/roles'
       const cols = key === 'extensions' ? ['name', 'default_version', 'installed_version', 'comment'] : ['name', 'superuser', 'login', 'createdb', 'member_of']
+      const token = ++loadSeq.current
       setTabs((prev) => (prev.find((t) => t.id === id) ? prev : [...prev, { id, kind: 'browser', title, sessionId: sid, url, cols, rows: null }]))
       setActiveTab(id)
-      api<Record<string, unknown>[] | { error: string }>(q(sid, `${url}?`)).then((j) => {
-        setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'browser' ? { ...t, rows: Array.isArray(j) ? j : null, error: (j as { error?: string }).error } : t)))
-      })
+      api<Record<string, unknown>[] | { error: string }>(q(sid, `${url}?`))
+        .then((j) => {
+          if (loadSeq.current !== token) return
+          setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'browser' ? { ...t, rows: Array.isArray(j) ? j : null, error: (j as { error?: string }).error } : t)))
+        })
+        .catch((e: unknown) => {
+          if (loadSeq.current !== token) return
+          setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'browser' ? { ...t, rows: null, error: e instanceof Error ? e.message : String(e) } : t)))
+        })
     },
     [activeId],
   )
@@ -778,11 +722,19 @@ export default function App() {
         return
       }
       const id = `e_${schema}__${shortSid(sid)}`
+      const token = ++loadSeq.current
       setTabs((prev) => (prev.find((t) => t.id === id) ? prev : [...prev, { id, kind: 'erd', title: `ERD ${schema}`, sessionId: sid, schema, data: null }]))
       setActiveTab(id)
-      api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(sid, `/api/erd?schema=${encodeURIComponent(schema)}`)).then((j) => {
-        setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'erd' ? { ...t, data: j } : t)))
-      })
+      api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(sid, `/api/erd?schema=${encodeURIComponent(schema)}`))
+        .then((j) => {
+          if (loadSeq.current !== token) return
+          setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'erd' ? { ...t, data: j } : t)))
+        })
+        .catch((e: unknown) => {
+          if (loadSeq.current !== token) return
+          setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'erd' ? { ...t, data: null } : t)))
+          toast.error(e instanceof Error ? e.message : String(e))
+        })
     },
     [activeId],
   )
@@ -851,6 +803,7 @@ export default function App() {
         }
       })()
       setActiveTab(wantActive && rebuilt.some((t) => t.id === wantActive) ? wantActive : rebuilt[0].id)
+      const token = ++loadSeq.current
       for (const t of rebuilt) {
         if (t.kind === 'docs' || t.kind === 'query') continue
         const sid = t.sessionId
@@ -858,13 +811,26 @@ export default function App() {
           void loadTablePage(sid, t.id, t.schema, t.table, t.limit, t.offset, t.filter, t.order)
           void loadTableMeta(sid, t.id, t.schema, t.table)
         } else if (t.kind === 'browser') {
-          api<Record<string, unknown>[] | { error: string }>(q(sid, `${t.url}?`)).then((j) => {
-            setTabs((prev) => prev.map((x) => (x.id === t.id && x.kind === 'browser' ? { ...x, rows: Array.isArray(j) ? j : null, error: (j as { error?: string }).error } : x)))
-          })
+          api<Record<string, unknown>[] | { error: string }>(q(sid, `${t.url}?`))
+            .then((j) => {
+              if (loadSeq.current !== token) return
+              setTabs((prev) => prev.map((x) => (x.id === t.id && x.kind === 'browser' ? { ...x, rows: Array.isArray(j) ? j : null, error: (j as { error?: string }).error } : x)))
+            })
+            .catch((e: unknown) => {
+              if (loadSeq.current !== token) return
+              setTabs((prev) => prev.map((x) => (x.id === t.id && x.kind === 'browser' ? { ...x, rows: null, error: e instanceof Error ? e.message : String(e) } : x)))
+            })
         } else if (t.kind === 'erd') {
-          api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(sid, `/api/erd?schema=${encodeURIComponent(t.schema)}`)).then((j) => {
-            setTabs((prev) => prev.map((x) => (x.id === t.id && x.kind === 'erd' ? { ...x, data: j } : x)))
-          })
+          api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(sid, `/api/erd?schema=${encodeURIComponent(t.schema)}`))
+            .then((j) => {
+              if (loadSeq.current !== token) return
+              setTabs((prev) => prev.map((x) => (x.id === t.id && x.kind === 'erd' ? { ...x, data: j } : x)))
+            })
+            .catch((e: unknown) => {
+              if (loadSeq.current !== token) return
+              setTabs((prev) => prev.map((x) => (x.id === t.id && x.kind === 'erd' ? { ...x, data: null } : x)))
+              toast.error(e instanceof Error ? e.message : String(e))
+            })
         }
       }
     },
@@ -896,34 +862,39 @@ export default function App() {
       const sid = t.sessionId
       const sql = sqlOver ?? t.sql
       runSql.current[id] = sql
-      if (!autocommit) {
-        const st = await apiClient.txn(sid, 'status')
-        if (!st.in_txn) await apiClient.txn(sid, 'begin')
-      }
       setRunning((r) => ({ ...r, [id]: true }))
       updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: undefined, plan: undefined } : x))
-      const j = await apiClient.runQuery(sid, sql, t.limit || undefined)
-      setRunning((r) => ({ ...r, [id]: false }))
-      delete runSql.current[id]
-      markTxn(sid, !!(j as { in_txn?: boolean }).in_txn)
-      if (DDL_RE.test(sql)) {
-        dropSnapshot(sid)
-        void ensureSnapshot(sid, true)
-      }
-      if (j.error && !(j as { results?: unknown }).results) {
-        updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: j.error, results: null } : x))
-        return
-      }
-      if (j.results) {
-        updateTab(id, (x) => (x.kind === 'query' ? { ...x, results: j.results ?? null, meta: `${j.results!.length} statements · ${(j as { duration_ms?: number }).duration_ms}ms`, error: (j as { error?: string }).error } : x))
-        pushHist(sql, (j as { duration_ms?: number }).duration_ms, j.results.reduce((a, r) => a + (r.rows?.length ?? 0), 0))
-      } else {
-        updateTab(id, (x) =>
-          x.kind === 'query'
-            ? { ...x, results: [j], meta: `${(j.rows ?? []).length} rows · ${j.duration_ms}ms`, error: undefined }
-            : x,
-        )
-        pushHist(sql, j.duration_ms, (j.rows ?? []).length)
+      try {
+        if (!autocommit) {
+          const st = await apiClient.txn(sid, 'status')
+          if (!st.in_txn) await apiClient.txn(sid, 'begin')
+        }
+        const j = await apiClient.runQuery(sid, sql, t.limit || undefined)
+        markTxn(sid, !!(j as { in_txn?: boolean }).in_txn)
+        if (DDL_RE.test(sql)) {
+          dropSnapshot(sid)
+          void ensureSnapshot(sid, true)
+        }
+        if (j.error && !(j as { results?: unknown }).results) {
+          updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: j.error, results: null } : x))
+          return
+        }
+        if (j.results) {
+          updateTab(id, (x) => (x.kind === 'query' ? { ...x, results: j.results ?? null, meta: `${j.results!.length} statements · ${(j as { duration_ms?: number }).duration_ms}ms`, error: (j as { error?: string }).error } : x))
+          pushHist(sql, (j as { duration_ms?: number }).duration_ms, j.results.reduce((a, r) => a + (r.rows?.length ?? 0), 0))
+        } else {
+          updateTab(id, (x) =>
+            x.kind === 'query'
+              ? { ...x, results: [j], meta: `${(j.rows ?? []).length} rows · ${j.duration_ms}ms`, error: undefined }
+              : x,
+          )
+          pushHist(sql, j.duration_ms, (j.rows ?? []).length)
+        }
+      } catch (e) {
+        updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: e instanceof Error ? e.message : String(e), results: null } : x))
+      } finally {
+        setRunning((r) => ({ ...r, [id]: false }))
+        delete runSql.current[id]
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -942,43 +913,47 @@ export default function App() {
         toast.error('No running query to cancel')
         return
       }
-      const norm = (s: string) => s.replace(/\s+/g, ' ').trim().replace(/;+\s*$/, '').slice(0, 200)
-      const needle = norm(sent)
-      const sqlHit = (query: unknown) => {
-        const h = norm(String(query ?? ''))
-        if (!h) return false
-        return h.includes(needle) || (needle.includes(h) && h.length > 10)
+      try {
+        const norm = (s: string) => s.replace(/\s+/g, ' ').trim().replace(/;+\s*$/, '').slice(0, 200)
+        const needle = norm(sent)
+        const sqlHit = (query: unknown) => {
+          const h = norm(String(query ?? ''))
+          if (!h) return false
+          return h.includes(needle) || (needle.includes(h) && h.length > 10)
+        }
+        const rows = await api<Record<string, unknown>[]>(q(sid, '/api/activity?'))
+        // NOTE: the poll-exclusion below must test the full query text — the
+        // activity statement mentions pg_stat_activity only after column 80.
+        const live = (Array.isArray(rows) ? rows : []).filter(
+          (r) => r.state === 'active' && !String(r.query ?? '').includes('pg_stat_activity'),
+        )
+        // Own pool first (exact when a single backend runs there).
+        const own = live.filter((r) => String(r.app ?? '') === `pglight:${sid}`)
+        const pick = (pool: Record<string, unknown>[]): Record<string, unknown> | null => {
+          if (!pool.length) return null
+          if (pool.length === 1) return pool[0]
+          const matched = pool.filter((r) => sqlHit(r.query))
+          return matched.length === 1 ? matched[0] : null
+        }
+        let hit = pick(own)
+        let ambiguous = !!own.length && !hit
+        if (!hit && !ambiguous) {
+          // Untagged pools (connected before the backend upgrade): fall back
+          // to matching the sent SQL across all backends.
+          const matched = live.filter((r) => sqlHit(r.query))
+          if (matched.length === 1) hit = matched[0]
+          else ambiguous = !!matched.length
+        }
+        if (!hit) {
+          toast.error(ambiguous ? 'Multiple running queries — cancel from Dashboard' : 'No running backend found')
+          return
+        }
+        const j = await apiClient.cancel(sid, Number(hit.pid))
+        if (j.error) toast.error(j.error)
+        else toast.success(`Cancelled backend ${hit.pid}`)
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e))
       }
-      const rows = await api<Record<string, unknown>[]>(q(sid, '/api/activity?'))
-      // NOTE: the poll-exclusion below must test the full query text — the
-      // activity statement mentions pg_stat_activity only after column 80.
-      const live = (Array.isArray(rows) ? rows : []).filter(
-        (r) => r.state === 'active' && !String(r.query ?? '').includes('pg_stat_activity'),
-      )
-      // Own pool first (exact when a single backend runs there).
-      const own = live.filter((r) => String(r.app ?? '') === `pglight:${sid}`)
-      const pick = (pool: Record<string, unknown>[]): Record<string, unknown> | null => {
-        if (!pool.length) return null
-        if (pool.length === 1) return pool[0]
-        const matched = pool.filter((r) => sqlHit(r.query))
-        return matched.length === 1 ? matched[0] : null
-      }
-      let hit = pick(own)
-      let ambiguous = !!own.length && !hit
-      if (!hit && !ambiguous) {
-        // Untagged pools (connected before the backend upgrade): fall back
-        // to matching the sent SQL across all backends.
-        const matched = live.filter((r) => sqlHit(r.query))
-        if (matched.length === 1) hit = matched[0]
-        else ambiguous = !!matched.length
-      }
-      if (!hit) {
-        toast.error(ambiguous ? 'Multiple running queries — cancel from Dashboard' : 'No running backend found')
-        return
-      }
-      const j = await apiClient.cancel(sid, Number(hit.pid))
-      if (j.error) toast.error(j.error)
-      else toast.success(`Cancelled backend ${hit.pid}`)
     },
     [session, tabs],
   )
@@ -987,12 +962,16 @@ export default function App() {
     async (id: string, analyze: boolean) => {
       const t = tabs.find((x) => x.id === id)
       if (!t || t.kind !== 'query' || !t.sessionId) return
-      const j = await apiClient.explain(t.sessionId, t.sql, analyze)
-      if ((j as { error?: string }).error) {
-        updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: (j as { error: string }).error } : x))
-        return
+      try {
+        const j = await apiClient.explain(t.sessionId, t.sql, analyze)
+        if ((j as { error?: string }).error) {
+          updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: (j as { error: string }).error } : x))
+          return
+        }
+        updateTab(id, (x) => (x.kind === 'query' ? { ...x, plan: explainToText(j), error: undefined } : x))
+      } catch (e) {
+        updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: e instanceof Error ? e.message : String(e) } : x))
       }
-      updateTab(id, (x) => (x.kind === 'query' ? { ...x, plan: explainToText(j), error: undefined } : x))
     },
     [tabs, updateTab],
   )
@@ -1002,17 +981,21 @@ export default function App() {
       const t = tabs.find((x) => x.id === tabId)
       if (!t || t.kind !== 'table' || !t.sessionId) return
       const sid = t.sessionId
-      if (!autocommit) {
-        const st = await apiClient.txn(sid, 'status')
-        if (!st.in_txn) await apiClient.txn(sid, 'begin')
+      try {
+        if (!autocommit) {
+          const st = await apiClient.txn(sid, 'status')
+          if (!st.in_txn) await apiClient.txn(sid, 'begin')
+        }
+        const j = await apiClient.rowOp({ session_id: sid, schema: t.schema, table: t.table, op, values, where })
+        if (j.error) {
+          toast.error(j.error)
+          return
+        }
+        markTxn(sid, !!j.in_txn)
+        loadTablePage(sid, t.id, t.schema, t.table, t.limit, t.offset, t.filter, t.order)
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e))
       }
-      const j = await apiClient.rowOp({ session_id: sid, schema: t.schema, table: t.table, op, values, where })
-      if (j.error) {
-        toast.error(j.error)
-        return
-      }
-      markTxn(sid, !!j.in_txn)
-      loadTablePage(sid, t.id, t.schema, t.table, t.limit, t.offset, t.filter, t.order)
     },
     [tabs, markTxn, autocommit, loadTablePage],
   )
@@ -1049,25 +1032,29 @@ export default function App() {
       const t = tabs.find((x) => x.id === tabId)
       if (!t || t.kind !== 'table' || !t.sessionId) return
       const sid = t.sessionId
-      const j = await apiClient.alterTable({ session_id: sid, schema: t.schema, table: t.table, ...p })
-      if (j.error) {
-        toast.error(j.error)
-        return
+      try {
+        const j = await apiClient.alterTable({ session_id: sid, schema: t.schema, table: t.table, ...p })
+        if (j.error) {
+          toast.error(j.error)
+          return
+        }
+        markTxn(sid, !!j.in_txn)
+        if (p.op === 'rename_table' && p.new_name) {
+          const nn = p.new_name
+          const nid = `t_${shortSid(sid)}_${t.schema}_${nn}`
+          setTabs((prev) => prev.map((x) => (x.id === tabId && x.kind === 'table' ? { ...x, id: nid, table: nn, title: nn } : x)))
+          setActiveTab(nid)
+          loadTablePage(sid, nid, t.schema, nn, t.limit, 0, t.filter, t.order)
+          loadTableMeta(sid, nid, t.schema, nn)
+        } else {
+          loadTablePage(sid, t.id, t.schema, t.table, t.limit, t.offset, t.filter, t.order)
+          loadTableMeta(sid, t.id, t.schema, t.table)
+        }
+        toast.success('Table altered')
+        loadExplorer(sid)
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e))
       }
-      markTxn(sid, !!j.in_txn)
-      if (p.op === 'rename_table' && p.new_name) {
-        const nn = p.new_name
-        const nid = `t_${shortSid(sid)}_${t.schema}_${nn}`
-        setTabs((prev) => prev.map((x) => (x.id === tabId && x.kind === 'table' ? { ...x, id: nid, table: nn, title: nn } : x)))
-        setActiveTab(nid)
-        loadTablePage(sid, nid, t.schema, nn, t.limit, 0, t.filter, t.order)
-        loadTableMeta(sid, nid, t.schema, nn)
-      } else {
-        loadTablePage(sid, t.id, t.schema, t.table, t.limit, t.offset, t.filter, t.order)
-        loadTableMeta(sid, t.id, t.schema, t.table)
-      }
-      toast.success('Table altered')
-      loadExplorer(sid)
     },
     [tabs, markTxn, loadTablePage, loadTableMeta, loadExplorer],
   )
@@ -1356,14 +1343,8 @@ export default function App() {
             databases={databases}
             schemas={schemas}
             currentDb={active?.dbname ?? fields.dbname}
-            detail={detail}
             onSwitchDb={switchDb}
             onOpenTable={openTableTab}
-            onShowDDL={showDDL}
-            onShowView={showView}
-            onShowFunc={showFunc}
-            onShowSeq={showSeq}
-            onShowType={showType}
             onOpenBrowser={openBrowser}
             onOpenErd={openErd}
             onRefresh={() => loadExplorer()}
@@ -1453,7 +1434,16 @@ export default function App() {
                 onApply={() => loadTablePage(cur.sessionId, cur.id, cur.schema, cur.table, cur.limit, cur.offset, cur.filter, cur.order)}
                 onPage={(d) => loadTablePage(cur.sessionId, cur.id, cur.schema, cur.table, cur.limit, Math.max(0, cur.offset + d * cur.limit), cur.filter, cur.order)}
                 onEditCell={async (col, orig) => {
-                  const first = Object.entries(orig).find(([, v]) => v != null)
+                  const keys = pkOf(cur)
+                  if (!keys.length) {
+                    toast.error('No primary key — editing is disabled for this table')
+                    return
+                  }
+                  const missing = keys.filter((k) => orig[k] == null)
+                  if (missing.length) {
+                    toast.error(`Primary key column ${missing.join(', ')} is NULL — cannot identify this row`)
+                    return
+                  }
                   const v = await dialogs.prompt({
                     title: `Edit ${col}`,
                     description: 'Type __NULL__ for NULL',
@@ -1461,8 +1451,7 @@ export default function App() {
                   })
                   if (v == null) return
                   const where: Record<string, unknown> = {}
-                  if (first) where[first[0]] = first[1]
-                  else Object.assign(where, orig)
+                  for (const k of keys) where[k] = orig[k]
                   rowOp(cur.id, 'update', { [col]: v }, where)
                 }}
                 onDeleteRow={async (orig) => {
@@ -1480,11 +1469,12 @@ export default function App() {
                 onExportRows={(rows, fmt) => {
                   if (!rows.length) return
                   const cols = cur.result?.columns ?? Object.keys(rows[0])
+                  const types = cur.result?.types
                   const matrix = rows.map((r) => cols.map((c) => r[c]))
                   const base = `${cur.schema}.${cur.table}-selected`
                   if (fmt === 'csv') download(resultToCSV(cols, matrix), `${base}.csv`, 'text/csv')
                   else if (fmt === 'json') download(resultToJSON(cols, matrix), `${base}.json`, 'application/json')
-                  else download(resultToInserts(cols, matrix, `${qi(cur.schema)}.${qi(cur.table)}`), `${base}.sql`, 'text/sql')
+                  else download(resultToInserts(cols, matrix, `${qi(cur.schema)}.${qi(cur.table)}`, types), `${base}.sql`, 'text/sql')
                 }}
                 onCopyRows={(rows) => {
                   if (!rows.length) return
@@ -1504,21 +1494,26 @@ export default function App() {
                     danger: true,
                   })
                   if (!ok) return
-                  if (!autocommit) {
-                    const st = await apiClient.txn(cur.sessionId, 'status')
-                    if (!st.in_txn) await apiClient.txn(cur.sessionId, 'begin')
+                  try {
+                    if (!autocommit) {
+                      const st = await apiClient.txn(cur.sessionId, 'status')
+                      if (!st.in_txn) await apiClient.txn(cur.sessionId, 'begin')
+                    }
+                    let failed = 0
+                    let curTxn = false
+                    for (const w of rows) {
+                      const j = await apiClient.rowOp({ session_id: cur.sessionId, schema: cur.schema, table: cur.table, op: 'delete', values: {}, where: w })
+                      if (j.error) failed++
+                      curTxn = !!j.in_txn
+                    }
+                    markTxn(cur.sessionId, curTxn)
+                    if (failed) toast.error(`Failed to delete ${failed} row${failed === 1 ? '' : 's'}`)
+                    else toast.success(`Deleted ${rows.length} row${rows.length === 1 ? '' : 's'}`)
+                    loadTablePage(cur.sessionId, cur.id, cur.schema, cur.table, cur.limit, cur.offset, cur.filter, cur.order)
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : String(e))
+                    loadTablePage(cur.sessionId, cur.id, cur.schema, cur.table, cur.limit, cur.offset, cur.filter, cur.order)
                   }
-                  let failed = 0
-                  let curTxn = false
-                  for (const w of rows) {
-                    const j = await apiClient.rowOp({ session_id: cur.sessionId, schema: cur.schema, table: cur.table, op: 'delete', values: {}, where: w })
-                    if (j.error) failed++
-                    curTxn = !!j.in_txn
-                  }
-                  markTxn(cur.sessionId, curTxn)
-                  if (failed) toast.error(`Failed to delete ${failed} row${failed === 1 ? '' : 's'}`)
-                  else toast.success(`Deleted ${rows.length} row${rows.length === 1 ? '' : 's'}`)
-                  loadTablePage(cur.sessionId, cur.id, cur.schema, cur.table, cur.limit, cur.offset, cur.filter, cur.order)
                 }}
                 onInsert={async () => {
                   if (!cur.result) return
@@ -1539,19 +1534,27 @@ export default function App() {
                     confirmText: op.toUpperCase(),
                   })
                   if (!ok) return
-                  const j = await apiClient.maintenance(cur.sessionId, cur.schema, cur.table, op)
-                  if (j.error) toast.error(j.error)
-                  else {
-                    toast.success('OK: ' + (j.result || op))
-                    loadTableMeta(cur.sessionId, cur.id, cur.schema, cur.table)
+                  try {
+                    const j = await apiClient.maintenance(cur.sessionId, cur.schema, cur.table, op)
+                    if (j.error) toast.error(j.error)
+                    else {
+                      toast.success('OK: ' + (j.result || op))
+                      loadTableMeta(cur.sessionId, cur.id, cur.schema, cur.table)
+                    }
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : String(e))
                   }
                 }}
                 onImport={async (columns, rows) => {
-                  const j = await apiClient.importRows({ session_id: cur.sessionId, schema: cur.schema, table: cur.table, columns, rows })
-                  if (j.error) toast.error(j.error)
-                  else {
-                    toast.success(`Imported ${j.rows_affected} rows`)
-                    loadTablePage(cur.sessionId, cur.id, cur.schema, cur.table, cur.limit, cur.offset, cur.filter, cur.order)
+                  try {
+                    const j = await apiClient.importRows({ session_id: cur.sessionId, schema: cur.schema, table: cur.table, columns, rows })
+                    if (j.error) toast.error(j.error)
+                    else {
+                      toast.success(`Imported ${j.rows_affected} rows`)
+                      loadTablePage(cur.sessionId, cur.id, cur.schema, cur.table, cur.limit, cur.offset, cur.filter, cur.order)
+                    }
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : String(e))
                   }
                 }}
                 onOpenErd={() => openErd(cur.schema, cur.sessionId)}
@@ -1564,11 +1567,15 @@ export default function App() {
               <BrowserView
                 tab={cur}
                 onReload={() =>
-                  api<Record<string, unknown>[] | { error: string }>(q(cur.sessionId, `${cur.url}?`)).then((j) => {
-                    updateTab(cur.id, (x) =>
-                      x.kind === 'browser' ? { ...x, rows: Array.isArray(j) ? j : null, error: (j as { error?: string }).error } : x,
-                    )
-                  })
+                  api<Record<string, unknown>[] | { error: string }>(q(cur.sessionId, `${cur.url}?`))
+                    .then((j) => {
+                      updateTab(cur.id, (x) =>
+                        x.kind === 'browser' ? { ...x, rows: Array.isArray(j) ? j : null, error: (j as { error?: string }).error } : x,
+                      )
+                    })
+                    .catch((e: unknown) => {
+                      updateTab(cur.id, (x) => (x.kind === 'browser' ? { ...x, rows: null, error: e instanceof Error ? e.message : String(e) } : x))
+                    })
                 }
               />
             )}
@@ -1578,14 +1585,24 @@ export default function App() {
                 schemas={schemas.map((s) => s.schema)}
                 onSchema={(s) => {
                   updateTab(cur.id, (x) => (x.kind === 'erd' ? { ...x, schema: s, title: `ERD ${s}`, data: null } : x))
-                  api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(cur.sessionId, `/api/erd?schema=${encodeURIComponent(s)}`)).then((j) => {
-                    updateTab(cur.id, (x) => (x.kind === 'erd' ? { ...x, data: j } : x))
-                  })
+                  api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(cur.sessionId, `/api/erd?schema=${encodeURIComponent(s)}`))
+                    .then((j) => {
+                      updateTab(cur.id, (x) => (x.kind === 'erd' ? { ...x, data: j } : x))
+                    })
+                    .catch((e: unknown) => {
+                      updateTab(cur.id, (x) => (x.kind === 'erd' ? { ...x, data: null } : x))
+                      toast.error(e instanceof Error ? e.message : String(e))
+                    })
                 }}
                 onReload={() =>
-                  api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(cur.sessionId, `/api/erd?schema=${encodeURIComponent(cur.schema)}`)).then((j) => {
-                    updateTab(cur.id, (x) => (x.kind === 'erd' ? { ...x, data: j } : x))
-                  })
+                  api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(cur.sessionId, `/api/erd?schema=${encodeURIComponent(cur.schema)}`))
+                    .then((j) => {
+                      updateTab(cur.id, (x) => (x.kind === 'erd' ? { ...x, data: j } : x))
+                    })
+                    .catch((e: unknown) => {
+                      updateTab(cur.id, (x) => (x.kind === 'erd' ? { ...x, data: null } : x))
+                      toast.error(e instanceof Error ? e.message : String(e))
+                    })
                 }
                 onOpenTable={(schema, table) => openTableTab(schema, table, cur.sessionId)}
               />
@@ -1621,7 +1638,7 @@ export default function App() {
           ? `${sessions.length} session${sessions.length === 1 ? '' : 's'} · ${active.user}@${active.host}:${active.port}/${active.dbname} · Ctrl+K search · Ctrl+Enter run`
           : 'disconnected · Ctrl+K search · Ctrl+Enter run'}
       </Card>
-      <SearchPalette key={paletteOpen ? 'open' : 'closed'} open={paletteOpen} onOpenChange={setPaletteOpen} session={session} onOpenTable={openTableTab} onShowFunc={showFunc} />
+      <SearchPalette key={paletteOpen ? 'open' : 'closed'} open={paletteOpen} onOpenChange={setPaletteOpen} session={session} onOpenTable={openTableTab} />
     </div>
     </TooltipProvider>
   )

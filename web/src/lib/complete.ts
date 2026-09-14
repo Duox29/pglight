@@ -113,11 +113,19 @@ function fuzzyScore(label: string, prefix: string): number {
 
 function qualifierMatches(dot: string, t: { schema: string; name: string; alias: string }): boolean {
   const d = dot.toLowerCase()
-  return t.alias.toLowerCase() === d || t.name.toLowerCase() === d || `${t.schema}.${t.name}`.toLowerCase() === d
+  if (t.alias && t.alias.toLowerCase() === d) return true
+  if (t.name.toLowerCase() === d) return true
+  if (t.schema && `${t.schema}.${t.name}`.toLowerCase() === d) return true
+  return false
 }
 
 function resolveDot(snap: SchemaSnapshot, dot: string) {
   const d = dot.toLowerCase()
+  const qualified = d.split('.')
+  if (qualified.length === 2) {
+    const hit = snap.tables.find((t) => t.schema.toLowerCase() === qualified[0] && t.name.toLowerCase() === qualified[1])
+    if (hit) return hit
+  }
   for (const t of snap.tables) {
     if (t.name.toLowerCase() === d || `${t.schema}.${t.name}`.toLowerCase() === d) return t
   }
@@ -186,10 +194,10 @@ export function createCompleteSource(session: string): CompletionSource {
     if (scope.kind === 'dot' && scope.dot) {
       const scoped = scope.tables.find((t) => qualifierMatches(scope.dot!, t))
       const target = scoped
-        ? snap.tables.find((t) => t.name.toLowerCase() === scoped.name.toLowerCase())
+        ? snap.tables.find((t) => t.name.toLowerCase() === scoped.name.toLowerCase() && (!scoped.schema || t.schema.toLowerCase() === scoped.schema.toLowerCase()))
         : resolveDot(snap, scope.dot)
       for (const t of snap.tables) {
-        if (scoped && t.name.toLowerCase() !== scoped.name.toLowerCase()) continue
+        if (scoped && (t.name.toLowerCase() !== scoped.name.toLowerCase() || (scoped.schema && t.schema.toLowerCase() !== scoped.schema.toLowerCase()))) continue
         if (!scoped && !target) {
           // Unknown qualifier: fall back to alias names themselves.
           for (const a of scope.tables) push({ label: a.alias, type: 'alias', detail: `${a.schema}.${a.name}` }, -20)
@@ -228,7 +236,7 @@ export function createCompleteSource(session: string): CompletionSource {
     // Column context (SELECT/WHERE/ON/...): scoped columns first.
     const seenCols = new Set<string>()
     for (const st of scope.tables) {
-      const t = snap.tables.find((x) => x.name.toLowerCase() === st.name.toLowerCase())
+      const t = snap.tables.find((x) => x.name.toLowerCase() === st.name.toLowerCase() && (!st.schema || x.schema.toLowerCase() === st.schema.toLowerCase()))
       if (!t) continue
       const tag = st.alias || t.name
       for (const c of t.columns) {

@@ -13,7 +13,7 @@ import type { TableSubtab, TableTabT } from '@/types'
 import type { DialogsApi } from './dialogs'
 import { ColumnDialog, ConstraintDialog, type ColumnValues } from './ColumnEditor'
 import { IndexDialog, TriggerDialog } from './IndexTriggerEditor'
-import { download, parseCSV, resultToCSV, resultToInserts } from '@/lib/format'
+import { download, parseCSV, quoteQualified, resultToCSV, resultToInserts } from '@/lib/format'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from './ui/context-menu'
 
 interface Props {
@@ -70,13 +70,19 @@ export function TableWorkspace(p: Props) {
   const [idxDlg, setIdxDlg] = useState(false)
   const [trgDlg, setTrgDlg] = useState(false)
   const colNames = (t.cols ?? []).map((c) => String(c['name'] ?? '')).filter(Boolean)
-  // Bulk row selection, keyed by serialized row content so it survives
-  // reloads/paging. Identical duplicate rows share one key (known limit).
+  const pkCols = (t.cols ?? [])
+    .filter((c) => String(c['pk'] ?? '').toLowerCase() === 't' || c['pk'] === true)
+    .map((c) => String(c['name'] ?? ''))
+    .filter(Boolean)
+  const pkIdx = pkCols.map((c) => (t.result?.columns ?? []).indexOf(c)).filter((i) => i >= 0)
+  const hasIdentity = pkIdx.length > 0
+  // Bulk row selection. Keyed by primary-key values when the table exposes
+  // them; falls back to serialized row content (duplicate rows share a key).
   const [sel, setSel] = useState<Set<string>>(new Set())
   const anchor = useRef(0)
   const pageRows = t.result?.rows ?? []
   const pageCols = t.result?.columns ?? []
-  const rowKey = (r: unknown[]) => JSON.stringify(r)
+  const rowKey = (r: unknown[]) => (hasIdentity ? JSON.stringify(pkIdx.map((i) => r[i])) : JSON.stringify(r))
   const selRecs = pageRows.filter((r) => sel.has(rowKey(r))).map((r) => Object.fromEntries(pageCols.map((c, i) => [c, r[i]])))
   const toggleRow = (ri: number, r: unknown[]) => {
     const k = rowKey(r)
@@ -101,9 +107,15 @@ export function TableWorkspace(p: Props) {
 
   const handleFile = async (file: File) => {
     const text = await file.text()
-    const rows = parseCSV(text)
+    const name = file.name.toLowerCase()
+    const rows = parseCSV(text, name.endsWith('.tsv') ? '\t' : undefined)
     if (!rows.length) {
       toast.error('Empty file')
+      return
+    }
+    const widths = new Set(rows.map((r) => r.length))
+    if (widths.size > 1) {
+      toast.error(`Ragged ${name.endsWith('.tsv') ? 'TSV' : 'CSV'}: rows have ${[...widths].sort((a, b) => a - b).join('/')} columns`)
       return
     }
     const header = rows[0].map((h) => h.trim())
@@ -189,7 +201,7 @@ export function TableWorkspace(p: Props) {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => t.result && download(resultToInserts(t.result.columns, t.result.rows, `${t.schema}.${t.table}`), `${t.table}.sql`, 'text/sql')}
+              onClick={() => t.result && download(resultToInserts(t.result.columns, t.result.rows, quoteQualified(t.schema, t.table), t.result.types), `${t.table}.sql`, 'text/sql')}
             >
               INSERTs
             </Button>
@@ -209,11 +221,17 @@ export function TableWorkspace(p: Props) {
             />
           </div>
           <div className="flex items-center gap-1.5">
-            <Button size="sm" variant="ghost" onClick={() => p.onPage(-1)}>
+            <Button size="sm" variant="ghost" onClick={() => p.onPage(-1)} disabled={t.offset === 0} aria-label="Previous page">
               <ArrowLeft />
             </Button>
             <span className="text-[12px] text-muted-foreground">offset {t.offset}</span>
-            <Button size="sm" variant="ghost" onClick={() => p.onPage(1)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => p.onPage(1)}
+              disabled={t.result?.total != null ? t.offset + t.limit >= t.result.total : (t.result?.rows.length ?? t.limit) < t.limit}
+              aria-label="Next page"
+            >
               <ArrowRight />
             </Button>
             <span className="text-[12px] text-muted-foreground">
@@ -268,6 +286,7 @@ export function TableWorkspace(p: Props) {
                               className="cursor-text bg-sky-950/30"
                               onDoubleClick={() => p.onEditCell(t.result!.columns[ci], orig)}
                               onClick={(e) => {
+                                if (e.detail > 1) return
                                 if (e.ctrlKey || e.metaKey) {
                                   toggleRow(ri, r)
                                   return
@@ -276,8 +295,12 @@ export function TableWorkspace(p: Props) {
                                   rangeTo(ri)
                                   return
                                 }
+                              }}
+                              onContextMenu={(e) => {
+                                e.preventDefault()
                                 if (c != null && navigator.clipboard) navigator.clipboard.writeText(String(c))
                               }}
+                              title="Double-click to edit · right-click copies cell"
                             >
                               {c == null ? <span className="italic text-muted-foreground">NULL</span> : String(c).slice(0, 200)}
                             </TableCell>

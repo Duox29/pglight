@@ -17,11 +17,11 @@ export function SearchPalette(props: {
   onOpenChange: (v: boolean) => void
   session: string
   onOpenTable: (schema: string, table: string) => void
-  onShowFunc: (schema: string, name: string) => void
 }) {
   const [term, setTerm] = useState('')
   const [hits, setHits] = useState<Hit[]>([])
-  const timer = useRef<ReturnType<typeof setTimeout>>()
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const seq = useRef(0)
 
   useEffect(() => () => clearTimeout(timer.current), [])
 
@@ -32,13 +32,16 @@ export function SearchPalette(props: {
       setHits([])
       return
     }
+    const n = ++seq.current
     const query = v.trim()
     const sid = props.session
     timer.current = setTimeout(async () => {
       try {
         const j = await api<Hit[] | { error?: string }>(q(sid, `/api/search?q=${encodeURIComponent(query)}`))
-        setHits(Array.isArray(j) ? j : [])
+        if (seq.current !== n) return
+        setHits(Array.isArray(j) ? j.filter((h) => h.kind !== 'function') : [])
       } catch {
+        if (seq.current !== n) return
         setHits([])
       }
     }, 200)
@@ -46,9 +49,7 @@ export function SearchPalette(props: {
 
   const go = (r: Hit) => {
     props.onOpenChange(false)
-    if (r.kind === 'table') props.onOpenTable(r.schema, r.name.split('.')[0])
-    else if (r.kind === 'column') props.onOpenTable(r.schema, r.name.split('.')[0])
-    else if (r.kind === 'function') props.onShowFunc(r.schema, r.name)
+    if (r.kind === 'table' || r.kind === 'column') props.onOpenTable(r.schema, r.name.split('.')[0])
   }
 
   return (
@@ -61,7 +62,7 @@ export function SearchPalette(props: {
         </DialogHeader>
         <Input
           autoFocus
-          placeholder="Type to search tables, columns, functions…"
+          placeholder="Type to search tables, columns…"
           value={term}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {

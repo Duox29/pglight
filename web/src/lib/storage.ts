@@ -1,11 +1,38 @@
 import { useState } from 'react'
 
-/** Typed fetch wrapper around the Go backend API. */
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, init)
-  if (res.status === 401) notifyUnauthorized(path, init)
-  return (await res.json()) as T
+/** Thrown for transport failures and non-JSON bodies. HTTP error statuses */
+/** resolve as `{error}` JSON per the backend contract — check `j.error`. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message)
+  }
 }
+
+/** Typed fetch wrapper around the Go backend API. */
+/** Throws ApiError on network failure or invalid JSON, never on `{error}` bodies. */
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(path, init)
+  } catch (e) {
+    throw new ApiError(e instanceof Error ? e.message : 'Network request failed', 0)
+  }
+  if (res.status === 401) notifyUnauthorized(path, init)
+  const text = await res.text().catch(() => '')
+  if (!text) {
+    if (!res.ok) throw new ApiError(`Request failed (${res.status})`, res.status)
+    return null as T
+  }
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    throw new ApiError(`Invalid response (${res.status})`, res.status)
+  }
+}
+
 
 type UnauthorizedCb = (sessionId: string) => void
 const unauthorizedCbs = new Set<UnauthorizedCb>()

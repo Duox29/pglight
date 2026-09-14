@@ -56,12 +56,6 @@ export interface SchemaGroup {
   types: ObjRef[]
 }
 
-export interface ObjectDetail {
-  title: string
-  kind: string
-  body: React.ReactNode
-}
-
 export interface QueryTabT {
   id: string
   kind: 'query'

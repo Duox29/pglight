@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import type { QueryTabT } from '@/types'
 import type { DialogsApi } from './dialogs'
-import { download, formatSqlText, resultToCSV, resultToInserts, resultToJSON, fmtPlanText } from '@/lib/format'
+import { download, formatSqlText, quoteQualified, resultToCSV, resultToInserts, resultToJSON, fmtPlanText } from '@/lib/format'
 
 interface Props {
   tab: QueryTabT
@@ -31,7 +31,7 @@ interface Props {
 
 export function QueryConsole(p: Props) {
   const { tab: t } = p
-  const [sortIdx, setSortIdx] = useState<Record<number, boolean>>({})
+  const [sort, setSort] = useState<{ column: number; direction: 'asc' | 'desc' } | null>(null)
   const editorHandle = useRef<SqlEditorHandle | null>(null)
   // Run the highlighted selection when present, else the whole script.
   const runSelected = () => {
@@ -49,7 +49,11 @@ export function QueryConsole(p: Props) {
         placeholder: 'schema.table',
         defaultValue: 'public.my_table',
       })
-      if (name) download(resultToInserts(r.columns, r.rows, name), 'result.sql', 'text/sql')
+      if (!name) return
+      const [schema, ...rest] = name.split('.')
+      const table = rest.length ? rest.join('.') : schema
+      const qualified = rest.length ? quoteQualified(schema.trim(), table.trim()) : quoteQualified('', table.trim())
+      download(resultToInserts(r.columns, r.rows, qualified, r.types), 'result.sql', 'text/sql')
     }
   }
 
@@ -155,11 +159,18 @@ export function QueryConsole(p: Props) {
           ) : (
             <>
               <DataGrid
-                data={{ columns: res.columns, rows: res.rows }}
+                data={{
+                  columns: res.columns.map((c, i) => (sort?.column === i ? `${c} ${sort.direction === 'asc' ? '▲' : '▼'}` : c)),
+                  rows:
+                    sort == null
+                      ? res.rows
+                      : [...res.rows].sort((a, b) => {
+                          const cmp = String(a[sort.column] ?? '').localeCompare(String(b[sort.column] ?? ''))
+                          return sort.direction === 'asc' ? cmp : -cmp
+                        }),
+                }}
                 onSort={(i) => {
-                  const sorted = [...res.rows].sort((a, b) => String(a[i] ?? '').localeCompare(String(b[i] ?? '')))
-                  res.rows = sorted
-                  setSortIdx({ ...sortIdx, [ri]: !sortIdx[ri] })
+                  setSort((prev) => (prev?.column === i ? { column: i, direction: prev.direction === 'asc' ? 'desc' : 'asc' } : { column: i, direction: 'asc' }))
                 }}
                 onCellClick={(v) => {
                   if (v != null && navigator.clipboard) navigator.clipboard.writeText(String(v))
