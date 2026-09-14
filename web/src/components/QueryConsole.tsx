@@ -7,6 +7,7 @@ import { ensureSnapshot } from '@/lib/schemaCache'
 import { Badge } from './ui/badge'
 import { Card } from './ui/card'
 import { DataGrid, sortGridRows } from './ui/data-grid'
+import { TxnControls } from './TxnControls'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './ui/resizable'
 import { ErrorText } from './ui/feedback'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
@@ -19,6 +20,11 @@ interface Props {
   tab: QueryTabT
   inTxn: boolean
   running: boolean
+  autocommit: boolean
+  connLabel: string
+  connTip: string
+  onAutocommit: (v: boolean) => void
+  onTxn: (action: string) => void
   onSqlChange: (sql: string) => void
   onRun: (sql?: string) => void
   onClearResults: () => void
@@ -85,6 +91,15 @@ export function QueryConsole(p: Props) {
           </span>
         </Tip>
         <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+        {/* TXN: session state lives with Run, not in a separate bar */}
+        <TxnControls
+          connLabel={p.connLabel}
+          connTip={p.connTip}
+          inTxn={p.inTxn}
+          autocommit={p.autocommit}
+          onAutocommit={p.onAutocommit}
+          onTxn={p.onTxn}
+        />
         {/* QUERY: plan + shape the statement */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -145,7 +160,6 @@ export function QueryConsole(p: Props) {
         </Tip>
         <span className="text-[12px] text-muted-foreground">{t.meta}</span>
         {t.results?.[0]?.stale && <Badge variant="secondary">Snapshot from last session — Run to refresh</Badge>}
-        {p.inTxn && <Badge variant="warning">IN TXN</Badge>}
       </div>
         </div>
       </ResizablePanel>

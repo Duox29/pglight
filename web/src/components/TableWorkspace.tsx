@@ -6,6 +6,7 @@ import { Tip } from './ui/tooltip'
 import { Input } from './ui/input'
 import { Badge } from './ui/badge'
 import { Card } from './ui/card'
+import { TxnControls } from './TxnControls'
 import { Switch } from './ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
@@ -20,6 +21,11 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, Con
 interface Props {
   tab: TableTabT
   inTxn: boolean
+  autocommit: boolean
+  connLabel: string
+  connTip: string
+  onAutocommit: (v: boolean) => void
+  onTxn: (action: string) => void
   onSubtab: (s: TableSubtab) => void
   onFilterChange: (filter: string, order: string) => void
   onApply: () => void
@@ -159,8 +165,15 @@ export function TableWorkspace(p: Props) {
             {t.schema}{t.result?.total != null ? ` · ${t.result.total} rows` : ''}{t.ddl?.owner ? ` · owner ${t.ddl.owner}` : ''}
           </div>
         </div>
-        {p.inTxn && <Badge variant="warning">IN TXN</Badge>}
         <span className="flex-1" />
+        <TxnControls
+          connLabel={p.connLabel}
+          connTip={p.connTip}
+          inTxn={p.inTxn}
+          autocommit={p.autocommit}
+          onAutocommit={p.onAutocommit}
+          onTxn={p.onTxn}
+        />
         <Tabs value={t.subtab === 'constraints' || t.subtab === 'triggers' ? 'columns' : t.subtab} onValueChange={(v) => p.onSubtab(v as TableSubtab)}>
           <TabsList aria-label="Table sections">
             <TabsTrigger value="data">Data</TabsTrigger>

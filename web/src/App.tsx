@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Info, Loader2, Play, Plus, RotateCcw, X } from 'lucide-react'
+import { Check, Info, Loader2, Plus, X } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
-import { Badge } from './components/ui/badge'
-import { Button } from './components/ui/button'
 import { Card } from './components/ui/card'
-import { Switch } from './components/ui/switch'
 import { Tip, TooltipProvider } from './components/ui/tooltip'
 import { Separator } from './components/ui/separator'
 import { ConnectionBar, type ConnFields } from './components/ConnectionBar'
+import { TxnControls } from './components/TxnControls'
 import { CredentialManager } from './components/CredentialManager'
 import { DialogHost, createDialogs, type PendingDialog } from './components/dialogs'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './components/ui/resizable'
@@ -115,7 +113,8 @@ export default function App() {
   const [fields, setFields] = useState<ConnFields>({ host: 'localhost', port: '5432', user: 'postgres', password: '', dbname: 'postgres', sslmode: 'disable' })
   const [saved, setSaved] = useLocalStorage<SavedConnection[]>('conns', [])
   // Multi-session: N live backend pools. Tabs bind to one session id each;
-  // the explorer + txn bar follow the active session. No passwords persist.
+  // the explorer follows the active session; txn controls live in each tab's
+  // own toolbar, bound to that tab's session. No passwords persist.
   const [sessions, setSessions] = useLocalStorage<SessionInfo[]>('sessions', [])
   const [activeId, setActiveId] = useLocalStorage<string>('active-sid', '')
   const active = sessions.find((s) => s.id === activeId) ?? null
@@ -383,17 +382,35 @@ export default function App() {
   )
 
   const doTxn = useCallback(
-    async (action: string) => {
-      if (!session) return
+    async (action: string, sidOver?: string) => {
+      const sid = sidOver ?? session
+      if (!sid) return
       try {
-        const j = await apiClient.txn(session, action)
+        const j = await apiClient.txn(sid, action)
         if (j.error) toast.error(j.error)
-        markTxn(session, !!j.in_txn)
+        markTxn(sid, !!j.in_txn)
       } catch (e) {
         toast.error(e instanceof Error ? e.message : String(e))
       }
     },
     [session, markTxn],
+  )
+
+  // Txn controls live inside each tab's own toolbar, bound to that tab's
+  // session — never the globally active one.
+  const txnFor = useCallback(
+    (sid: string) => {
+      const s = sessions.find((x) => x.id === sid)
+      return {
+        inTxn: !!inTxnMap[sid],
+        autocommit,
+        connLabel: s ? `${s.user}@${s.host}/${s.dbname}` : '',
+        connTip: s ? `${s.user}@${s.host}:${s.port}/${s.dbname}` : '',
+        onAutocommit: setAutocommit,
+        onTxn: (a: string) => void doTxn(a, sid),
+      }
+    },
+    [sessions, inTxnMap, autocommit, setAutocommit, doTxn],
   )
 
   /* ---------- explorer (follows the active session) ---------- */
@@ -1263,38 +1280,16 @@ export default function App() {
         }}
         onDocs={() => openDocsTab()}
       />
-      {connected && active && (
+      {connected && active && cur && (cur.kind === 'browser' || cur.kind === 'erd') && (
         <div className="flex items-center gap-2 border-b bg-card px-2.5 py-1.5 text-[12px]">
-          <Tip content={`${active.user}@${active.host}:${active.port}/${active.dbname}`}>
-            <span className="truncate font-semibold">
-              {active.user}@{active.host}/{active.dbname}
-            </span>
-          </Tip>
-          <Separator orientation="vertical" className="h-4" />
-          <label className="flex cursor-pointer items-center gap-1.5 text-muted-foreground">
-            <Switch checked={autocommit} onCheckedChange={setAutocommit} aria-label="Autocommit" />
-            autocommit
-          </label>
-          <Separator orientation="vertical" className="h-4" />
-          <Tip content="Begin transaction">
-            <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="Begin transaction" onClick={() => doTxn('begin')} disabled={inTxn}>
-              <Play />
-            </Button>
-          </Tip>
-          <Tip content="Commit transaction">
-            <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="Commit transaction" onClick={() => doTxn('commit')} disabled={!inTxn}>
-              <Check />
-            </Button>
-          </Tip>
-          <Tip content="Rollback transaction">
-            <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="Rollback transaction" onClick={() => doTxn('rollback')} disabled={!inTxn}>
-              <RotateCcw />
-            </Button>
-          </Tip>
-          <Badge variant="outline" className="gap-1.5 font-normal">
-            <span className={cn('h-2 w-2 rounded-full', inTxn ? 'bg-amber-500' : 'bg-emerald-500')} />
-            {inTxn ? 'open transaction — Commit or Rollback' : 'no transaction'}
-          </Badge>
+          <TxnControls
+            connLabel={`${active.user}@${active.host}/${active.dbname}`}
+            connTip={`${active.user}@${active.host}:${active.port}/${active.dbname}`}
+            inTxn={(cur as { sessionId?: string }).sessionId ? !!inTxnMap[(cur as { sessionId?: string }).sessionId as string] : inTxn}
+            autocommit={autocommit}
+            onAutocommit={setAutocommit}
+            onTxn={(a) => void doTxn(a, (cur as { sessionId?: string }).sessionId as string)}
+          />
         </div>
       )}
       <ResizablePanelGroup direction="horizontal" autoSaveId="pglight-main-layout" className="min-h-0 flex-1">
@@ -1419,8 +1414,8 @@ export default function App() {
             {cur?.kind === 'query' && (
               <QueryConsole
                 tab={cur}
-                inTxn={!!inTxnMap[cur.sessionId]}
                 running={!!running[cur.id]}
+                {...txnFor(cur.sessionId)}
                 onSqlChange={(sql) => updateTab(cur.id, (x) => (x.kind === 'query' ? { ...x, sql } : x))}
                 onRun={(sql) => runQuery(cur.id, sql)}
                 onCancel={() => cancelQuery(cur.id)}
@@ -1440,7 +1435,7 @@ export default function App() {
             {cur?.kind === 'table' && (
               <TableWorkspace
                 tab={cur}
-                inTxn={!!inTxnMap[cur.sessionId]}
+                {...txnFor(cur.sessionId)}
                 onSubtab={(s) => {
                   updateTab(cur.id, (x) => (x.kind === 'table' ? { ...x, subtab: s } : x))
                   if (s !== 'data') loadTableMeta(cur.sessionId, cur.id, cur.schema, cur.table)
