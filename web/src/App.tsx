@@ -820,6 +820,25 @@ export default function App() {
     },
     [activeTab],
   )
+  /* ---------- tab strip: vertical wheel scrolls horizontally, no scrollbar ---------- */
+  const tablistRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const bar = tablistRef.current
+    if (!bar) return
+    // React attaches wheel listeners as passive at the root, so preventDefault
+    // needs a native non-passive listener.
+    const onWheel = (e: WheelEvent) => {
+      if (bar.scrollWidth <= bar.clientWidth + 1) return
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
+      e.preventDefault()
+      bar.scrollLeft += e.deltaY
+    }
+    bar.addEventListener('wheel', onWheel, { passive: false })
+    return () => {
+      bar.removeEventListener('wheel', onWheel)
+    }
+  }, [])
   /* ---------- object alter (sequences / functions / types) ---------- */
   const runObjectDDL = useCallback(
     async (tabId: string, sql: string, success: string) => {
@@ -1576,7 +1595,7 @@ export default function App() {
         <ResizableHandle withHandle />
         <ResizablePanel defaultSize={55} minSize={30} className="min-h-0">
         <main className="flex h-full min-h-0 min-w-0 flex-col">
-          <div className="flex h-10 items-end gap-1 overflow-x-auto border-b bg-card px-2 pt-1.5" role="tablist" aria-label="Workspace tabs">
+          <div ref={tablistRef} className="flex h-10 items-end gap-1 overflow-x-auto border-b bg-card px-2 pt-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="tablist" aria-label="Workspace tabs">
             {tabs.map((t) => {
               const sid = (t as { sessionId?: string }).sessionId
               const db = sessions.find((s) => s.id === sid)?.dbname ?? ''
