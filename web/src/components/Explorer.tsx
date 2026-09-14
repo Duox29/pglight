@@ -70,22 +70,14 @@ function Group(props: {
         <div className="ml-3 border-l border-border/60 pl-1">
           {props.items.map((t) => (
             <ContextMenu key={t.name}>
-              {props.onOpen ? (
-                <Tip content="Click to open data · right-click for actions">
-                  <ContextMenuTrigger asChild>
-                    <div
-                      className="cursor-pointer truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent"
-                      onClick={() => props.onOpen?.(t.name)}
-                    >
-                      {props.render(t.name)}
-                    </div>
-                  </ContextMenuTrigger>
-                </Tip>
-              ) : (
-                <ContextMenuTrigger asChild>
-                  <div className="truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent">{props.render(t.name)}</div>
-                </ContextMenuTrigger>
-              )}
+              <ContextMenuTrigger asChild>
+                <div
+                  className="cursor-pointer truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent"
+                  onClick={() => props.onOpen?.(t.name)}
+                >
+                  {props.render(t.name)}
+                </div>
+              </ContextMenuTrigger>
               {props.menu?.(t.name)}
             </ContextMenu>
           ))}
