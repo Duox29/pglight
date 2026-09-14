@@ -12,6 +12,8 @@ import {
   Hash,
   Shapes,
   ServerCog,
+  Blocks,
+  Users,
 } from 'lucide-react'
 import { Input } from './ui/input'
 import { Button } from './ui/button'
@@ -44,28 +46,31 @@ function Group(props: {
   items: { name: string }[]
   render: (name: string) => React.ReactNode
   onOpen?: (name: string) => void
+  defaultOpen?: boolean
+  forceOpen?: boolean
   menu?: (name: string) => React.ReactNode
 }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(props.defaultOpen ?? false)
+  const shown = props.forceOpen ? true : open
   if (!props.items.length) return null
   return (
     <div>
       <button
-        className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-[12px] text-sky-300/90 hover:bg-accent"
-        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:bg-accent hover:text-foreground"
+        onClick={() => setOpen(!shown)}
       >
-        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        {shown ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         {props.icon}
         <span>
           {props.label} ({props.items.length})
         </span>
       </button>
-      {open && (
-        <div className="ml-3">
+      {shown && (
+        <div className="ml-3 border-l border-border/60 pl-1">
           {props.items.map((t) => (
             <ContextMenu key={t.name}>
               {props.onOpen ? (
-                <Tip content="Click to open">
+                <Tip content="Click to open data · right-click for actions">
                   <ContextMenuTrigger asChild>
                     <div
                       className="cursor-pointer truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent"
@@ -92,13 +97,33 @@ function Group(props: {
 export function Explorer(p: Props) {
   const [filter, setFilter] = useState('')
   const [openSchemas, setOpenSchemas] = useState<Record<string, boolean>>({})
-  const f = filter.toLowerCase()
+  const f = filter.trim().toLowerCase()
   const match = (schema: string, name: string) => (schema + '.' + name).toLowerCase().includes(f)
-
+  const matchCount = f
+    ? p.databases.filter((d) => d.name.toLowerCase().includes(f)).length +
+      p.schemas.reduce((n, s) => {
+        const hit = (name: string) => (s.schema + '.' + name).toLowerCase().includes(f)
+        return (
+          n +
+          s.tables.filter((t) => hit(t.name)).length +
+          s.views.filter((t) => hit(t.name)).length +
+          s.matviews.filter((t) => hit(t.name)).length +
+          s.foreign.filter((t) => hit(t.name)).length +
+          s.functions.filter((t) => hit(t.name)).length +
+          s.sequences.filter((t) => hit(t.name)).length +
+          s.types.filter((t) => hit(t.name)).length
+        )
+      }, 0)
+    : 0
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex gap-1.5 p-2">
-        <Input placeholder="Filter objects…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+      <div className="flex items-center gap-1.5 p-2">
+        <Input placeholder="Filter objects…" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter objects" />
+        {filter && (
+          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground" aria-live="polite">
+            {matchCount} match{matchCount === 1 ? '' : 'es'}
+          </span>
+        )}
         <Tip content="Refresh">
           <Button size="icon" variant="ghost" onClick={p.onRefresh} aria-label="Refresh">
             <RefreshCw />
@@ -107,7 +132,7 @@ export function Explorer(p: Props) {
       </div>
       <ScrollArea className="min-h-0 flex-1 px-2">
         <div className="pb-2">
-          <div className="flex items-center gap-1 px-1 py-1 text-[12px] font-semibold text-sky-300">
+          <div className="flex items-center gap-1 px-1 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             <Database className="h-3.5 w-3.5" /> Databases ({p.databases.length})
           </div>
           <div className="ml-3">
@@ -120,12 +145,13 @@ export function Explorer(p: Props) {
                     <ContextMenuTrigger asChild>
                       <div
                         className={cn(
-                          'cursor-pointer truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent',
-                          d.name === p.currentDb && 'font-semibold text-foreground',
+                          'flex cursor-pointer items-center gap-1.5 truncate rounded px-1.5 py-0.5 text-[12px] hover:bg-accent',
+                          d.name === p.currentDb ? 'font-semibold text-foreground' : 'text-muted-foreground',
                         )}
                         onClick={() => p.onSwitchDb(d.name)}
                       >
-                        {d.name === p.currentDb ? '●' : '○'} {d.name}
+                        <span aria-hidden className={d.name === p.currentDb ? 'text-emerald-500' : 'opacity-40'}>●</span>
+                        <span className="truncate">{d.name}</span>
                         <span className="text-muted-foreground"> {d.size ?? ''}</span>
                       </div>
                     </ContextMenuTrigger>
@@ -175,11 +201,12 @@ export function Explorer(p: Props) {
                 <ContextMenu>
                   <ContextMenuTrigger asChild>
                     <button
-                      className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-[12px] font-semibold text-sky-300 hover:bg-accent"
+                      className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left hover:bg-accent"
                       onClick={() => setOpenSchemas((m) => ({ ...m, [s.schema]: !isOpen }))}
                     >
-                      {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                      {s.schema} ({T.length + V.length + M.length + F.length})
+                      {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+                      <span className="text-[13px] font-semibold text-foreground">{s.schema}</span>
+                      <span className="text-[11px] font-normal text-muted-foreground">({T.length + V.length + M.length + F.length})</span>
                     </button>
                   </ContextMenuTrigger>
                   <ContextMenuContent>
@@ -192,40 +219,40 @@ export function Explorer(p: Props) {
                   </ContextMenuContent>
                 </ContextMenu>
                 {isOpen && (
-                  <div className="ml-2">
-                    <Group icon={<Table2 className="h-3 w-3" />} label="Tables" items={T} render={(n) => `▦ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
-                    <Group icon={<Eye className="h-3 w-3" />} label="Views" items={V} render={(n) => `👁 ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
-                    <Group icon={<Layers className="h-3 w-3" />} label="MatViews" items={M} render={(n) => `▦ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
-                    <Group icon={<Network className="h-3 w-3" />} label="Foreign" items={F} render={(n) => `⛓ ${n}`} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
-                    <Group icon={<FunctionSquare className="h-3 w-3" />} label="Functions" items={Fn} render={(n) => `ƒ ${n}`} menu={slimMenu} />
-                    <Group icon={<Hash className="h-3 w-3" />} label="Sequences" items={Sq} render={(n) => `🔢 ${n}`} menu={slimMenu} />
-                    <Group icon={<Shapes className="h-3 w-3" />} label="Types" items={Ty} render={(n) => `◈ ${n}`} menu={slimMenu} />
+                  <div className="ml-2 border-l border-border/50 pl-1">
+                    <Group icon={<Table2 className="h-3 w-3" />} label="Tables" items={T} defaultOpen forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><Table2 className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="truncate">{n}</span></span>} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
+                    <Group icon={<Eye className="h-3 w-3" />} label="Views" items={V} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><Eye className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="truncate">{n}</span></span>} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
+                    <Group icon={<Layers className="h-3 w-3" />} label="MatViews" items={M} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><Layers className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="truncate">{n}</span></span>} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
+                    <Group icon={<Network className="h-3 w-3" />} label="Foreign" items={F} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><Network className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="truncate">{n}</span></span>} onOpen={(n) => p.onOpenTable(s.schema, n)} menu={fullMenu} />
+                    <Group icon={<FunctionSquare className="h-3 w-3" />} label="Functions" items={Fn} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><FunctionSquare className="h-3 w-3 shrink-0 text-purple-400/70" /><span className="truncate">{n}</span></span>} menu={slimMenu} />
+                    <Group icon={<Hash className="h-3 w-3" />} label="Sequences" items={Sq} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><Hash className="h-3 w-3 shrink-0 text-amber-400/70" /><span className="truncate">{n}</span></span>} menu={slimMenu} />
+                    <Group icon={<Shapes className="h-3 w-3" />} label="Types" items={Ty} forceOpen={!!f} render={(n) => <span className="flex items-center gap-1.5"><Shapes className="h-3 w-3 shrink-0 text-cyan-400/70" /><span className="truncate">{n}</span></span>} menu={slimMenu} />
                   </div>
                 )}
               </div>
             )
           })}
-          <div className="flex items-center gap-1 px-1 py-1 text-[12px] font-semibold text-sky-300">
+          <div className="flex items-center gap-1 px-1 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             <ServerCog className="h-3.5 w-3.5" /> Server objects
           </div>
           {p.connected ? (
-            <div className="ml-3">
+            <div className="ml-3 flex flex-col gap-px">
               <Tip content="Installed Postgres extensions (pg_catalog)">
-                <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenBrowser('extensions', 'Extensions')}>○ Extensions</div>
+                <div className="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-0.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => p.onOpenBrowser('extensions', 'Extensions')}><Blocks className="h-3 w-3" /> Extensions</div>
               </Tip>
               <Tip content="Users, groups and their attributes">
-                <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenBrowser('roles', 'Roles')}>○ Roles</div>
+                <div className="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-0.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => p.onOpenBrowser('roles', 'Roles')}><Users className="h-3 w-3" /> Roles</div>
               </Tip>
               <Tip content="Foreign-key graph of a schema">
-                <div className="cursor-pointer rounded px-1.5 py-0.5 text-[12px] hover:bg-accent" onClick={() => p.onOpenErd('public')}>○ ERD</div>
+                <div className="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-0.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => p.onOpenErd('public')}><Network className="h-3 w-3" /> ERD</div>
               </Tip>
             </div>
           ) : (
             <Tip content="Connect to a database first">
-              <div className="ml-3 opacity-40">
-                <div className="cursor-not-allowed rounded px-1.5 py-0.5 text-[12px]" aria-disabled>○ Extensions</div>
-                <div className="cursor-not-allowed rounded px-1.5 py-0.5 text-[12px]" aria-disabled>○ Roles</div>
-                <div className="cursor-not-allowed rounded px-1.5 py-0.5 text-[12px]" aria-disabled>○ ERD</div>
+              <div className="ml-3 flex flex-col gap-px opacity-40">
+                <div className="flex cursor-not-allowed items-center gap-1.5 rounded px-1.5 py-0.5 text-[12px]" aria-disabled><Blocks className="h-3 w-3" /> Extensions</div>
+                <div className="flex cursor-not-allowed items-center gap-1.5 rounded px-1.5 py-0.5 text-[12px]" aria-disabled><Users className="h-3 w-3" /> Roles</div>
+                <div className="flex cursor-not-allowed items-center gap-1.5 rounded px-1.5 py-0.5 text-[12px]" aria-disabled><Network className="h-3 w-3" /> ERD</div>
               </div>
             </Tip>
           )}

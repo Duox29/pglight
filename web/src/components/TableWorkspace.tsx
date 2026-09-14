@@ -6,6 +6,7 @@ import { Tip } from './ui/tooltip'
 import { Input } from './ui/input'
 import { Badge } from './ui/badge'
 import { Card } from './ui/card'
+import { Switch } from './ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
 import { ErrorText, EmptyNote } from './ui/feedback'
@@ -151,23 +152,25 @@ export function TableWorkspace(p: Props) {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-sm font-semibold">
-          {t.schema}.{t.table}
-        </span>
+      <div className="flex flex-wrap items-end gap-1.5">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">{t.table}</div>
+          <div className="truncate text-[11px] text-muted-foreground">
+            {t.schema}{t.result?.total != null ? ` · ${t.result.total} rows` : ''}{t.ddl?.owner ? ` · owner ${t.ddl.owner}` : ''}
+          </div>
+        </div>
         {p.inTxn && <Badge variant="warning">IN TXN</Badge>}
         <span className="flex-1" />
-        <Tabs value={t.subtab} onValueChange={(v) => p.onSubtab(v as TableSubtab)}>
-          <TabsList>
-            {(['data', 'columns', 'ddl', 'indexes', 'constraints', 'triggers', 'stats'] as TableSubtab[]).map((s) => (
-              <TabsTrigger key={s} value={s} className="capitalize">
-                {s}
-              </TabsTrigger>
-            ))}
+        <Tabs value={t.subtab === 'constraints' || t.subtab === 'triggers' ? 'columns' : t.subtab} onValueChange={(v) => p.onSubtab(v as TableSubtab)}>
+          <TabsList aria-label="Table sections">
+            <TabsTrigger value="data">Data</TabsTrigger>
+            <TabsTrigger value="columns">Structure</TabsTrigger>
+            <TabsTrigger value="ddl">SQL</TabsTrigger>
+            <TabsTrigger value="indexes">Indexes</TabsTrigger>
+            <TabsTrigger value="stats">Stats</TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
-
       {t.subtab === 'data' && (
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -235,7 +238,7 @@ export function TableWorkspace(p: Props) {
               <ArrowRight />
             </Button>
             <span className="text-[12px] text-muted-foreground">
-              {t.result ? `${t.result.rows.length} rows${t.result.total != null ? ` / ${t.result.total} total` : ''} · ${t.result.duration_ms}ms` : ''}
+              {t.result ? <><b className="font-medium text-foreground">{t.result.rows.length} rows</b>{t.result.total != null ? ` / ${t.result.total} total` : ''} · {t.result.duration_ms}ms · double-click a cell to edit</> : ''}
             </span>
             {selRecs.length > 0 && (
               <>
@@ -262,7 +265,7 @@ export function TableWorkspace(p: Props) {
                       {t.result.columns.map((c) => (
                         <TableHead key={c}>{c}</TableHead>
                       ))}
-                      <TableHead>✎</TableHead>
+                      <TableHead aria-label="Row actions"><Pencil className="h-3 w-3 text-muted-foreground" /></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -309,12 +312,14 @@ export function TableWorkspace(p: Props) {
                             <div className="flex gap-1">
                               <Tip content="Copy row as INSERT">
                                 <Button size="sm" variant="ghost" aria-label="Copy row as INSERT" onClick={() => p.onCopyInsert(orig)}>
-                                  ⧉
+                                  <Copy className="h-3 w-3" />
                                 </Button>
                               </Tip>
-                              <Button size="sm" variant="ghost" onClick={() => p.onDeleteRow(orig)}>
-                                del
-                              </Button>
+                              <Tip content="Delete row">
+                                <Button size="sm" variant="ghost" aria-label="Delete row" onClick={() => p.onDeleteRow(orig)}>
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </Tip>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -349,6 +354,21 @@ export function TableWorkspace(p: Props) {
       )}
 
       <Tabs value={t.subtab}>
+        {(t.subtab === 'columns' || t.subtab === 'constraints' || t.subtab === 'triggers') && (
+          <div className="flex items-center gap-1 text-[12px]" role="tablist" aria-label="Structure sections">
+            {(['columns', 'constraints', 'triggers'] as TableSubtab[]).map((s) => (
+              <button
+                key={s}
+                role="tab"
+                aria-selected={s === t.subtab}
+                onClick={() => p.onSubtab(s)}
+                className={s === t.subtab ? 'rounded bg-muted px-2 py-1 font-semibold capitalize text-foreground' : 'rounded px-2 py-1 capitalize text-muted-foreground hover:text-foreground'}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
         <TabsContent value="columns">
           <div className="mb-2 flex items-center gap-1.5">
             <span className="text-[12px] text-muted-foreground">{t.cols ? `${t.cols.length} columns` : ''} · double-click a row to edit</span>
@@ -460,20 +480,21 @@ export function TableWorkspace(p: Props) {
               </div>
               <Card className="p-2.5">
                 <div className="mb-1 flex items-center gap-2">
-                  <span className="text-[12px] font-semibold">CREATE TABLE</span>
-                  <Button size="sm" variant="ghost" onClick={copyDdl}>
-                    <Copy /> Copy
+                  <span className="font-mono text-[12px] font-semibold">CREATE TABLE {t.schema}.{t.table}</span>
+                  <span className="flex-1" />
+                  <Button size="sm" variant="ghost" onClick={copyDdl} aria-label="Copy DDL">
+                    <Copy className="h-3.5 w-3.5" /> Copy
                   </Button>
                 </div>
-                <pre className="overflow-auto rounded bg-muted p-2 font-mono text-[12px]">{t.ddl.ddl}</pre>
+                <pre className="overflow-auto rounded-md border border-border bg-[#0b0d11] p-2.5 font-mono text-[12px] leading-relaxed">{t.ddl.ddl}</pre>
               </Card>
               <Card className="p-2.5">
                 <div className="mb-1 text-[12px] font-semibold">Constraints</div>
-                <pre className="overflow-auto font-mono text-[12px]">{(t.ddl.constraints ?? []).map((c) => c.def).join('\n') || '—'}</pre>
+                <pre className="overflow-auto rounded-md border border-border/60 bg-muted/40 p-2 font-mono text-[12px]">{(t.ddl.constraints ?? []).map((c) => c.def).join('\n') || '—'}</pre>
               </Card>
               <Card className="p-2.5">
                 <div className="mb-1 text-[12px] font-semibold">Indexes</div>
-                <pre className="overflow-auto font-mono text-[12px]">{(t.ddl.indexes ?? []).map((c) => c.def).join('\n') || '—'}</pre>
+                <pre className="overflow-auto rounded-md border border-border/60 bg-muted/40 p-2 font-mono text-[12px]">{(t.ddl.indexes ?? []).map((c) => c.def).join('\n') || '—'}</pre>
               </Card>
             </div>
           ) : (
@@ -656,14 +677,13 @@ export function TableWorkspace(p: Props) {
                       <TableCell>
                         <div className="flex gap-1">
                           <Tip content={disabled ? `Enable trigger ${x.name}` : `Disable trigger ${x.name}`}>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              aria-label={`${disabled ? 'Enable' : 'Disable'} ${x.name}`}
-                              onClick={() => p.onAlter({ op: disabled ? 'enable_trigger' : 'disable_trigger', trigger: x.name })}
-                            >
-                              {disabled ? 'on' : 'off'}
-                            </Button>
+                            <span className="inline-flex h-7 items-center px-2">
+                              <Switch
+                                checked={!disabled}
+                                onCheckedChange={() => p.onAlter({ op: disabled ? 'enable_trigger' : 'disable_trigger', trigger: x.name })}
+                                aria-label={`${disabled ? 'Enable' : 'Disable'} ${x.name}`}
+                              />
+                            </span>
                           </Tip>
                           <Tip content={`Drop trigger ${x.name}`}>
                             <Button

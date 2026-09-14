@@ -77,6 +77,7 @@ function ConfirmHost({ dlg }: { dlg: PendingDialog }) {
         <AlertDialogHeader>
           <AlertDialogTitle>{dlg.title}</AlertDialogTitle>
           {dlg.description && <AlertDialogDescription>{dlg.description}</AlertDialogDescription>}
+          {dlg.danger && <p className="text-[12px] font-medium text-destructive">This action cannot be undone.</p>}
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel onClick={() => dlg.resolve(false)}>Cancel</AlertDialogCancel>

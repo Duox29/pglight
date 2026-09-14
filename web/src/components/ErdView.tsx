@@ -1,3 +1,4 @@
+import { RefreshCw } from 'lucide-react'
 import { Button } from './ui/button'
 import { EmptyNote } from './ui/feedback'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
@@ -39,8 +40,8 @@ export function ErdView(props: {
             ))}
           </SelectContent>
         </Select>
-        <Button size="sm" variant="secondary" onClick={props.onReload}>
-          ↻
+        <Button size="sm" variant="secondary" onClick={props.onReload} aria-label="Reload diagram">
+          <RefreshCw className="h-3.5 w-3.5" />
         </Button>
         <span className="text-[12px] text-muted-foreground">click a table to open</span>
       </div>

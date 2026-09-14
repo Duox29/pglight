@@ -1,3 +1,4 @@
+import { RefreshCw } from 'lucide-react'
 import { Button } from './ui/button'
 import { DataGrid } from './ui/data-grid'
 import { EmptyNote, ErrorText } from './ui/feedback'
@@ -10,8 +11,8 @@ export function BrowserView(props: { tab: BrowserTabT; onReload: () => void }) {
       <div className="flex items-center gap-1.5">
         <b className="text-sm">{t.title}</b>
         <span className="flex-1" />
-        <Button size="sm" variant="secondary" onClick={props.onReload}>
-          ↻
+        <Button size="sm" variant="secondary" onClick={props.onReload} aria-label="Reload">
+          <RefreshCw className="h-3.5 w-3.5" />
         </Button>
       </div>
       <ErrorText message={t.error} />

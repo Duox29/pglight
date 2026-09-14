@@ -60,9 +60,9 @@ const SECTIONS: Section[] = [
         <ul className="mt-1.5 list-disc space-y-1 pl-5">
           <Li><K>Multi-statement scripts</K> run in order and render one result block per statement; a failing statement reports which one failed.</Li>
           <Li><K>Explain / Analyze</K> shows the plan with timing and buffer stats.</Li>
-          <Li><K>Format</K> uppercases keywords and breaks clauses; <K>★ Snippet</K> saves the SQL to the Snippets panel.</Li>
+          <Li><K>Format</K> uppercases keywords and breaks clauses; <K>Snippet</K> saves the SQL to the Snippets panel.</Li>
           <Li>Export any result as <K>CSV / JSON / INSERTs</K>; click a cell to copy it; click a header to sort.</Li>
-          <Li><K>Autocomplete</K> suggests tables/columns as you type (context-aware: FROM → tables, <K>alias.</K> → that table's columns); <K>Ctrl+Space</K> triggers it manually, <K>Tab/Enter</K> accepts. Schema is cached per session (⟳ forces refresh).</Li>
+          <Li><K>Autocomplete</K> suggests tables/columns as you type (context-aware: FROM → tables, <K>alias.</K> → that table's columns); <K>Ctrl+Space</K> triggers it manually, <K>Tab/Enter</K> accepts. Schema is cached per session (refresh button forces refresh).</Li>
           <Li>With <K>autocommit off</K>, running DML auto-opens a transaction — Commit or Rollback from the txn bar. The <K>IN TXN</K> badge marks tabs inside it.</Li>
         </ul>
       </>
@@ -75,7 +75,7 @@ const SECTIONS: Section[] = [
       <>
         <P>Tables open with seven sub-tabs: Data, Columns, DDL, Indexes, Constraints, Triggers, Stats.</P>
         <ul className="mt-1.5 list-disc space-y-1 pl-5">
-          <Li><K>Data</K>: free-form WHERE filter, ORDER input, paging, per-row edit (double-click a cell, <K>__NULL__</K> for NULL), copy row as INSERT (⧉), delete, insert row form, CSV export/INSERT export. Bulk select with Ctrl-click / Shift-click, right-click for Export (CSV/JSON/INSERTs), Copy and bulk Delete.</Li>
+          <Li><K>Data</K>: free-form WHERE filter, ORDER input, paging, per-row edit (double-click a cell, <K>__NULL__</K> for NULL), copy row as INSERT, delete, insert row form, CSV export/INSERT export. Bulk select with Ctrl-click / Shift-click, right-click for Export (CSV/JSON/INSERTs), Copy and bulk Delete.</Li>
           <Li><K>Import CSV</K>: header row maps to columns automatically (or positional fallback); confirm before inserting.</Li>
           <Li><K>Stats</K> shows sizes, seq/idx scans, live/dead tuples and vacuum ages, with VACUUM / ANALYZE / REINDEX actions (refused inside an open txn, like pgAdmin).</Li>
           <Li>UPDATE/DELETE without a key are refused server-side.</Li>

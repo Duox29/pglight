@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plug, PlugZap, RefreshCw, Save, Trash2, KeyRound, ChevronsUpDown } from 'lucide-react'
+import { Plug, PlugZap, RefreshCw, Save, Trash2, KeyRound, ChevronsUpDown, X } from 'lucide-react'
 import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
 import { Input } from './ui/input'
@@ -47,14 +47,27 @@ export function CredentialManager(p: Props) {
     />
   )
 
+  const active = p.sessions.find((s) => s.id === p.activeId)
+  // Post-connect: collapse the editor into a one-line context (the fields
+  // stay mounted so they keep their values for the next connection).
+
   return (
     <Collapsible open={p.open} onOpenChange={p.onOpenChange} className="border-b">
       <CollapsibleTrigger asChild>
         <button className="-mb-px flex h-10 w-full items-center gap-1.5 px-2.5 text-left text-[12px] font-semibold hover:bg-accent">
-          <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
-          Connections
-          <span className="flex-1" />
-          <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className={active ? 'text-emerald-500' : 'text-muted-foreground'} aria-hidden>●</span>
+          {active ? (
+            <span className="min-w-0 flex-1 truncate font-semibold">
+              {active.user}@{active.host}/{active.dbname}
+              <span className="ml-1.5 font-normal text-muted-foreground">{active.port !== '5432' ? `:${active.port}` : ''} · {p.sessions.length} session{p.sessions.length === 1 ? '' : 's'}</span>
+            </span>
+          ) : (
+            <>
+              <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="flex-1">Connections</span>
+            </>
+          )}
+          {!active && <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" />}
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent className="data-[state=closed]:hidden">
@@ -83,7 +96,7 @@ export function CredentialManager(p: Props) {
                         className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left hover:underline"
                         onClick={() => p.onSwitch(s.id)}
                       >
-                        <span className={dead ? 'text-red-400' : s.id === p.activeId ? '' : 'opacity-60'}>{dead ? '○' : s.id === p.activeId ? '●' : '○'}</span>
+                        <span className={dead ? 'text-red-400' : s.id === p.activeId ? '' : 'opacity-60'} aria-hidden>{dead ? '○' : s.id === p.activeId ? '●' : '○'}</span>
                         <span className="truncate">
                           {s.user}@{s.host}/{s.dbname}
                         </span>
@@ -99,7 +112,7 @@ export function CredentialManager(p: Props) {
                     )}
                     <Tip content="Disconnect this session">
                       <Button size="sm" variant="ghost" aria-label="Disconnect this session" onClick={() => p.onDisconnectOne(s.id)}>
-                        ✖
+                        <X className="h-3 w-3" />
                       </Button>
                     </Tip>
                   </div>
@@ -177,7 +190,7 @@ export function CredentialManager(p: Props) {
             </Tip>
             <Tip content="Disconnect">
               <Button size="sm" variant="ghost" onClick={p.onDisconnect} aria-label="Disconnect">
-                ✖
+                <X className="h-3 w-3" />
               </Button>
             </Tip>
           </div>

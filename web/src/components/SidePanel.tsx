@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Ban, Skull } from 'lucide-react'
+import { Ban, Skull, Trash2, X } from 'lucide-react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Card } from './ui/card'
@@ -24,8 +24,11 @@ interface Props {
   dialogs: DialogsApi
 }
 
-const views: SideView[] = ['history', 'snippets', 'server', 'activity', 'locks', 'stats', 'settings', 'logs']
-
+const viewGroups: { label: string; views: SideView[] }[] = [
+  { label: 'Workspace', views: ['history', 'snippets'] },
+  { label: 'Database', views: ['server', 'activity', 'locks', 'stats'] },
+  { label: 'System', views: ['settings', 'logs'] },
+]
 export function SidePanel(p: Props) {
   const [filter, setFilter] = useState('')
   const [payload, setPayload] = useState<unknown>(null)
@@ -71,19 +74,24 @@ export function SidePanel(p: Props) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between px-2.5 pt-2">
         <span className="text-sm font-semibold capitalize">{p.view}</span>
-        <Button size="sm" variant="ghost" onClick={p.onClose}>
-          ✖
+        <Button size="sm" variant="ghost" onClick={p.onClose} aria-label="Close panel">
+          <X className="h-3.5 w-3.5" />
         </Button>
       </div>
-      <div className="px-2.5 pb-1">
+      <div className="flex flex-col gap-1 px-2.5 pb-1">
         <Tabs value={p.view} onValueChange={(v) => p.onView(v as SideView)}>
-          <TabsList>
-            {views.map((v) => (
-              <TabsTrigger key={v} value={v} className="capitalize">
-                {v}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+          {viewGroups.map((g) => (
+            <div key={g.label}>
+              <div className="px-1 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{g.label}</div>
+              <TabsList className="w-full justify-start">
+                {g.views.map((v) => (
+                  <TabsTrigger key={v} value={v} className="capitalize">
+                    {v}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
+          ))}
         </Tabs>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-2.5">
@@ -112,18 +120,19 @@ export function SidePanel(p: Props) {
                   <Button
                     size="sm"
                     variant="ghost"
+                    aria-label={`Delete snippet ${s.name}`}
                     onClick={(e) => {
                       e.stopPropagation()
                       p.onDeleteSnippet(i)
                     }}
                   >
-                    del
+                    <Trash2 className="h-3 w-3" />
                   </Button>
                 </div>
                 <pre className="mt-1 whitespace-pre-wrap text-[11px] text-muted-foreground">{s.sql.slice(0, 200)}</pre>
               </Card>
             ))}
-            {!p.snippets.length && <EmptyNote text="No snippets — use ★ in a query tab" />}
+            {!p.snippets.length && <EmptyNote text="No snippets — use Snippet in a query tab" />}
           </div>
         )}
         {(p.view === 'server' || p.view === 'activity' || p.view === 'locks' || p.view === 'stats' || p.view === 'settings' || p.view === 'logs') && (
@@ -134,12 +143,7 @@ export function SidePanel(p: Props) {
               <ActivityView rows={payload as ActivityRow[]} session={p.session} dialogs={p.dialogs} />
             )}
             {p.view === 'locks' && payload != null && Array.isArray(payload) && (
-              <DataGrid
-                data={{
-                  columns: ['pid', 'user', 'locktype', 'relation', 'mode', 'granted', 'query'],
-                  rows: (payload as LockRow[]).map((r) => [r.pid, r.user, r.locktype, r.relation, r.mode, String(r.granted), (r.query ?? '').slice(0, 80)]),
-                }}
-              />
+              <LocksView rows={payload as LockRow[]} />
             )}
             {p.view === 'stats' && payload != null && !(payload as { error?: string }).error && <StatsView data={payload as StatsInfo} />}
             {p.view === 'settings' && <SettingsPanel />}
@@ -198,22 +202,27 @@ function ActivityView({ rows, session, dialogs }: { rows: ActivityRow[]; session
     await api(q(session, `/api/cancel?pid=${pid}${kill ? '&kill=1' : ''}`))
   }
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1.5">
+      <DataGrid
+        data={{
+          columns: ['pid', 'user', 'state', 'duration', 'query'],
+          rows: rows.map((r) => [r.pid, r.user, r.state, r.duration, (r.query ?? '').slice(0, 120)]),
+        }}
+        onCellClick={(v, col) => {
+          if (col === 'pid' && navigator.clipboard) navigator.clipboard.writeText(String(v))
+        }}
+      />
       {rows.map((r) => (
-        <Card key={r.pid} className="p-2 text-[12px]">
-          <div className="flex items-center gap-2">
-            <b>#{r.pid}</b>
-            <span className="text-muted-foreground">{r.user} · {r.state} · {r.duration}</span>
-            <span className="flex-1" />
-            <Button size="sm" variant="ghost" onClick={() => act(r.pid)}>
-              <Ban /> cancel
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => act(r.pid, true)}>
-              <Skull /> kill
-            </Button>
-          </div>
-          <pre className="mt-1 whitespace-pre-wrap text-[11px] text-muted-foreground">{(r.query ?? '').slice(0, 160)}</pre>
-        </Card>
+        <div key={r.pid} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className="font-mono">#{r.pid}</span>
+          <span className="min-w-0 flex-1 truncate">{(r.query ?? '').slice(0, 80) || '—'}</span>
+          <Button size="sm" variant="ghost" onClick={() => act(r.pid)} aria-label={`Cancel backend ${r.pid}`}>
+            <Ban className="h-3 w-3" /> cancel
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => act(r.pid, true)} aria-label={`Terminate backend ${r.pid}`}>
+            <Skull className="h-3 w-3" /> kill
+          </Button>
+        </div>
       ))}
       {!rows.length && <EmptyNote text="No sessions" />}
     </div>
@@ -228,6 +237,25 @@ interface LockRow {
   mode: string
   granted: boolean
   query: string
+}
+
+function LocksView({ rows }: { rows: LockRow[] }) {
+  const blocked = rows.filter((r) => !r.granted)
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1"><span aria-hidden className="h-2 w-2 rounded-full bg-emerald-500" /> {rows.length - blocked.length} granted</span>
+        <span className="inline-flex items-center gap-1"><span aria-hidden className="h-2 w-2 rounded-full bg-red-500" /> {blocked.length} waiting</span>
+      </div>
+      <DataGrid
+        data={{
+          columns: ['pid', 'user', 'locktype', 'relation', 'mode', 'status', 'query'],
+          rows: rows.map((r) => [r.pid, r.user, r.locktype, r.relation, r.mode, r.granted ? 'granted' : 'waiting', (r.query ?? '').slice(0, 80)]),
+        }}
+        cellClassName={(v) => (v === 'waiting' ? 'font-semibold text-red-400' : v === 'granted' ? 'text-emerald-500' : undefined)}
+      />
+    </div>
+  )
 }
 
 interface StatsInfo {

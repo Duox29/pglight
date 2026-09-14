@@ -103,23 +103,30 @@ export function SettingsPanel() {
                 </SelectContent>
               </Select>
             </label>
+            <p className="-mt-1 text-[11px] text-muted-foreground">Minimum severity kept in the log buffer.</p>
             <label className="flex items-center justify-between gap-2">
               <span>HTTP requests</span>
               <Switch checked={cfg.log_http} onCheckedChange={(v) => setCfg({ ...cfg, log_http: v })} />
             </label>
+            <p className="-mt-1 text-[11px] text-muted-foreground">Log every API request with status and duration.</p>
             <label className="flex items-center justify-between gap-2">
               <span>Queries</span>
               <Switch checked={cfg.log_query} onCheckedChange={(v) => setCfg({ ...cfg, log_query: v })} />
             </label>
+            <p className="-mt-1 text-[11px] text-muted-foreground">Log SQL text, session, and row counts.</p>
             <label className="flex items-center justify-between gap-2">
-              <span>Slow threshold (ms)</span>
-              <Input
-                type="number"
-                className="w-[110px]"
-                value={cfg.slow_ms}
-                onChange={(e) => setCfg({ ...cfg, slow_ms: Number(e.target.value) })}
-              />
+              <span>Slow query threshold</span>
+              <span className="flex items-center gap-1">
+                <Input
+                  type="number"
+                  className="w-[80px]"
+                  value={cfg.slow_ms}
+                  onChange={(e) => setCfg({ ...cfg, slow_ms: Number(e.target.value) })}
+                />
+                <span className="text-muted-foreground">ms</span>
+              </span>
             </label>
+            <p className="-mt-1 text-[11px] text-muted-foreground">Queries taking longer than this are logged as warnings.</p>
             <label className="flex items-center justify-between gap-2">
               <span>Max entries</span>
               <Input
@@ -129,9 +136,7 @@ export function SettingsPanel() {
                 onChange={(e) => setCfg({ ...cfg, max_entries: Number(e.target.value) })}
               />
             </label>
-            <div className="text-[11px] text-muted-foreground">
-              Steady-state queries log at debug; slow queries warn, failures error.
-            </div>
+            <p className="-mt-1 text-[11px] text-muted-foreground">Maximum number of log entries kept in memory. Steady-state queries log at debug; slow queries warn, failures error.</p>
             <div className="flex gap-1.5">
               <Button size="sm" className="flex-1" onClick={save} disabled={saving}>
                 <Save /> Save

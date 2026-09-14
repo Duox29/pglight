@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Play, FileDown, RefreshCw, Sparkles, Square, Star, Trash2, Wand2 } from 'lucide-react'
+import { Play, FileDown, RefreshCw, Sparkles, Square, Star, Trash2, Wand2, ChevronDown } from 'lucide-react'
 import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
 import { SqlEditor, type SqlEditorHandle } from './SqlEditor'
@@ -69,39 +69,39 @@ export function QueryConsole(p: Props) {
         handleRef={editorHandle}
       />
       <div className="flex flex-wrap items-center gap-1.5">
-        <Tip content="Run selection if any, else whole script">
+        {/* PRIMARY: the one action that matters */}
+        <Tip content="Run selection if any, else whole script (Ctrl+Enter)">
           <span className="inline-flex">
             <Button size="sm" onClick={runSelected} disabled={p.running}>
-              <Play /> Run (Ctrl+Enter)
+              <Play /> Run
             </Button>
           </span>
         </Tip>
         <Tip content="Cancel running query">
           <span className="inline-flex">
-            <Button size="sm" variant="ghost" onClick={p.onCancel} disabled={!p.running} aria-label="Cancel running query">
+            <Button size="sm" variant="outline" onClick={p.onCancel} disabled={!p.running} aria-label="Cancel running query">
               <Square />
             </Button>
           </span>
         </Tip>
-        <Button size="sm" variant="secondary" onClick={() => p.onExplain(false)}>
-          Explain
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => p.onExplain(true)}>
-          Analyze
-        </Button>
+        <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+        {/* QUERY: plan + shape the statement */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="secondary">
+              Explain <ChevronDown />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem onSelect={() => p.onExplain(false)}>Explain</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => p.onExplain(true)}>Explain Analyze</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button size="sm" variant="ghost" onClick={() => p.onSqlChange(formatSqlText(t.sql))}>
           <Wand2 /> Format
         </Button>
-        <Button size="sm" variant="ghost" onClick={p.onSaveSnippet}>
-          <Star /> Snippet
-        </Button>
-        <Tip content="Refresh autocomplete schema (cached 60s, auto-invalidated on DDL)">
-          <span className="inline-flex">
-            <Button size="sm" variant="ghost" onClick={() => ensureSnapshot(t.sessionId, true)} aria-label="Refresh autocomplete schema">
-              <RefreshCw />
-            </Button>
-          </span>
-        </Tip>
+        <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+        {/* RESULT: size + export the output */}
         <Select value={String(t.limit)} onValueChange={(v) => p.onLimit(Number(v))}>
           <SelectTrigger className="w-[100px]">
             <SelectValue />
@@ -124,10 +124,18 @@ export function QueryConsole(p: Props) {
             <DropdownMenuItem onSelect={() => exportAs('sql')}>INSERTs</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <span className="text-[12px] text-muted-foreground">{t.meta}</span>
-        {t.results?.[0]?.stale && <Badge variant="secondary">Snapshot from last session — Run to refresh</Badge>}
-        {p.inTxn && <Badge variant="warning">IN TXN</Badge>}
-        <span className="flex-1" />
+        <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+        {/* UTILITY: housekeeping */}
+        <Button size="sm" variant="ghost" onClick={p.onSaveSnippet}>
+          <Star /> Snippet
+        </Button>
+        <Tip content="Refresh autocomplete schema (cached 60s, auto-invalidated on DDL)">
+          <span className="inline-flex">
+            <Button size="sm" variant="ghost" onClick={() => ensureSnapshot(t.sessionId, true)} aria-label="Refresh autocomplete schema">
+              <RefreshCw />
+            </Button>
+          </span>
+        </Tip>
         <Tip content="Clear results">
           <span className="inline-flex">
             <Button size="sm" variant="ghost" onClick={p.onClearResults} disabled={!t.results && !t.error && !t.plan} aria-label="Clear results">
@@ -135,6 +143,9 @@ export function QueryConsole(p: Props) {
             </Button>
           </span>
         </Tip>
+        <span className="text-[12px] text-muted-foreground">{t.meta}</span>
+        {t.results?.[0]?.stale && <Badge variant="secondary">Snapshot from last session — Run to refresh</Badge>}
+        {p.inTxn && <Badge variant="warning">IN TXN</Badge>}
       </div>
         </div>
       </ResizablePanel>
@@ -159,16 +170,11 @@ export function QueryConsole(p: Props) {
           ) : (
             <>
               <DataGrid
-                data={{
-                  columns: res.columns.map((c, i) => (sort?.column === i ? `${c} ${sort.direction === 'asc' ? '▲' : '▼'}` : c)),
-                  rows:
-                    sort == null
-                      ? res.rows
-                      : [...res.rows].sort((a, b) => {
-                          const cmp = String(a[sort.column] ?? '').localeCompare(String(b[sort.column] ?? ''))
-                          return sort.direction === 'asc' ? cmp : -cmp
-                        }),
-                }}
+                data={{ columns: res.columns, types: res.types, rows: sort == null ? res.rows : [...res.rows].sort((a, b) => {
+                  const cmp = String(a[sort.column] ?? '').localeCompare(String(b[sort.column] ?? ''))
+                  return sort.direction === 'asc' ? cmp : -cmp
+                })}}
+                sort={sort}
                 onSort={(i) => {
                   setSort((prev) => (prev?.column === i ? { column: i, direction: prev.direction === 'asc' ? 'desc' : 'asc' } : { column: i, direction: 'asc' }))
                 }}
@@ -176,7 +182,13 @@ export function QueryConsole(p: Props) {
                   if (v != null && navigator.clipboard) navigator.clipboard.writeText(String(v))
                 }}
               />
-              <div className="mt-1.5 text-[12px] text-muted-foreground">{res.rows.length} rows</div>
+              <div className="mt-1.5 flex items-center gap-2 text-[12px] text-muted-foreground">
+                <span className="font-medium text-foreground">{res.rows.length} row{res.rows.length === 1 ? '' : 's'}</span>
+                <span>·</span>
+                <span>{res.duration_ms ?? 0}ms</span>
+                <span>·</span>
+                <span>click a cell to copy · click a header to sort</span>
+              </div>
             </>
           )}
         </Card>
