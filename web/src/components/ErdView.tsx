@@ -287,10 +287,12 @@ function ErdCanvasInner(props: {
           fitViewOptions={FIT}
           minZoom={0.1}
           maxZoom={1.75}
+          zoomOnScroll
+          zoomOnPinch
           onlyRenderVisibleElements
           proOptions={{ hideAttribution: true }}
           colorMode="dark"
-          className="[&_.react-flow__attribution]:hidden"
+          className="[&_.react-flow__attribution]:hidden [&_.react-flow__pane]:!touch-none"
         >
           <Background gap={24} size={1} color="#1a1f2a" />
           <Controls
