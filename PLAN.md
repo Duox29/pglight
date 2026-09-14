@@ -98,6 +98,7 @@ GET  /api/search?session_id=&q=
 POST /api/maintenance       {session_id,schema,table,op}
 POST /api/import            {session_id,schema,table,columns,rows,on_conflict_do_nothing}
 POST /api/alter-table       {session_id,schema,table,op,…} — columns: add_column|drop_column|rename_column|alter_type|set_nullable|set_default|rename_table (types validated via to_regtype, custom enums ok); constraints: add_constraint|drop_constraint; indexes: create_index{index?,unique,method,columns[],include[],where}|drop_index|rename_index (CREATE INDEX takes an unqualified name — always lands in the table's schema); triggers: create_trigger{trigger,timing,events[],for_each,function,update_of[],when}|drop_trigger|enable_trigger|disable_trigger
+Object tabs (functions/sequences/types): view definition + properties; edits run through `POST /api/query` with quoted identifiers — sequence ALTER (increment/min/max/cache/restart/cycle), function CREATE OR REPLACE, enum ADD VALUE, sequence/type RENAME, DROP (functions resolved via `regprocedure`, all overloads confirmed). No new backend endpoint.
 POST /api/query             (now multi-statement aware → {results[]} when >1)
 GET  /api/settings          → {logging: {enabled,level,log_http,log_query,slow_ms,max_entries}}
 POST /api/settings          {logging: {...}} (normalized + persisted to data/logging.json)
