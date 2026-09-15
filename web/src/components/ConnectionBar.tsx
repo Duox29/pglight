@@ -22,11 +22,11 @@ export function ConnectionBar(props: {
       <span className="flex items-center gap-1.5 text-sm font-bold">
         <Database className="h-4 w-4" /> pglight
       </span>
-      {/* Primary: object search dominates the header */}
-      <Button size="sm" variant="outline" onClick={props.onSearch} className="min-w-[220px] justify-start font-normal text-muted-foreground">
-        <Search /> Search objects… <kbd className="ml-auto rounded border px-1 font-mono text-[10px]">Ctrl K</kbd>
-      </Button>
       <span className="flex-1" />
+      {/* Object search sits at the right, next to History */}
+      <Button size="sm" variant="outline" onClick={props.onSearch} className="min-w-[220px] justify-start font-normal text-muted-foreground">
+        <Search /> Search objects… <kbd className="ml-auto font-mono text-[10px] text-muted-foreground/70">Ctrl K</kbd>
+      </Button>
       {/* Secondary: workspace tools stay visible */}
       <Button size="sm" variant="ghost" onClick={() => props.onPanel('history')}>
         <History /> History
