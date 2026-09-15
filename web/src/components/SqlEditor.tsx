@@ -1,15 +1,17 @@
 import { useEffect, useRef } from 'react'
-import { EditorState, Prec } from '@codemirror/state'
-import { EditorView, keymap } from '@codemirror/view'
+import { EditorState, Prec, RangeSet, StateEffect, StateField } from '@codemirror/state'
+import { Decoration, EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { autocompletion, closeBrackets, completionKeymap, pickedCompletion, startCompletion } from '@codemirror/autocomplete'
 import { PostgreSQL, sql } from '@codemirror/lang-sql'
 import { ensureSnapshot } from '@/lib/schemaCache'
 import { createCompleteSource, recordUse } from '@/lib/complete'
-
-/** Selection access for Run-selection without touching editor internals. */
+/** Error jump + blink + selection access without touching editor internals. */
 export interface SqlEditorHandle {
   getSelection: () => string
+  gotoLine: (line: number, column?: number) => void
+  flashErrorLine: (line: number, column?: number) => void
+  clearErrorFlash: () => void
 }
 
 interface Props {
@@ -36,12 +38,30 @@ export function SqlEditor({ value, session, onChange, onCtrlEnter, handleRef }: 
   })
   // First-render SQL: later prop changes sync via the value effect below.
   const initialRef = useRef(value)
-
   useEffect(() => {
     const mount = mountRef.current
     if (!mount) return
     void ensureSnapshot(session)
     const src = createCompleteSource(session)
+    // One error line at a time: a StateField holding a RangeSet of a single
+    // line decoration. Edits remap it; only explicit set/clear effects move it.
+    const setErrLine = StateEffect.define<number | null>()
+    const errLineField = StateField.define<RangeSet<Decoration>>({
+      create: () => RangeSet.empty,
+      update: (set, tr) => {
+        set = set.map(tr.changes)
+        for (const e of tr.effects) {
+          if (e.is(setErrLine)) {
+            if (e.value == null) return RangeSet.empty
+            const n = Math.min(Math.max(1, e.value), tr.state.doc.lines)
+            const line = tr.state.doc.line(n)
+            set = RangeSet.of([{ from: line.from, to: line.from, value: Decoration.line({ class: 'cm-errline' }) }])
+          }
+        }
+        return set
+      },
+      provide: (f) => EditorView.decorations.from(f),
+    })
     const update = EditorView.updateListener.of((u) => {
       if (u.docChanged) cb.current.onChange(u.state.doc.toString())
       const picked = u.transactions.map((t) => t.annotation(pickedCompletion)).find((a) => a)
@@ -55,6 +75,7 @@ export function SqlEditor({ value, session, onChange, onCtrlEnter, handleRef }: 
         sql({ dialect: PostgreSQL }),
         closeBrackets(),
         EditorView.lineWrapping,
+        errLineField,
         autocompletion({ override: [src], activateOnTyping: true, maxRenderedOptions: 50 }),
         Prec.high(
           keymap.of([
@@ -70,6 +91,9 @@ export function SqlEditor({ value, session, onChange, onCtrlEnter, handleRef }: 
           '.cm-line': { padding: '0 8px' },
           '.cm-gutters': { display: 'none' },
           '.cm-focused': { outline: 'none' },
+          '.cm-errline': { backgroundColor: 'hsl(var(--destructive) / 0.22)' },
+          '@keyframes pglight-errblink': { '0%,100%': { backgroundColor: 'hsl(var(--destructive) / 0.22)' }, '50%': { backgroundColor: 'hsl(var(--destructive) / 0.55)' } },
+          '.cm-errline-blink': { animation: 'pglight-errblink 0.45s ease-in-out 3' },
           '.cm-tooltip.cm-tooltip-autocomplete': {
             backgroundColor: 'hsl(var(--popover))',
             color: 'hsl(var(--popover-foreground))',
@@ -92,6 +116,38 @@ export function SqlEditor({ value, session, onChange, onCtrlEnter, handleRef }: 
         if (!v) return ''
         const r = v.state.selection.main
         return r.empty ? '' : v.state.sliceDoc(r.from, r.to)
+      },
+      gotoLine: (line: number, column?: number) => {
+        const v = viewRef.current
+        if (!v || line < 1) return
+        const docLine = v.state.doc.line(Math.min(line, v.state.doc.lines))
+        const col = Math.max(1, Math.min(column ?? 1, docLine.length + 1))
+        const pos = docLine.from + (col - 1)
+        v.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
+        v.focus()
+      },
+      // Steady highlight + 3 CSS blinks (~1.35s), then the line stays
+      // tinted until the next run/clear/tab switch. Decoration remaps on
+      // edit; re-running re-flashes from the current line.
+      flashErrorLine: (line: number, column?: number) => {
+        const v = viewRef.current
+        if (!v || line < 1) return
+        const n = Math.min(line, v.state.doc.lines)
+        const docLine = v.state.doc.line(n)
+        const col = Math.max(1, Math.min(column ?? 1, docLine.length + 1))
+        const pos = docLine.from + (col - 1)
+        v.dispatch({ effects: setErrLine.of(n), selection: { anchor: pos }, scrollIntoView: true })
+        v.focus()
+        const el = v.contentDOM.querySelector('.cm-errline')
+        if (el) {
+          el.classList.remove('cm-errline-blink')
+          // Forced reflow restarts the animation when the same line fails twice.
+          void (el as HTMLElement).offsetWidth
+          el.classList.add('cm-errline-blink')
+        }
+      },
+      clearErrorFlash: () => {
+        viewRef.current?.dispatch({ effects: setErrLine.of(null) })
       },
     }
     return () => {

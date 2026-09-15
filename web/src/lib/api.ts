@@ -31,7 +31,14 @@ export interface MultiResult {
   in_txn?: boolean
 }
 
-export type QueryResponse = QueryResult & { results?: QueryResult[]; error?: string }
+export interface QueryErrorLoc {
+  line?: number
+  column?: number
+  code?: string
+  statement_index?: number
+}
+
+export type QueryResponse = QueryResult & { results?: QueryResult[]; statements?: number; error?: string } & QueryErrorLoc
 
 export interface LoggingConfig {
   enabled: boolean
@@ -92,6 +99,10 @@ export const apiClient = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: session, sql, analyze }),
     }),
+  explainError: (v: unknown): string | undefined => {
+    if (v && typeof v === 'object' && 'error' in v && typeof v.error === 'string') return v.error
+    return undefined
+  },
   rowOp: (p: {
     session_id: string
     schema: string

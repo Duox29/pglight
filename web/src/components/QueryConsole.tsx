@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { Play, FileDown, RefreshCw, Sparkles, Square, Star, Trash2, Wand2, ChevronDown } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Play, FileDown, RefreshCw, Sparkles, Square, Star, Trash2, Wand2, ChevronDown, LocateFixed } from 'lucide-react'
 import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
 import { SqlEditor, type SqlEditorHandle } from './SqlEditor'
@@ -39,6 +39,17 @@ export function QueryConsole(p: Props) {
   const { tab: t } = p
   const [sort, setSort] = useState<{ column: number; direction: 'asc' | 'desc' } | null>(null)
   const editorHandle = useRef<SqlEditorHandle | null>(null)
+  // Error line: jump caret + blink 3×, then keep a steady tint until the
+  // next run/clear/tab switch. flashTick re-fires the blink when the same
+  // line fails twice in a row.
+  const jumpToError = () => {
+    if (t.errLoc?.line) editorHandle.current?.flashErrorLine(t.errLoc.line, t.errLoc.column)
+  }
+  useEffect(() => {
+    if (t.error && t.errLoc?.line) jumpToError()
+    else if (!t.error) editorHandle.current?.clearErrorFlash()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t.error, t.errLoc?.line, t.errLoc?.column, t.flashTick])
   // Run the highlighted selection when present, else the whole script.
   const runSelected = () => {
     const sel = editorHandle.current?.getSelection() ?? ''
@@ -57,8 +68,8 @@ export function QueryConsole(p: Props) {
       })
       if (!name) return
       const [schema, ...rest] = name.split('.')
-      const table = rest.length ? rest.join('.') : schema
-      const qualified = rest.length ? quoteQualified(schema.trim(), table.trim()) : quoteQualified('', table.trim())
+      const table = rest.length ? rest.join('.') : (schema ?? '')
+      const qualified = rest.length ? quoteQualified((schema ?? '').trim(), table.trim()) : quoteQualified('', table.trim())
       download(resultToInserts(r.columns, r.rows, qualified, r.types), 'result.sql', 'text/sql')
     }
   }
@@ -167,43 +178,59 @@ export function QueryConsole(p: Props) {
       <ResizablePanel defaultSize={70} minSize={12} className="min-h-0">
         <div className="h-full overflow-auto pt-2">
           <div className="flex flex-col gap-2">
-      <ErrorText message={t.error} />
-      {t.plan && (
-        <Card className="whitespace-pre-wrap p-2.5 font-mono text-[12px]">{t.plan}</Card>
-      )}
-      {(t.results ?? []).map((res, ri) => ({ res, ri })).reverse().map(({ res, ri }) => (
-        <Card key={ri} className="p-2.5">
-          {(t.results?.length ?? 0) > 1 && (
-            <div className="mb-1.5 text-[12px] text-muted-foreground">
-              — result {ri + 1} · {res.rows?.length ?? 0} rows · {res.duration_ms ?? 0}ms
-              {res.statement && <pre className="mt-1 max-h-16 overflow-auto rounded bg-muted p-1.5">{res.statement.slice(0, 300)}</pre>}
-            </div>
-          )}
-          {!res.columns?.length ? (
-            <div className="text-[12px] text-muted-foreground">OK · {res.rows_affected ?? 0} rows affected</div>
-          ) : (
-            <>
-              <DataGrid
-                data={{ columns: res.columns, types: res.types, rows: sort == null ? res.rows : sortGridRows(res.rows, sort, res.types) }}
-                sort={sort}
-                onSort={(i) => {
-                  setSort((prev) => (prev?.column === i ? { column: i, direction: prev.direction === 'asc' ? 'desc' : 'asc' } : { column: i, direction: 'asc' }))
-                }}
-                onCellClick={(v) => {
-                  if (v != null && navigator.clipboard) navigator.clipboard.writeText(String(v))
-                }}
-              />
-              <div className="mt-1.5 flex items-center gap-2 text-[12px] text-muted-foreground">
-                <span className="font-medium text-foreground">{res.rows.length} row{res.rows.length === 1 ? '' : 's'}</span>
-                <span>·</span>
-                <span>{res.duration_ms ?? 0}ms</span>
-                <span>·</span>
-                <span>click a cell to copy · click a header to sort</span>
-              </div>
-            </>
-          )}
-        </Card>
-      ))}
+            {(t.error || t.errLoc?.line != null || t.errLoc?.statement_index != null || t.errLoc?.code) && (
+              <Card className="border-red-500/40 p-2.5">
+                {t.error && <ErrorText message={t.error} />}
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
+                  {t.errLoc?.line != null && (
+                    <Tip content="Jump to the failing line in the editor">
+                      <button type="button" onClick={jumpToError} className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-2 hover:underline">
+                        <LocateFixed className="h-3.5 w-3.5" />
+                        Line {t.errLoc.line}
+                        {t.errLoc.column != null ? `, col ${t.errLoc.column}` : ''}
+                      </button>
+                    </Tip>
+                  )}
+                  {t.errLoc?.statement_index != null && <span>statement {t.errLoc.statement_index + 1}</span>}
+                  {t.errLoc?.code && <Badge variant="secondary">{t.errLoc.code}</Badge>}
+                </div>
+              </Card>
+            )}
+            {t.plan && <Card className="whitespace-pre-wrap p-2.5 font-mono text-[12px]">{t.plan}</Card>}
+            {(t.results ?? []).map((res, ri) => ({ res, ri })).reverse().map(({ res, ri }) => (
+              <Card key={ri} className={t.error && t.errLoc?.statement_index === ri ? 'border-red-500/40 p-2.5' : 'p-2.5'}>
+                {(t.results?.length ?? 0) > 1 && (
+                  <div className="mb-1.5 text-[12px] text-muted-foreground">
+                    — result {ri + 1} · {res.rows?.length ?? 0} rows · {res.duration_ms ?? 0}ms
+                    {t.error && t.errLoc?.statement_index === ri && <span className="ml-1 font-medium text-red-400">· failed</span>}
+                    {res.statement && <pre className="mt-1 max-h-16 overflow-auto rounded bg-muted p-1.5">{res.statement.slice(0, 300)}</pre>}
+                  </div>
+                )}
+                {!res.columns?.length ? (
+                  <div className="text-[12px] text-muted-foreground">OK · {res.rows_affected ?? 0} rows affected</div>
+                ) : (
+                  <>
+                    <DataGrid
+                      data={{ columns: res.columns, types: res.types, rows: sort == null ? res.rows : sortGridRows(res.rows, sort, res.types) }}
+                      sort={sort}
+                      onSort={(i) => {
+                        setSort((prev) => (prev?.column === i ? { column: i, direction: prev.direction === 'asc' ? 'desc' : 'asc' } : { column: i, direction: 'asc' }))
+                      }}
+                      onCellClick={(v) => {
+                        if (v != null && navigator.clipboard) navigator.clipboard.writeText(String(v))
+                      }}
+                    />
+                    <div className="mt-1.5 flex items-center gap-2 text-[12px] text-muted-foreground">
+                      <span className="font-medium text-foreground">{res.rows.length} row{res.rows.length === 1 ? '' : 's'}</span>
+                      <span>·</span>
+                      <span>{res.duration_ms ?? 0}ms</span>
+                      <span>·</span>
+                      <span>click a cell to copy · click a header to sort</span>
+                    </div>
+                  </>
+                )}
+              </Card>
+            ))}
       {t.results && t.results.length === 0 && <Sparkles className="h-4 w-4 text-muted-foreground" />}
           </div>
         </div>

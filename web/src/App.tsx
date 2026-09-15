@@ -1199,35 +1199,40 @@ export default function App() {
       const sql = sqlOver ?? t.sql
       runSql.current[id] = sql
       setRunning((r) => ({ ...r, [id]: true }))
-      updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: undefined, plan: undefined } : x))
+      updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: undefined, errLoc: undefined, flashTick: undefined, plan: undefined } : x))
       try {
         if (!autocommit) {
           const st = await apiClient.txn(sid, 'status')
           if (!st.in_txn) await apiClient.txn(sid, 'begin')
         }
         const j = await apiClient.runQuery(sid, sql, t.limit || undefined)
-        markTxn(sid, !!(j as { in_txn?: boolean }).in_txn)
+        markTxn(sid, !!j.in_txn)
+        const errLoc =
+          j.line != null || j.column != null || j.statement_index != null || j.code
+            ? { line: j.line, column: j.column, statement_index: j.statement_index, code: j.code }
+            : undefined
         if (DDL_RE.test(sql)) {
           dropSnapshot(sid)
           void ensureSnapshot(sid, true)
         }
-        if (j.error && !(j as { results?: unknown }).results) {
-          updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: j.error, results: null } : x))
+        if (j.error && !j.results) {
+          updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: j.error, errLoc, flashTick: (x.flashTick ?? 0) + 1, results: null } : x))
           return
         }
         if (j.results) {
-          updateTab(id, (x) => (x.kind === 'query' ? { ...x, results: j.results ?? null, meta: `${j.results!.length} statements · ${(j as { duration_ms?: number }).duration_ms}ms`, error: (j as { error?: string }).error } : x))
-          pushHist(sql, (j as { duration_ms?: number }).duration_ms, j.results.reduce((a, r) => a + (r.rows?.length ?? 0), 0))
+          const total = (j as { duration_ms?: number }).duration_ms
+          const count = j.statements ?? j.results.length
+          updateTab(id, (x) => (x.kind === 'query' ? { ...x, results: j.results ?? null, meta: `${count} statements · ${total ?? 0}ms`, error: j.error, errLoc, flashTick: j.error ? (x.flashTick ?? 0) + 1 : undefined } : x))
         } else {
           updateTab(id, (x) =>
             x.kind === 'query'
-              ? { ...x, results: [j], meta: `${(j.rows ?? []).length} rows · ${j.duration_ms}ms`, error: undefined }
+              ? { ...x, results: [j], meta: `${(j.rows ?? []).length} rows · ${j.duration_ms}ms`, error: undefined, errLoc: undefined, flashTick: undefined }
               : x,
           )
           pushHist(sql, j.duration_ms, (j.rows ?? []).length)
         }
       } catch (e) {
-        updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: e instanceof Error ? e.message : String(e), results: null } : x))
+        updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: e instanceof Error ? e.message : String(e), errLoc: undefined, flashTick: undefined, results: null } : x))
       } finally {
         setRunning((r) => ({ ...r, [id]: false }))
         delete runSql.current[id]
@@ -1300,13 +1305,14 @@ export default function App() {
       if (!t || t.kind !== 'query' || !t.sessionId) return
       try {
         const j = await apiClient.explain(t.sessionId, t.sql, analyze)
-        if ((j as { error?: string }).error) {
-          updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: (j as { error: string }).error } : x))
+        const err = apiClient.explainError(j)
+        if (err) {
+          updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: err, errLoc: undefined, flashTick: undefined } : x))
           return
         }
-        updateTab(id, (x) => (x.kind === 'query' ? { ...x, plan: explainToText(j), error: undefined } : x))
+        updateTab(id, (x) => (x.kind === 'query' ? { ...x, plan: explainToText(j), error: undefined, errLoc: undefined, flashTick: undefined } : x))
       } catch (e) {
-        updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: e instanceof Error ? e.message : String(e) } : x))
+        updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: e instanceof Error ? e.message : String(e), errLoc: undefined, flashTick: undefined } : x))
       }
     },
     [tabs, updateTab],
@@ -1741,13 +1747,14 @@ export default function App() {
             {!cur && <div className="text-muted-foreground">{connected ? 'Open a table or run a query.' : 'Connect to a database to begin.'}</div>}
             {cur?.kind === 'query' && (
               <QueryConsole
+                key={cur.id}
                 tab={cur}
                 running={!!running[cur.id]}
                 {...txnFor(cur.sessionId)}
                 onSqlChange={(sql) => updateTab(cur.id, (x) => (x.kind === 'query' ? { ...x, sql } : x))}
                 onRun={(sql) => runQuery(cur.id, sql)}
                 onCancel={() => cancelQuery(cur.id)}
-                onClearResults={() => updateTab(cur.id, (x) => (x.kind === 'query' ? { ...x, results: null, error: undefined, plan: undefined, meta: undefined } : x))}
+                onClearResults={() => updateTab(cur.id, (x) => (x.kind === 'query' ? { ...x, results: null, error: undefined, errLoc: undefined, flashTick: undefined, plan: undefined, meta: undefined } : x))}
                 onExplain={(a) => explainQuery(cur.id, a)}
                 onLimit={(n) => updateTab(cur.id, (x) => (x.kind === 'query' ? { ...x, limit: n } : x))}
                 onSaveSnippet={async () => {

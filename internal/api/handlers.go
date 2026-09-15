@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -14,6 +15,7 @@ import (
 	"pglight/internal/logging"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -783,7 +785,7 @@ func (h *Handler) TableData(w http.ResponseWriter, r *http.Request) {
 	// endpoint to one database round-trip.
 	fetchLimit := limit + 1
 	sql := fmt.Sprintf("SELECT * FROM %s%s LIMIT %d OFFSET %d", qt, where, fetchLimit, offset)
-	h.execQuery(w, r, qq, sid, sql, -1, limit)
+	h.execQuery(w, r, qq, sid, sql, nil, -1, limit)
 }
 
 type queryReq struct {
@@ -792,13 +794,24 @@ type queryReq struct {
 	Limit   int    `json:"limit"`
 }
 
+// splitStmt is one trimmed statement plus the byte offset of its first byte
+// in the source script (for mapping Postgres error positions to lines).
+type splitStmt struct {
+	text   string
+	offset int
+}
+
 // splitStatements splits SQL on semicolons outside strings/comments,
-// including PostgreSQL dollar-quoted bodies.
-func splitStatements(sql string) []string {
-	var out []string
+// including PostgreSQL dollar-quoted bodies. Whitespace between statements
+// is skipped before each scan, so offset points at the statement's first
+// meaningful byte in the source script.
+func splitStatements(sql string) []splitStmt {
+	var out []splitStmt
 	var cur strings.Builder
 	n := len(sql)
 	i := 0
+	start := 0
+	skipTrivia(sql, &i, &start)
 	var dollarTag string
 	inDollar := false
 	inSingle, inDouble := false, false
@@ -918,19 +931,67 @@ func splitStatements(sql string) []string {
 		if c == ';' {
 			s := strings.TrimSpace(cur.String())
 			if s != "" {
-				out = append(out, s)
+				// `start` is already past leading trivia; only trailing
+				// trivia (before the `;`) needs trimming to find the first
+				// meaningful byte.
+				out = append(out, splitStmt{text: s, offset: start + (len(cur.String()) - len(strings.TrimLeft(cur.String(), " \t\n\r\f\v")))})
 			}
 			cur.Reset()
 			i++
+			start = i
+			skipTrivia(sql, &i, &start)
 			continue
 		}
 		cur.WriteByte(c)
 		i++
 	}
 	if s := strings.TrimSpace(cur.String()); s != "" {
-		out = append(out, s)
+		out = append(out, splitStmt{text: s, offset: start + (len(cur.String()) - len(strings.TrimLeft(cur.String(), " \t\n\r\f\v")))})
 	}
 	return out
+}
+
+// skipTrivia fast-forwards over whitespace, line comments and block comments
+// so the next statement starts at its first meaningful byte. It mirrors the
+// comment rules in splitStatements but does not feed `cur`.
+func skipTrivia(sql string, i, start *int) {
+	n := len(sql)
+	for *i < n {
+		c := sql[*i]
+		var nxt byte
+		if *i+1 < n {
+			nxt = sql[*i+1]
+		}
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v' {
+			(*i)++
+			(*start)++
+			continue
+		}
+		if c == '-' && nxt == '-' {
+			*i += 2
+			*start += 2
+			for *i < n && sql[*i] != '\n' {
+				(*i)++
+				(*start)++
+			}
+			continue
+		}
+		if c == '/' && nxt == '*' {
+			*i += 2
+			*start += 2
+			for *i < n {
+				if sql[*i] == '*' && *i+1 < n && sql[*i+1] == '/' {
+					*i += 2
+					*start += 2
+					break
+				}
+				(*i)++
+				(*start)++
+			}
+			continue
+		}
+		break
+	}
 }
 
 func isIdentChar(c byte) bool {
@@ -954,23 +1015,34 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	qq = logging.Wrap(qq, h.Log, id)
-	sql := strings.TrimSpace(req.SQL)
-	if sql == "" {
+	raw := req.SQL
+	if strings.TrimSpace(raw) == "" {
 		writeJSON(w, 400, map[string]string{"error": "empty sql"})
 		return
 	}
-	stmts := splitStatements(sql)
+	stmts := splitStatements(raw)
 	// Schema may have changed: drop the cached complete snapshot after a
 	// successful DDL run so the editor refetches once (not per keystroke).
-	wantInvalidate := ddlRe.MatchString(sql)
+	wantInvalidate := ddlRe.MatchString(raw)
 	if len(stmts) > 1 {
 		start := time.Now()
 		results := []map[string]any{}
-		for _, st := range stmts {
-			res, qerr := h.runSingle(r, qq, st, req.Limit)
+		for idx, st := range stmts {
+			// The SELECT wrapper hides the real text (and shifts Position),
+			// so line-map against the text Postgres actually parsed while
+			// reporting the original text in results.
+			execText := wrapSelect(st.text, req.Limit)
+			res, qerr := h.runSingle(r, qq, execText, 0)
 			if qerr != nil {
-				writeJSON(w, 400, map[string]any{"error": qerr.Error(), "statement": st, "results": results, "in_txn": h.Mgr.InTxn(id)})
+				body := map[string]any{"error": qerr.Error(), "statement": st.text, "results": results, "statements": len(stmts), "duration_ms": time.Since(start).Milliseconds(), "in_txn": h.Mgr.InTxn(id)}
+				for k, v := range errLocation(raw, idx, st.offset, st.text, execText, qerr) {
+					body[k] = v
+				}
+				writeJSON(w, 400, body)
 				return
+			}
+			if res != nil {
+				res["statement"] = st.text
 			}
 			results = append(results, res)
 		}
@@ -980,18 +1052,142 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"results": results, "duration_ms": time.Since(start).Milliseconds(), "in_txn": h.Mgr.InTxn(id)})
 		return
 	}
-	if req.Limit > 0 && req.Limit < 5000 && isSingleSelect(sql) {
-		sql = fmt.Sprintf("SELECT * FROM (%s) AS _q LIMIT %d", strings.TrimSuffix(sql, ";"), req.Limit)
+	sql := strings.TrimSpace(raw)
+	off, text := 0, sql
+	if len(stmts) == 1 {
+		off, text = stmts[0].offset, stmts[0].text
 	}
+	sql = wrapSelect(text, req.Limit)
+	loc := &stmtLoc{script: raw, index: -1, offset: off, text: text}
 	if wantInvalidate {
 		defer globalComplete.Invalidate(id)
 	}
-	h.execQuery(w, r, qq, id, sql, -1)
+	h.execQuery(w, r, qq, id, sql, loc, -1)
 }
 
+// stmtLoc maps an executed statement back to the user's script.
+type stmtLoc struct {
+	script string // full untrimmed script as sent
+	index  int    // statement index in the script, -1 for a single statement
+	offset int    // byte offset of the statement's first byte in script
+	text   string // trimmed statement text before the SELECT wrapper
+}
+
+// isSingleSelect reports whether sql is one unwrapped SELECT (no trailing
+// statements). The console wraps those to enforce the row cap.
 func isSingleSelect(sql string) bool {
 	s := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(sql), ";"))
 	return strings.HasPrefix(strings.ToUpper(s), "SELECT") && strings.Count(s, ";") == 0
+}
+
+// wrapSelect caps ad-hoc SELECTs so the console never floods the UI.
+// Non-SELECTs and out-of-range limits pass through untouched.
+func wrapSelect(sql string, limit int) string {
+	if limit > 0 && limit < 5000 && isSingleSelect(sql) {
+		return fmt.Sprintf("SELECT * FROM (%s) AS _q LIMIT %d", strings.TrimSuffix(sql, ";"), limit)
+	}
+	return sql
+}
+
+// errLocation maps a Postgres error to 1-based line/column in the user's
+// script. stmtText/execText are the sent/parsed statement (they differ when
+// the SELECT wrapper applied). Always additive: code + statement_index when
+// known, line/column fall back to the statement start when Position is
+// missing (duplicate objects, permission errors) or fails to map.
+// Non-PgErrors yield nil.
+func errLocation(script string, stmtIdx, stmtOff int, stmtText, execText string, qerr error) map[string]any {
+	var pgErr *pgconn.PgError
+	if !errors.As(qerr, &pgErr) {
+		return nil
+	}
+	out := map[string]any{}
+	if pgErr.Code != "" {
+		out["code"] = pgErr.Code
+	}
+	if stmtIdx >= 0 {
+		out["statement_index"] = stmtIdx
+	}
+	// fallback reports the statement start so callers always have a line
+	// to jump to when the precise error offset is unavailable.
+	fallback := func() {
+		if stmtOff < 0 || stmtOff > len(script) {
+			return
+		}
+		if stmtOff+len(stmtText) > len(script) || script[stmtOff:stmtOff+len(stmtText)] != stmtText {
+			return
+		}
+		line, col := lineCol(script, stmtOff)
+		out["line"] = line
+		out["column"] = col
+	}
+	pos := int(pgErr.Position) // 1-based chars in execText; 0 when N/A
+	if pos < 1 {
+		fallback()
+		return out
+	}
+	execRunes := []rune(execText)
+	if pos > len(execRunes) {
+		fallback()
+		return out
+	}
+	// Exec-relative 0-based char offset → statement-relative.
+	stmtChar := pos - 1
+	if execText != stmtText {
+		const prefix = "SELECT * FROM ("
+		pre := len([]rune(prefix))
+		if !strings.HasPrefix(execText, prefix) || stmtChar < pre || stmtChar >= pre+len([]rune(stmtText)) {
+			fallback()
+			return out
+		}
+		stmtChar -= pre
+	}
+	stmtRunes := []rune(stmtText)
+	if stmtChar > len(stmtRunes) {
+		fallback()
+		return out
+	}
+	// Statement-relative chars → absolute byte offset in the script.
+	abs := -1
+	if stmtOff >= 0 && stmtOff+len(stmtText) <= len(script) && script[stmtOff:stmtOff+len(stmtText)] == stmtText {
+		abs = stmtOff + len(string(stmtRunes[:stmtChar]))
+	}
+	if abs < 0 {
+		fallback()
+		return out
+	}
+	line, col := lineCol(script, abs)
+	out["line"] = line
+	out["column"] = col
+	return out
+}
+
+// lineCol converts a byte offset into 1-based line/column (columns in runes).
+func lineCol(s string, off int) (line, col int) {
+	if off < 0 {
+		off = 0
+	}
+	if off > len(s) {
+		off = len(s)
+	}
+	line = 1 + strings.Count(s[:off], "\n")
+	last := strings.LastIndex(s[:off], "\n")
+	col = len([]rune(s[last+1:off])) + 1
+	return line, col
+}
+
+// queryErrBody builds the additive /api/query + /api/table-data error shape:
+// {error} plus code/statement_index and line/column (exact offset, else
+// statement start) when the statement maps back to the script.
+func queryErrBody(h *Handler, sid string, loc *stmtLoc, execText string, qerr error) map[string]any {
+	body := map[string]any{"error": qerr.Error(), "in_txn": h.Mgr.InTxn(sid)}
+	script, idx, off, text := execText, -1, 0, execText
+	if loc != nil {
+		script, idx, off, text = loc.script, loc.index, loc.offset, loc.text
+	}
+	for k, v := range errLocation(script, idx, off, text, execText, qerr) {
+		body[k] = v
+	}
+	return body
 }
 
 func (h *Handler) runSingle(r *http.Request, qq db.Querier, sql string, limit int) (map[string]any, error) {
@@ -2162,13 +2358,13 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"version": snap.Version, "tables": snap.Tables, "functions": snap.Funcs, "fks": snap.FKs, "keywords": kw, "in_txn": h.Mgr.InTxn(sid)})
 }
 
-func (h *Handler) execQuery(w http.ResponseWriter, r *http.Request, qq db.Querier, sid string, sql string, total int64, visibleLimit ...int) {
+func (h *Handler) execQuery(w http.ResponseWriter, r *http.Request, qq db.Querier, sid string, sql string, loc *stmtLoc, total int64, visibleLimit ...int) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
 	rows, err := qq.Query(ctx, sql)
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		writeJSON(w, 400, queryErrBody(h, sid, loc, sql, err))
 		return
 	}
 	defer rows.Close()

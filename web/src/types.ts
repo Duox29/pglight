@@ -65,6 +65,9 @@ export interface QueryTabT {
   limit: number
   results: (QueryResult & { statement?: string })[] | null
   error?: string
+  errLoc?: { line?: number; column?: number; statement_index?: number; code?: string }
+  /** Bumps every failed run so the editor re-blinks the same line. */
+  flashTick?: number
   meta?: string
   plan?: string
 }
