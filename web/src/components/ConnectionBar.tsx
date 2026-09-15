@@ -1,4 +1,4 @@
-import { BookOpen, Database, History, LayoutDashboard, MoreHorizontal, Search, Settings, Star } from 'lucide-react'
+import { BookOpen, Database, History, LayoutDashboard, MoreHorizontal, Search, Settings, Star, Zap } from 'lucide-react'
 import { Button } from './ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 
@@ -14,7 +14,7 @@ export interface ConnFields {
 export function ConnectionBar(props: {
   connected: boolean
   onSearch: () => void
-  onPanel: (v: 'history' | 'snippets' | 'server' | 'settings') => void
+  onPanel: (v: 'history' | 'snippets' | 'aliases' | 'server' | 'settings') => void
   onDocs: () => void
 }) {
   return (
@@ -44,6 +44,9 @@ export function ConnectionBar(props: {
         <DropdownMenuContent align="end">
           <DropdownMenuItem onSelect={() => props.onPanel('snippets')}>
             <Star /> Snippets
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => props.onPanel('aliases')}>
+            <Zap /> Aliases
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => props.onPanel('settings')}>
             <Settings /> Settings

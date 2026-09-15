@@ -58,6 +58,13 @@ export interface LogEntry {
   detail?: string
 }
 
+export interface CompletionAlias {
+  trigger: string
+  expansion: string
+  detail?: string
+  builtin: boolean
+}
+
 export interface SessionInfo {
   id: string
   host: string
@@ -185,4 +192,14 @@ export const apiClient = {
     return api<{ entries: LogEntry[]; error?: string }>(`/api/logs${qs ? '?' + qs : ''}`)
   },
   clearLogs: () => api<{ ok?: boolean; error?: string }>(`/api/logs`, { method: 'DELETE' }),
+  listAliases: () => api<{ aliases?: CompletionAlias[]; error?: string }>(`/api/aliases`),
+  saveAlias: (trigger: string, expansion: string) =>
+    api<{ alias?: CompletionAlias; error?: string }>(`/api/aliases`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trigger, expansion }),
+    }),
+  deleteAlias: (trigger: string) =>
+    api<{ ok?: boolean; error?: string }>(`/api/aliases?trigger=${encodeURIComponent(trigger)}`, { method: 'DELETE' }),
+  resetAliases: () => api<{ ok?: boolean; error?: string }>(`/api/aliases`, { method: 'DELETE' }),
 }

@@ -39,6 +39,7 @@ func main() {
 	mux.HandleFunc("/api/cancel", h.Cancel)
 	mux.HandleFunc("/api/row", h.RowOp)
 	mux.HandleFunc("/api/complete", h.Complete)
+	mux.HandleFunc("/api/aliases", h.Aliases)
 	mux.HandleFunc("/api/txn", h.Txn)
 	mux.HandleFunc("/api/server-info", h.ServerInfo)
 	mux.HandleFunc("/api/stats", h.Stats)

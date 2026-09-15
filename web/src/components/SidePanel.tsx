@@ -9,6 +9,7 @@ import { EmptyNote, ErrorText } from './ui/feedback'
 import type { HistoryEntry, SideView, Snippet } from '@/types'
 import type { DialogsApi } from './dialogs'
 import { SettingsPanel } from './SettingsPanel'
+import { AliasesPanel } from './AliasesPanel'
 import { LogsPanel } from './LogsPanel'
 import { api, q } from '@/lib/api'
 
@@ -25,7 +26,7 @@ interface Props {
 }
 
 const viewGroups: { label: string; views: SideView[] }[] = [
-  { label: 'Workspace', views: ['history', 'snippets'] },
+  { label: 'Workspace', views: ['history', 'snippets', 'aliases'] },
   { label: 'Database', views: ['server', 'activity', 'locks', 'stats'] },
   { label: 'System', views: ['settings', 'logs'] },
 ]
@@ -35,7 +36,7 @@ export function SidePanel(p: Props) {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    if (p.view === 'history' || p.view === 'snippets' || p.view === 'settings' || p.view === 'logs') return
+    if (p.view === 'history' || p.view === 'snippets' || p.view === 'aliases' || p.view === 'settings' || p.view === 'logs') return
     // Drop the previous view's payload: without this a slow fetch briefly
     // renders stale data (e.g. an array) under the new view and crashes it.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -135,6 +136,7 @@ export function SidePanel(p: Props) {
             {!p.snippets.length && <EmptyNote text="No snippets — use Snippet in a query tab" />}
           </div>
         )}
+        {p.view === 'aliases' && <AliasesPanel dialogs={p.dialogs} />}
         {(p.view === 'server' || p.view === 'activity' || p.view === 'locks' || p.view === 'stats' || p.view === 'settings' || p.view === 'logs') && (
           <div className="flex flex-col gap-2">
             <ErrorText message={error} />

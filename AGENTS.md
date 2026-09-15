@@ -6,9 +6,9 @@
 ## 0. Stack map
 
 - **Backend**: Go 1.25, `github.com/jackc/pgx/v5`. API in `internal/api/`
-  (domain files: `session|explorer|query|data|admin|alter|complete|settings.go`,
+  (domain files: `session|explorer|query|data|admin|alter|complete|settings|aliases.go`,
   shared core in `handlers.go`), connection pool + explicit-txn state in
-  `internal/db/manager.go`, routes in `main.go`.
+  `internal/db/manager.go`, routes in `main.go` (grouped by domain).
 - **Frontend**: React 18 + Vite 5 + Tailwind v3 + shadcn-style prebuilt
   components (`web/src/components/ui/*`, Radix + cva + tailwind-merge +
   lucide-react) + Sonner toasts + promise-based dialog host (`dialogs.tsx`).
@@ -50,7 +50,7 @@ Gate before finishing any change: `go run ./scripts/check` (gofmt, vet, build,
    `in_txn: bool`. Multi-statement scripts return `{results[]}`.
 6. **Limits**: cap result sets (1000 rows), add `LIMIT` to explorer queries,
    use 5–30s contexts (120s only for maintenance/import).
-7. **New endpoint checklist**: handler in `handlers.go` → route in `main.go` →
+7. **New endpoint checklist**: handler in its domain file (rule 10) → route in `main.go` →
    typed client in `web/src/lib/api.ts` → document in `PLAN.md` → curl-verify
    against the docker DB.
 8. **Observability (AOP)**: no ad-hoc logging in handlers. HTTP is logged by
@@ -60,6 +60,13 @@ Gate before finishing any change: `go run ./scripts/check` (gofmt, vet, build,
    persists in `data/logging.json` and is edited only via `/api/settings` +
    the web Settings panel — never by hand-editing the file.
 9. Formatting: `gofmt` clean, `go vet` clean, no new deps without a reason.
+10. **Domain layout (DDD-lite)**: one bounded context = one file `internal/api/<domain>.go`
+    owning its handler methods + request/response types + process-wide store
+    (e.g. `complete_cache.go`, `aliases.go`). `handlers.go` owns only the shared kernel
+    (`Handler`, `writeJSON`, `sessionID`/`sessionFromBody`, `q`/`pool`, `queryJSON`/`execQuery`,
+    `rowsToMaps`, `errLocation`, cross-domain detectors like `ddlRe`). NEVER copy kernel
+    helpers into a domain file; NEVER touch another domain's unexported state — use its
+    exported API (`globalComplete.Invalidate`, `globalAliases.List`). No `misc.go`/`utils.go` catch-alls.
 
 ## 3. Frontend rules (React + shadcn)
 

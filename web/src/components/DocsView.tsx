@@ -690,6 +690,31 @@ const SECTIONS: Section[] = [
     },
   },
   {
+    id: 'aliases',
+    title: { en: 'Aliases', vi: 'Aliases' },
+    group: { en: 'Right panel', vi: 'Panel phải' },
+    body: {
+      en: (
+        <>
+          <P>Aliases are short triggers that expand in autocomplete — e.g. <K>ssf</K> → <K>SELECT * FROM</K>. The list is served by the backend with user overrides.</P>
+          <Ul>
+            <Li>Add via the plus button, edit via the pencil, delete custom entries via the trash button. Editing a builtin creates an override.</Li>
+            <Li>Reset to defaults drops all custom entries and builtin overrides.</Li>
+          </Ul>
+        </>
+      ),
+      vi: (
+        <>
+          <P>Aliases là trigger ngắn bung ra trong autocomplete — ví dụ <K>ssf</K> → <K>SELECT * FROM</K>. Danh sách do backend phục vụ kèm override của user.</P>
+          <Ul>
+            <Li>Thêm bằng nút cộng, sửa bằng bút chì, xóa entry custom bằng nút xóa. Sửa builtin tạo override.</Li>
+            <Li>Reset về mặc định xóa mọi entry custom và override builtin.</Li>
+          </Ul>
+        </>
+      ),
+    },
+  },
+  {
     id: 'server',
     title: { en: 'Server', vi: 'Server' },
     group: { en: 'Right panel', vi: 'Panel phải' },
@@ -1061,6 +1086,7 @@ function textOf(id: string): string {
     browser: 'extensions roles browser grid tiện ích vai trò trình duyệt',
     erd: 'diagram erd foreign key graph schema canvas node edge layout minimap line bezier straight smoothstep sơ đồ quan hệ',
     history: 'history executed statements reopen filter lịch sử câu lệnh',
+    aliases: 'aliases trigger expansion autocomplete ssf prefix override builtin reset trigger mở rộng gợi ý',
     snippets: 'snippets saved sql library delete đoạn mã lưu',
     server: 'server version uptime connections settings máy chủ phiên bản',
     activity: 'activity pg_stat_activity cancel kill pid backend sessions hoạt động tiến trình hủy',

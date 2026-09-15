@@ -104,6 +104,9 @@ GET  /api/settings          → {logging: {enabled,level,log_http,log_query,slow
 POST /api/settings          {logging: {...}} (normalized + persisted to data/logging.json)
 GET  /api/logs?limit=&level=&category= → {entries[]} (newest first; /api/logs not self-logged)
 DELETE /api/logs            clear the ring buffer
+GET  /api/aliases           → {aliases: [{trigger,expansion,detail?,builtin}]} (builtins merged with user overrides; global, no session/PG)
+POST /api/aliases           {trigger,expansion} → upsert user entry (trigger: [a-z][a-z0-9_]{0,31}, expansion ≤2000 chars; shadows builtin; 200-entry cap)
+DELETE /api/aliases?trigger= drop one user entry (builtin restored) · DELETE /api/aliases reset all to defaults
 ```
 
 All txn-aware: `/api/query`, `/api/explain`, `/api/table-data`, `/api/row`, `/api/import`, `/api/alter-table`.

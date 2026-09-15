@@ -5,6 +5,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { autocompletion, closeBrackets, completionKeymap, pickedCompletion, startCompletion } from '@codemirror/autocomplete'
 import { PostgreSQL, sql } from '@codemirror/lang-sql'
 import { ensureSnapshot } from '@/lib/schemaCache'
+import { ensureAliases } from '@/lib/aliases'
 import { createCompleteSource, recordUse } from '@/lib/complete'
 /** Error jump + blink + selection access without touching editor internals. */
 export interface SqlEditorHandle {
@@ -42,6 +43,7 @@ export function SqlEditor({ value, session, onChange, onCtrlEnter, handleRef }: 
     const mount = mountRef.current
     if (!mount) return
     void ensureSnapshot(session)
+    void ensureAliases()
     const src = createCompleteSource(session)
     // One error line at a time: a StateField holding a RangeSet of a single
     // line decoration. Edits remap it; only explicit set/clear effects move it.

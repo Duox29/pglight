@@ -1,5 +1,6 @@
 import type { Completion, CompletionSource } from '@codemirror/autocomplete'
 import { getSnapshotCached, type SchemaSnapshot } from './schemaCache'
+import { getAliasesCached } from './aliases'
 
 /** Clause context of the statement prefix before the cursor. */
 export type ScopeKind = 'table' | 'column' | 'dot' | 'keyword'
@@ -33,21 +34,25 @@ export function recordUse(label: string) {
 }
 
 const KEYWORDS = [
-  'SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'FULL JOIN', 'CROSS JOIN', 'ON', 'USING',
-  'ORDER BY', 'GROUP BY', 'HAVING', 'LIMIT', 'OFFSET', 'DISTINCT', 'ALL',
-  'INSERT INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE FROM', 'RETURNING', 'ON CONFLICT',
-  'WITH', 'AS', 'UNION', 'UNION ALL', 'EXCEPT', 'INTERSECT',
-  'CREATE TABLE', 'ALTER TABLE', 'DROP TABLE', 'CREATE INDEX', 'TRUNCATE',
-  'BEGIN', 'COMMIT', 'ROLLBACK', 'EXPLAIN', 'ANALYZE', 'VACUUM',
-  'AND', 'OR', 'NOT', 'NULL', 'IS', 'IN', 'BETWEEN', 'LIKE', 'ILIKE', 'EXISTS', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'CAST',
-  'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COALESCE', 'NULLIF', 'NOW', 'TRUE', 'FALSE',
+  'SELECT', 'FROM', 'WHERE', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER', 'CROSS', 'ON', 'USING',
+  'ORDER', 'BY', 'GROUP', 'HAVING', 'LIMIT', 'OFFSET', 'FETCH', 'FIRST', 'DISTINCT', 'ALL', 'ASC', 'DESC', 'NULLS', 'LAST',
+  'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE', 'RETURNING', 'CONFLICT', 'DO', 'NOTHING',
+  'WITH', 'RECURSIVE', 'AS', 'UNION', 'EXCEPT', 'INTERSECT',
+  'CREATE', 'ALTER', 'DROP', 'TRUNCATE', 'ADD', 'COLUMN', 'CONSTRAINT', 'RENAME', 'TO',
+  'SCHEMA', 'TABLE', 'VIEW', 'MATERIALIZED', 'INDEX', 'SEQUENCE', 'FUNCTION', 'TRIGGER', 'TYPE', 'EXTENSION', 'DATABASE', 'ROLE',
+  'PRIMARY', 'KEY', 'FOREIGN', 'REFERENCES', 'CHECK', 'UNIQUE', 'DEFAULT', 'NOT', 'NULL',
+  'CASCADE', 'RESTRICT', 'IF', 'EXISTS',
+  'BEGIN', 'TRANSACTION', 'COMMIT', 'ROLLBACK', 'SAVEPOINT', 'EXPLAIN', 'ANALYZE', 'VACUUM', 'REINDEX', 'CLUSTER', 'COPY',
+  'GRANT', 'REVOKE', 'OWNER',
+  'AND', 'OR', 'IS', 'IN', 'BETWEEN', 'LIKE', 'ILIKE', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'CAST',
+  'WINDOW', 'OVER', 'PARTITION', 'FILTER', 'FOR', 'SKIP', 'LOCKED',
+  'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COALESCE', 'NULLIF', 'NOW', 'STRING_AGG', 'ARRAY_AGG', 'EXTRACT', 'GENERATE_SERIES', 'CURRENT_DATE', 'CURRENT_TIMESTAMP',
+  'TRUE', 'FALSE',
 ]
 
-const SNIPPETS: { label: string; template: string; detail: string }[] = [
-  { label: 'sel', template: 'SELECT ${cols} FROM ${table} LIMIT 100;', detail: 'SELECT … FROM … LIMIT' },
-  { label: 'join', template: 'JOIN ${table} ON ${a}.${fk} = ${b}.id', detail: 'JOIN … ON fk' },
-  { label: 'cte', template: 'WITH ${name} AS (\n  SELECT ${cols} FROM ${table}\n)\nSELECT * FROM ${name};', detail: 'WITH … SELECT' },
-  { label: 'where', template: 'WHERE ${col} = ${val}', detail: 'WHERE clause' },
+/** Hardcoded fallback when /api/aliases is unreachable (private mode, boot race). */
+const FALLBACK_ALIASES = [
+  { label: 'ssf', template: 'SELECT * FROM ', detail: 'SELECT * FROM …' },
 ]
 
 
@@ -266,8 +271,15 @@ export function createCompleteSource(session: string): CompletionSource {
       push({ label: f.name, type: 'function', detail: `${f.schema}${f.args}` }, -5)
     }
     for (const k of KEYWORDS) push({ label: k, type: 'keyword' }, -40)
-    for (const s of SNIPPETS) {
-      if (!prefix || s.label.startsWith(prefix)) opts.push({ label: s.label, type: 'snippet', detail: s.detail, apply: s.template, boost: 90 })
+    for (const a of getAliasesCached()) {
+      if (!prefix || a.trigger.startsWith(prefix)) {
+        opts.push({ label: a.trigger, type: 'snippet', detail: a.detail || a.expansion.slice(0, 60), apply: a.expansion, boost: 95 })
+      }
+    }
+    if (!getAliasesCached().length) {
+      for (const s of FALLBACK_ALIASES) {
+        if (!prefix || s.label.startsWith(prefix)) opts.push({ label: s.label, type: 'snippet', detail: s.detail, apply: s.template, boost: 95 })
+      }
     }
     if (scope.kind === 'keyword') {
       for (const k of KEYWORDS) push({ label: k, type: 'keyword' }, 10)
