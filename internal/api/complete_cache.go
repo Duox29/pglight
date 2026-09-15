@@ -11,7 +11,7 @@ package api
 //	-> single PG fetch when the entry is stale/missing (single-flighted)
 //
 // Invalidation: TTL expiry (completeTTL), explicit ?refresh=1, DDL executed
-// via /api/query (see ddlRe in handlers.go), session disconnect/sweep.
+// via /api/query (see ddlRe in complete.go), session disconnect/sweep.
 
 import (
 	"context"

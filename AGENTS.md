@@ -5,8 +5,10 @@
 
 ## 0. Stack map
 
-- **Backend**: Go 1.25, `github.com/jackc/pgx/v5`. API in `internal/api/handlers.go`,
-  connection pool + explicit-txn state in `internal/db/manager.go`, routes in `main.go`.
+- **Backend**: Go 1.25, `github.com/jackc/pgx/v5`. API in `internal/api/`
+  (domain files: `session|explorer|query|data|admin|alter|complete|settings.go`,
+  shared core in `handlers.go`), connection pool + explicit-txn state in
+  `internal/db/manager.go`, routes in `main.go`.
 - **Frontend**: React 18 + Vite 5 + Tailwind v3 + shadcn-style prebuilt
   components (`web/src/components/ui/*`, Radix + cva + tailwind-merge +
   lucide-react) + Sonner toasts + promise-based dialog host (`dialogs.tsx`).
