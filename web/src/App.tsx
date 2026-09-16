@@ -1575,7 +1575,6 @@ export default function App() {
     const stored = readStoredTabs()
     const aliveIds = new Set(sessions.map((s) => s.id))
     // One-shot restore; loaders resolve into state asynchronously.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (stored.length) restoreStoredTabs(stored, aliveIds, activeId)
     else newQueryTab(undefined, activeId)
   }, [connected, activeId, sessions, bootDone, newQueryTab, restoreStoredTabs])
