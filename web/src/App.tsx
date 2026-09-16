@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Info, Loader2, Plus, X } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
-import { Card } from './components/ui/card'
 import { Tip, TooltipProvider } from './components/ui/tooltip'
-import { Separator } from './components/ui/separator'
 import { ConnectionBar } from './components/ConnectionBar'
 import { CredentialManager } from './components/CredentialManager'
 import { DialogHost, createDialogs, type PendingDialog } from './components/dialogs'
@@ -596,12 +594,6 @@ export default function App() {
           </>
         )}
       </ResizablePanelGroup>
-      <Separator />
-      <Card className="rounded-none border-0 border-t px-2.5 py-1 text-[11px] text-muted-foreground">
-        {connected && active
-          ? `${sessions.length} session${sessions.length === 1 ? '' : 's'} · ${active.user}@${active.host}:${active.port}/${active.dbname} · Ctrl+K search · Ctrl+Enter run`
-          : 'disconnected · Ctrl+K search · Ctrl+Enter run'}
-      </Card>
       <SearchPalette key={paletteOpen ? 'open' : 'closed'} open={paletteOpen} onOpenChange={setPaletteOpen} session={session} onOpenTable={openTableForSession} />
     </div>
     </TooltipProvider>

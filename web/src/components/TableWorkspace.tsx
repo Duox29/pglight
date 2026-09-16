@@ -236,7 +236,7 @@ export function TableWorkspace(p: Props) {
               <ArrowRight />
             </Button>
             <span className="text-[12px] text-muted-foreground">
-              {t.result ? <><b className="font-medium text-foreground">{t.result.rows.length} rows</b>{t.result.total != null ? ` / ${t.result.total} total` : ''} · {t.result.duration_ms}ms · double-click a cell to edit</> : ''}
+              {t.result ? <><b className="font-medium text-foreground">{t.result.rows.length} rows</b>{t.result.total != null ? ` / ${t.result.total} total` : ''} · {t.result.duration_ms}ms</> : ''}
             </span>
             {selRecs.length > 0 && (
               <>
@@ -282,7 +282,6 @@ export function TableWorkspace(p: Props) {
                           }}
                         >
                           {r.map((c, ci) => (
-                            <Tip key={ci} content="Double-click to edit · right-click copies cell">
                               <TableCell
                                 className="cursor-text bg-sky-950/30"
                                 onDoubleClick={() => p.onEditCell(t.result!.columns[ci], orig)}
@@ -304,7 +303,6 @@ export function TableWorkspace(p: Props) {
                               >
                                 {c == null ? <span className="italic text-muted-foreground">NULL</span> : String(c).slice(0, 200)}
                               </TableCell>
-                            </Tip>
                           ))}
                           <TableCell>
                             <div className="flex gap-1">
