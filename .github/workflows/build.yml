@@ -1,0 +1,150 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: web
+      # main.go embeds web/dist, so the bundle must exist before go vet/build.
+      - name: Build frontend
+        run: npm run build
+        working-directory: web
+      - name: gofmt
+        run: test -z "$(gofmt -l main.go internal/)"
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build -o /tmp/pglight-check .
+      - name: tsc
+        run: npx tsc --noEmit
+        working-directory: web
+      - name: eslint
+        run: npx eslint src
+        working-directory: web
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-386
+            goos: windows
+            goarch: '386'
+          - name: windows-amd64
+            goos: windows
+            goarch: amd64
+          - name: windows-arm64
+            goos: windows
+            goarch: arm64
+          - name: linux-386
+            goos: linux
+            goarch: '386'
+          - name: linux-amd64
+            goos: linux
+            goarch: amd64
+          - name: linux-armv7
+            goos: linux
+            goarch: arm
+            goarm: '7'
+          - name: linux-arm64
+            goos: linux
+            goarch: arm64
+          - name: darwin-amd64
+            goos: darwin
+            goarch: amd64
+          - name: darwin-arm64
+            goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build frontend
+        run: |
+          npm ci
+          npm run build
+        working-directory: web
+      # Pure Go (no cgo), so one Ubuntu runner cross-compiles every target.
+      - name: Build backend (${{ matrix.name }})
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          NAME="pglight-$GOOS-$GOARCH"
+          if [ -n "${GOARM:-}" ]; then NAME="${NAME}v$GOARM"; fi
+          mkdir -p dist
+          if [ "$GOOS" = windows ]; then
+            go build -trimpath -ldflags "-s -w" -o "dist/$NAME.exe" .
+            (cd dist && zip "$NAME.zip" "$NAME.exe" && rm "$NAME.exe")
+            (cd dist && sha256sum "$NAME.zip" > "$NAME.zip.sha256")
+          else
+            go build -trimpath -ldflags "-s -w" -o "dist/$NAME" .
+            (cd dist && tar -czf "$NAME.tar.gz" "$NAME" && rm "$NAME")
+            (cd dist && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
+          fi
+          file dist/* || true
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pglight-${{ matrix.name }}
+          path: dist/*
+          retention-days: 7
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pglight-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          (cd dist && sha256sum pglight-*.zip pglight-*.tar.gz > SHA256SUMS.txt)
+          ls -la dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

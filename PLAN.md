@@ -147,12 +147,41 @@ Dev workflow:
 ```sh
 cd web && npm install   # once
 npm run dev             # :5173, proxies /api → Go on :8080
-npm run build           # emits web/dist (committed so `go build` works)
+npm run build           # emits web/dist (git-ignored; main.go embeds it, so always rebuild before go build)
 ```
 
 `main.go` embeds `web/dist` and serves it with an SPA fallback to
 `index.html`. Rebuild the bundle (`npm run build` in `web/`) after any
 frontend change before `go build`.
+
+## CI & releases (`.github/workflows/build.yml`)
+
+Every push to `master`, PR, and manual dispatch runs the gate (`gofmt`, `go
+vet`, `tsc`, `eslint`) plus a 9-target matrix build. Tagging `v*` (e.g. `git
+tag v0.3.0 && git push origin v0.3.0`) additionally publishes a GitHub Release
+with all archives attached:
+
+| File | Target |
+|---|---|
+| `pglight-windows-386.zip` | Windows 32-bit (x86) |
+| `pglight-windows-amd64.zip` | Windows 64-bit (x86-64) |
+| `pglight-windows-arm64.zip` | Windows on ARM |
+| `pglight-linux-386.tar.gz` | Linux 32-bit (x86) |
+| `pglight-linux-amd64.tar.gz` | Linux 64-bit (x86-64) |
+| `pglight-linux-armv7.tar.gz` | Linux ARMv7 (e.g. Raspberry Pi 32-bit) |
+| `pglight-linux-arm64.tar.gz` | Linux ARM64 (e.g. Pi 4/5, AWS Graviton) |
+| `pglight-darwin-amd64.tar.gz` | macOS Intel |
+| `pglight-darwin-arm64.tar.gz` | macOS Apple Silicon |
+
+Each archive ships a single self-contained binary (frontend already embedded —
+no Node, no separate `dist/` needed at runtime) plus a `.sha256` checksum file;
+the release also carries a combined `SHA256SUMS.txt`. Just download, extract,
+and run (`./pglight`, `PORT=8080` to change the port).
+
+Design notes: one Ubuntu runner cross-compiles everything (`CGO_ENABLED=0` —
+the backend is pure Go, no cgo), the frontend builds once per job from `npm
+ci`, and binaries are `-trimpath -ldflags "-s -w"` stripped. The top-level
+`dist/` output dir is git-ignored.
 
 Conventions for contributors live in `AGENTS.md` (backend + frontend rules,
 checklists); run `go run ./scripts/check` before finishing any change.
