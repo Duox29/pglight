@@ -598,7 +598,7 @@ const SECTIONS: Section[] = [
           <P>The ERD tab shows the foreign key graph of one schema on a dark canvas.</P>
           <H>Toolbar</H>
           <Ul>
-            <Li>Schema picker, <K>Reload, Fit view, Reset layout</K>, table filter, and the <K>N tables and M relations</K> count.</Li>
+            <Li>Schema picker, <K>Reload, Fit view, Auto arrange, Reset layout</K>, table filter, and the <K>N tables and M relations</K> count. Auto-layout packs related tables by relation layers and unrelated tables into a balanced grid, then flow-packs the blocks so the canvas stays roughly square.</Li>
             <Li>The line switch applies to every edge at once: <K>Curved (bezier), Straight,</K> or <K>Orthogonal (smoothstep)</K>.</Li>
           </Ul>
           <H>Reading the diagram</H>
@@ -610,7 +610,7 @@ const SECTIONS: Section[] = [
           <H>Interaction</H>
           <Ul>
             <Li>Select a node to open the table. Right-click a node for <K>Open table, Copy qualified name,</K> and <K>Focus related tables</K>.</Li>
-            <Li>Drag nodes to arrange them. Positions persist per session and schema. <K>Reset layout</K> clears saved positions, rebuilds the automatic layout, and fits the view.</Li>
+            <Li>Drag nodes to arrange them. Positions persist per session and schema. <K>Auto arrange</K> rebuilds the balanced layout and saves it; <K>Reset layout</K> clears saved positions, rebuilds the automatic layout, and fits the view.</Li>
             <Li>Filter dims non-matching tables. <K>Enter</K> focuses the first match. Selecting a node or edge dims unrelated items and shows a detail bar.</Li>
             <Li>Scroll or pinch to zoom from 0.1 to 1.75. The minimap is round. Zoom and fit controls are at the bottom left.</Li>
           </Ul>
@@ -621,7 +621,7 @@ const SECTIONS: Section[] = [
           <P>Tab ERD hiển thị đồ thị khóa ngoại của một schema trên canvas tối.</P>
           <H>Toolbar</H>
           <Ul>
-            <Li>Chọn schema, <K>Reload, Fit view, Reset layout</K>, lọc bảng và số đếm <K>N tables và M relations</K>.</Li>
+            <Li>Chọn schema, <K>Reload, Fit view, Auto arrange, Reset layout</K>, lọc bảng và số đếm <K>N tables và M relations</K>. Auto-layout gom bảng liên quan theo tầng quan hệ, bảng rời rạc vào lưới cân bằng rồi xếp khối vừa khung.</Li>
             <Li>Cụm chuyển kiểu đường áp cho mọi cạnh cùng lúc: <K>Curved (bezier), Straight</K> hoặc <K>Orthogonal (smoothstep)</K>.</Li>
           </Ul>
           <H>Đọc sơ đồ</H>
@@ -633,7 +633,7 @@ const SECTIONS: Section[] = [
           <H>Tương tác</H>
           <Ul>
             <Li>Chọn một node để mở bảng. Chuột phải lên node để dùng <K>Open table, Copy qualified name</K> và <K>Focus related tables</K>.</Li>
-            <Li>Kéo node để sắp xếp. Vị trí được lưu theo session và schema. <K>Reset layout</K> xóa vị trí đã lưu, dựng lại layout tự động và fit view.</Li>
+            <Li>Kéo node để sắp xếp. Vị trí được lưu theo session và schema. <K>Auto arrange</K> dựng lại layout cân bằng và lưu; <K>Reset layout</K> xóa vị trí đã lưu, dựng lại layout tự động và fit view.</Li>
             <Li>Lọc làm mờ bảng không khớp. <K>Enter</K> focus kết quả đầu. Chọn node hoặc cạnh làm mờ phần không liên quan và hiển thị thanh chi tiết.</Li>
             <Li>Cuộn hoặc pinch để zoom từ 0.1 đến 1.75. Minimap hình tròn. Điều khiển zoom và fit ở góc trái dưới.</Li>
           </Ul>

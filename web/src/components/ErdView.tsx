@@ -262,6 +262,14 @@ function ErdCanvasInner(props: {
 
   const onFit = useCallback(() => void flow.fitView({ ...FIT, duration: 200 }), [flow])
 
+  const onAutoLayout = useCallback(() => {
+    const pos = layoutTables(graph.tables, graph.relations, {})
+    saveErdLayout(t.sessionId, t.schema, pos)
+    dragPos.current = {}
+    setNodes((prev) => prev.map((n) => (pos[n.id] ? { ...n, position: pos[n.id] } : n)))
+    requestAnimationFrame(() => void flow.fitView({ ...FIT, duration: 200 }))
+  }, [t.sessionId, t.schema, graph, setNodes, flow])
+
   const focusSearch = useCallback(() => {
     if (!matchIds?.size) return
     const first = graph.tables.find((tb) => matchIds.has(tb.id))
@@ -294,6 +302,7 @@ function ErdCanvasInner(props: {
         onSchema={props.onSchema}
         onReload={props.onReload}
         onFit={onFit}
+        onAutoLayout={onAutoLayout}
         onResetLayout={onResetLayout}
         query={query}
         onQueryChange={(v) => {

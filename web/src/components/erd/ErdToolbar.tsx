@@ -1,4 +1,4 @@
-import { LayoutGrid, Maximize2, RefreshCw, Search } from 'lucide-react'
+import { LayoutGrid, Maximize2, Network, RefreshCw, Search } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import {
@@ -15,6 +15,7 @@ export function ErdToolbar(props: {
   onSchema: (s: string) => void
   onReload: () => void
   onFit: () => void
+  onAutoLayout?: () => void
   onResetLayout: () => void
   query: string
   onQueryChange: (q: string) => void
@@ -43,6 +44,11 @@ export function ErdToolbar(props: {
       <Button size="sm" variant="secondary" onClick={props.onFit} aria-label="Fit view">
         <Maximize2 className="h-3.5 w-3.5" />
       </Button>
+      {props.onAutoLayout && (
+        <Button size="sm" variant="secondary" onClick={props.onAutoLayout} aria-label="Auto arrange">
+          <Network className="h-3.5 w-3.5" />
+        </Button>
+      )}
       <Button size="sm" variant="secondary" onClick={props.onResetLayout} aria-label="Reset layout">
         <LayoutGrid className="h-3.5 w-3.5" />
       </Button>
