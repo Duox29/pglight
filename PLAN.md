@@ -140,8 +140,15 @@ VACUUM/ANALYZE/REINDEX), `BrowserView` (extensions/roles), `ErdView` (React Flow
 FK canvas: `components/erd/` — column-level edges, auto-layout, drag persistence, search, minimap), `SidePanel` (history/snippets/server/activity/locks/stats with
 auto-refresh), `SearchPalette` (Ctrl+K global search dialog), last-session restore (open tabs +
 active tab + autocommit persist to localStorage; autologin from last successful
-connection with an opt-out Switch in Connections).
-
+connection with an opt-out Switch in Connections). `App.tsx` is a thin shell
+(hook composition + 3-column layout + tab strip); domain logic lives in
+`hooks/`: `useSessions` (multi-session connect/disconnect/reconnect/boot/
+heartbeat + txn map + autocommit), `useTabs` (tab model, open/close/remap,
+last-session restore), `useExplorer` (tree + schema/table actions),
+`useQueryRunner` (run/cancel/explain + history/snippets), `useTableOps`
+(table data/meta/row/alter), `useObjectOps` (function/sequence/type DDL);
+shared pure helpers (`qi`, tab-id builders, `slimTab`/restore) in
+`lib/tabs.ts`.
 Dev workflow:
 
 ```sh
