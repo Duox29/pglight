@@ -136,8 +136,8 @@ tables/views/matviews/foreign/functions/sequences/types + server objects),
 `QueryConsole` (multi-result, EXPLAIN text plan, formatter, per-result
 CSV/JSON/INSERT export), `TableWorkspace` (Data/Columns/DDL/Indexes/
 Constraints/Triggers/Stats sub-tabs, cell edit/duplicate/delete, CSV import,
-VACUUM/ANALYZE/REINDEX), `BrowserView` (extensions/roles), `ErdView` (React Flow
-FK canvas: `components/erd/` — column-level edges, auto-layout, drag persistence, search, minimap), `SidePanel` (history/snippets/server/activity/locks/stats with
+`VACUUM/ANALYZE/REINDEX), `BrowserView` (extensions/roles), `ErdView` (React Flow
+FK canvas: `components/erd/` — column-level edges, auto-layout, drag persistence, viewport (pan/zoom) persistence per session+schema, search, high-contrast minimap with accent viewport frame), `SidePanel` (history/snippets/server/activity/locks/stats with
 auto-refresh), `SearchPalette` (Ctrl+K global search dialog), last-session restore (open tabs +
 active tab + autocommit persist to localStorage; autologin from last successful
 connection with an opt-out Switch in Connections). `App.tsx` is a thin shell

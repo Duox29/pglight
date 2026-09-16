@@ -22,7 +22,14 @@ import ErdRelationEdge, { type ErdRelationEdgeT } from './erd/ErdRelationEdge'
 import { ErdToolbar } from './erd/ErdToolbar'
 import { layoutTables, type ErdPos } from './erd/erdLayout'
 import { dstHandle, mapErd, srcHandle, type ErdDataDto, type ErdLineType } from './erd/erdMapper'
-import { clearErdLayout, loadErdLayout, saveErdLayout } from './erd/erdStorage'
+import {
+  clearErdLayout,
+  clearErdViewport,
+  loadErdLayout,
+  loadErdViewport,
+  saveErdLayout,
+  saveErdViewport,
+} from './erd/erdStorage'
 import type { ErdTabT } from '@/types'
 import { cn } from '@/lib/utils'
 
@@ -65,6 +72,13 @@ function ErdCanvasInner(props: {
   })
   const flow = useReactFlow()
   const dragPos = useRef<Record<string, ErdPos>>({})
+  // Restored once per schema payload (inner is keyed, so init-only read is safe).
+  const savedViewport = useMemo(
+    () => loadErdViewport(t.sessionId, t.schema),
+    // Session/schema identify the stored view; reload constructs a fresh inner.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [t.sessionId, t.schema, graph],
+  )
 
   const openTable = useCallback(
     (schema: string, table: string) => props.onOpenTable(schema, table),
@@ -230,8 +244,17 @@ function ErdCanvasInner(props: {
     [persistDrag],
   )
 
+  // Persist pan/zoom at gesture end (pan, scroll-zoom, controls, minimap).
+  const onMoveEnd = useCallback(
+    (_: unknown, vp: { x: number; y: number; zoom: number }) => {
+      saveErdViewport(t.sessionId, t.schema, { x: vp.x, y: vp.y, zoom: vp.zoom })
+    },
+    [t.sessionId, t.schema],
+  )
+
   const onResetLayout = useCallback(() => {
     clearErdLayout(t.sessionId, t.schema)
+    clearErdViewport(t.sessionId, t.schema)
     const pos = layoutTables(graph.tables, graph.relations, {})
     setNodes((prev) => prev.map((n) => (pos[n.id] ? { ...n, position: pos[n.id] } : n)))
     requestAnimationFrame(() => void flow.fitView({ ...FIT, duration: 200 }))
@@ -295,8 +318,10 @@ function ErdCanvasInner(props: {
           onNodeDragStop={onNodeDragStop}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          fitView
+          fitView={!savedViewport}
           fitViewOptions={FIT}
+          defaultViewport={savedViewport ?? undefined}
+          onMoveEnd={onMoveEnd}
           minZoom={0.1}
           maxZoom={1.75}
           zoomOnScroll
@@ -364,10 +389,13 @@ function ErdCanvasInner(props: {
             pannable
             zoomable
             nodeBorderRadius={6}
-            bgColor="#0b0d11"
-            maskColor="rgba(11,13,17,0.7)"
-            nodeColor="#2a2f3a"
-            style={{ borderRadius: 9999 }}
+            bgColor="#13161c"
+            nodeColor="#5b6478"
+            maskColor="rgba(0,0,0,0.55)"
+            maskStrokeColor="#ffffff"
+            maskStrokeWidth={1}
+            style={{ borderRadius: 8, overflow: 'hidden' }}
+            className="!border-[#2a2f3a]"
           />
         </ReactFlow>
         {(matchIds || selected.nodes.length === 1 || selectedRel) && (

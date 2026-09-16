@@ -87,7 +87,9 @@ Gate before finishing any change: `go run ./scripts/check` (gofmt, vet, build,
 3. **Icons**: `lucide-react` only, no emoji in UI chrome.
 4. **Data access**: all HTTP via `lib/api.ts` (`api`/`apiClient`/`q(session,…)`).
    No `fetch` elsewhere. LocalStorage only via `useLocalStorage` (or the
-   `useLocalStorage` hook in `lib/storage.ts`).
+   `useLocalStorage` hook in `lib/storage.ts`). Exception: ERD node layout +
+   viewport persist raw via `components/erd/erdStorage.ts` (keys
+   `pglight-erd-layout` / `pglight-erd-viewport`, session+schema scoped).
 5. **State**: tabs are immutable (`setTabs(prev => prev.map(…))`, narrow by
    `t.kind`); per-tab loaders are `loadTablePage`/`loadTableMeta`-style
    functions in `App.tsx`. Feature components stay presentational: props in,
