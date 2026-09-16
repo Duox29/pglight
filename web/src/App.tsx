@@ -165,8 +165,10 @@ export default function App() {
   const retriedRef = useRef<Record<string, boolean>>({})
   const remapRef = useRef<Map<string, string>>(new Map())
   const sessionsRef = useRef(sessions)
+  const activeIdRef = useRef(activeId)
   useEffect(() => {
     sessionsRef.current = sessions
+    activeIdRef.current = activeId
   })
   const reconnectOneRef = useRef<(sid: string, opts?: { silent?: boolean }) => Promise<string>>(() => Promise.resolve(''))
   const reconnectAllRef = useRef<() => Promise<void>>(() => Promise.resolve())
@@ -420,10 +422,13 @@ export default function App() {
     [sessions, inTxnMap, autocommit, setAutocommit, doTxn],
   )
 
-  /* ---------- explorer (follows the active session) ---------- */
   const loadExplorer = useCallback(async (sidOver?: string) => {
-    const sid = sidOver ?? activeId
-    if (!sid) return
+    const sid = sidOver ?? activeIdRef.current
+    if (!sid) {
+      setSchemas([])
+      setDatabases([])
+      return
+    }
     let sch: unknown
     let tbl: unknown
     let dbs: unknown
@@ -442,6 +447,9 @@ export default function App() {
         api<unknown>(q(sid, `/api/objects?kind=${k}`)).catch(() => []),
       ),
     )
+    // Disconnect landed mid-flight: drop the stale payload instead of
+    // repainting a dead session's tree (only F5 fixed it before).
+    if (activeIdRef.current !== sid) return
     const by: Record<string, SchemaGroup> = {}
     const mk = (s: string): SchemaGroup => ({ schema: s, tables: [], views: [], matviews: [], foreign: [], functions: [], sequences: [], types: [] })
     const put = (arr: unknown, bucket: keyof Omit<SchemaGroup, 'schema'>) => {
@@ -474,13 +482,15 @@ export default function App() {
     // Warm the editor snapshot while we're here: one fetch per session per
     // minute, shared by every keystroke of every query tab on it.
     void ensureSnapshot(sid)
-  }, [activeId])
+  }, [])
 
   useEffect(() => {
-    if (!activeId) return
-    // External-system sync: reload server state on session change. Setters run
-    // in async continuations after fetch, not during render.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!activeId) {
+      setSchemas([])
+      setDatabases([])
+      return
+    }
+    // External-system sync: reload server state on session change.
     loadExplorer(activeId)
     refreshTxn()
     // eslint-disable-next-line react-hooks/exhaustive-deps
