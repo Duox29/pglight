@@ -4,7 +4,7 @@ import { Input } from './ui/input'
 import { Button } from './ui/button'
 import { Card } from './ui/card'
 import { ScrollArea } from './ui/scroll-area'
-import { useLocalStorage } from '@/lib/storage'
+import { useAppPreference } from '@/lib/storage'
 import { cn } from '@/lib/utils'
 
 type DocsLang = 'en' | 'vi'
@@ -66,8 +66,8 @@ const SECTIONS: Section[] = [
           </Ol>
           <H>Sessions</H>
           <Ul>
-            <Li><K>Save</K> stores the connection, including the password, in this browser. Select it later from the saved list. <K>Delete</K> removes the selected entry.</Li>
-            <Li><K>Auto-connect on startup</K> replays the last successful connection. The stored session is verified before use.</Li>
+            <Li><K>Save</K> stores the connection profile on the backend without the password. Select it later from the saved list and enter the password when connecting. <K>Delete</K> removes the selected entry.</Li>
+            <Li><K>Auto-connect on startup</K> is a session preference; passwords remain runtime-only and are never persisted by pglight.</Li>
             <Li><K>Active sessions</K> lists each open session. Select a session to switch to it. Select <K>X</K> to disconnect one session.</Li>
             <Li>A session marked <K>dead</K> lost its server pool, for example after a server restart. Use <K>Reconnect</K> for one session or <K>Reconnect all</K> to restore them with saved credentials.</Li>
             <Li>Select a database in the Explorer to reconnect to that database. Tabs are kept after disconnect and reload on the next connect.</Li>
@@ -85,8 +85,8 @@ const SECTIONS: Section[] = [
           </Ol>
           <H>Phiên</H>
           <Ul>
-            <Li><K>Save</K> lưu connection, gồm cả password, trong browser này. Chọn lại từ danh sách đã lưu. <K>Delete</K> xóa mục đang chọn.</Li>
-            <Li><K>Auto-connect on startup</K> phát lại connection thành công gần nhất. Session đã lưu được kiểm tra trước khi dùng.</Li>
+            <Li><K>Save</K> lưu profile connection trên backend nhưng không lưu password. Khi chọn lại profile, nhập password lúc connect. <K>Delete</K> xóa mục đang chọn.</Li>
+            <Li><K>Auto-connect on startup</K> là preference của session; pglight không persist password.</Li>
             <Li><K>Active sessions</K> liệt kê từng session đang mở. Chọn một session để chuyển sang. Chọn <K>X</K> để ngắt một session.</Li>
             <Li>Session gắn nhãn <K>dead</K> đã mất pool trên server, ví dụ sau khi server khởi động lại. Dùng <K>Reconnect</K> cho một session hoặc <K>Reconnect all</K> để khôi phục bằng credentials đã lưu.</Li>
             <Li>Chọn một database trong Explorer để kết nối lại sang database đó. Các tab được giữ sau khi ngắt và tải lại ở lần kết nối sau.</Li>
@@ -648,7 +648,7 @@ const SECTIONS: Section[] = [
     body: {
       en: (
         <>
-          <P>History lists executed statements from consoles as cards with <K>time, duration,</K> and <K>rows</K>, newest first, capped at 200 entries and stored in the browser.</P>
+          <P>History lists executed statements from consoles as cards with <K>time, duration,</K> and <K>rows</K>, newest first, capped at 200 entries and stored in the backend application database.</P>
           <Ul>
             <Li>Filter by SQL text. Select a card to reopen its SQL, up to 2,000 characters per statement, as a new query.</Li>
           </Ul>
@@ -656,7 +656,7 @@ const SECTIONS: Section[] = [
       ),
       vi: (
         <>
-          <P>History liệt kê các câu lệnh đã chạy từ consoles dưới dạng thẻ gồm <K>time, duration</K> và <K>rows</K>, mới nhất trước, tối đa 200 mục và lưu trong browser.</P>
+          <P>History liệt kê các câu lệnh đã chạy từ consoles dưới dạng thẻ gồm <K>time, duration</K> và <K>rows</K>, mới nhất trước, tối đa 200 mục và lưu trong database ứng dụng backend.</P>
           <Ul>
             <Li>Lọc theo nội dung SQL. Chọn một thẻ để mở lại SQL, tối đa 2.000 ký tự mỗi câu, thành query mới.</Li>
           </Ul>
@@ -671,7 +671,7 @@ const SECTIONS: Section[] = [
     body: {
       en: (
         <>
-          <P>Snippets is a personal SQL library stored in the browser.</P>
+          <P>Snippets is a personal SQL library stored in the backend application database.</P>
           <Ul>
             <Li>Save from the query toolbar <K>Snippet</K> button, which asks for a name.</Li>
             <Li>Select a card to reopen its SQL. The trash button deletes an entry.</Li>
@@ -680,7 +680,7 @@ const SECTIONS: Section[] = [
       ),
       vi: (
         <>
-          <P>Snippets là thư viện SQL cá nhân lưu trong browser.</P>
+          <P>Snippets là thư viện SQL cá nhân lưu trong database ứng dụng backend.</P>
           <Ul>
             <Li>Lưu từ nút <K>Snippet</K> trên toolbar query, hộp thoại hỏi tên.</Li>
             <Li>Chọn một thẻ để mở lại SQL. Nút xóa xóa một mục.</Li>
@@ -963,7 +963,7 @@ const SECTIONS: Section[] = [
 
 export function DocsView() {
   const [filter, setFilter] = useState('')
-  const [lang, setLang] = useLocalStorage<DocsLang>('docs-lang', 'en')
+  const [lang, setLang] = useAppPreference<DocsLang>('docs-lang', 'en')
   const [active, setActive] = useState(SECTIONS[0].id)
   const t = UI[lang]
   const list = useMemo(() => {

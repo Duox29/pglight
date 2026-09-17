@@ -4,7 +4,7 @@ import type { ConnFields } from '../components/ConnectionBar'
 import { apiClient } from '../lib/api'
 import { dropSnapshot } from '../lib/schemaCache'
 import { forgetSessionConn, readSessionConns, rememberSessionConn } from '../lib/reconnect'
-import { onUnauthorized, useLocalStorage } from '../lib/storage'
+import { onUnauthorized, useAppPreference } from '../lib/storage'
 import { readJSON } from '../lib/tabs'
 import type { SavedConnection, SessionInfo } from '../types'
 
@@ -14,12 +14,17 @@ import type { SavedConnection, SessionInfo } from '../types'
    persist. Tab-id remapping on reconnect is injected (tabs owner). */
 export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: string) => void }) {
   const [fields, setFields] = useState<ConnFields>({ host: 'localhost', port: '5432', user: 'postgres', password: '', dbname: 'postgres', sslmode: 'disable' })
-  const [saved, setSaved] = useLocalStorage<SavedConnection[]>('conns', [])
-  const [sessions, setSessions] = useLocalStorage<SessionInfo[]>('sessions', [])
-  const [activeId, setActiveId] = useLocalStorage<string>('active-sid', '')
+  const [saved, setSaved] = useState<SavedConnection[]>([])
+  const [sessions, setSessions] = useState<SessionInfo[]>([])
+  const [activeId, setActiveId] = useState<string>('')
   const active = sessions.find((s) => s.id === activeId) ?? null
   const session = active?.id ?? ''
   const connected = !!active
+  useEffect(() => {
+    void apiClient.listConnections().then((j) => {
+      setSaved((j.connections ?? []).map((c) => ({ id: c.id, name: c.name, host: c.host, port: String(c.port), user: c.user, password: '', dbname: c.dbname, sslmode: c.sslmode ?? 'prefer' })))
+    }).catch(() => undefined)
+  }, [])
   const [inTxnMap, setInTxnMap] = useState<Record<string, boolean>>({})
   const markTxn = useCallback((sid: string, v: boolean) => {
     setInTxnMap((m) => (m[sid] === v ? m : { ...m, [sid]: v }))
@@ -30,9 +35,9 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
     },
     [activeId, markTxn],
   )
-  const [autocommit, setAutocommit] = useLocalStorage<boolean>('autocommit', true)
-  const [autoLogin, setAutoLogin] = useLocalStorage<boolean>('auto-login', true)
-  const [credOpen, setCredOpen] = useLocalStorage<boolean>('conn-panel-open', true)
+  const [autocommit, setAutocommit] = useAppPreference<boolean>('autocommit', true)
+  const [autoLogin, setAutoLogin] = useAppPreference<boolean>('auto-login', true)
+  const [credOpen, setCredOpen] = useAppPreference<boolean>('conn-panel-open', true)
   // Dead-session tracking: backend pools die on server restart while tabs
   // persist. deadIds is state (badges); deadRef mirrors it for stable
   // callbacks; retriedRef bounds auto-reconnect to one attempt per session.
@@ -104,11 +109,6 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
       markTxn(sid, !!j.info?.in_txn)
       rememberSessionConn(sid, { ...f, dbname })
       clearDead(sid)
-      try {
-        localStorage.setItem('last-conn', JSON.stringify({ ...f, dbname }))
-      } catch {
-        /* private mode etc. — autologin just won't persist */
-      }
       return sid
     },
     [session, setSessions, setActiveId, markTxn, clearDead],
@@ -339,15 +339,6 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
           if (nid) {
             remapRef.current.set(s.id, nid)
             aliveIds.add(nid)
-          }
-        }
-        // First-ever run (nothing stored): legacy single last-conn.
-        if (!aliveIds.size && !stored.length) {
-          const last = readJSON<ConnFields | null>('last-conn', null)
-          if (last && last.host) {
-            setFields(last)
-            // Fresh pool: the previous server run (if any) is gone.
-            await bootConnect(last, true)
           }
         }
         // Still-unmapped stored sessions are dead — badge, don't drop.

@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -555,6 +557,66 @@ func (h *Handler) Types(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ERD(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && r.URL.Query().Get("layout") == "1" {
+		cid := strings.TrimSpace(r.URL.Query().Get("connection_id"))
+		schema := strings.TrimSpace(r.URL.Query().Get("schema"))
+		if cid == "" || schema == "" {
+			writeJSON(w, 400, map[string]string{"error": "connection_id and schema required"})
+			return
+		}
+		x, err := h.Store.GetErdLayout(r.Context(), h.UserID, cid, schema)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeJSON(w, 200, map[string]any{"layout": map[string]any{}, "viewport": nil})
+				return
+			}
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		var layout, viewport any
+		_ = json.Unmarshal([]byte(x.LayoutJSON), &layout)
+		_ = json.Unmarshal([]byte(x.ViewportJSON), &viewport)
+		writeJSON(w, 200, map[string]any{"layout": layout, "viewport": viewport, "updated_at": x.UpdatedAt})
+		return
+	}
+	if r.Method == http.MethodDelete && r.URL.Query().Get("layout") == "1" {
+		cid := strings.TrimSpace(r.URL.Query().Get("connection_id"))
+		schema := strings.TrimSpace(r.URL.Query().Get("schema"))
+		if cid == "" || schema == "" {
+			writeJSON(w, 400, map[string]string{"error": "connection_id and schema required"})
+			return
+		}
+		if err := h.Store.DeleteErdLayout(r.Context(), h.UserID, cid, schema); err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"ok": true})
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Query().Get("layout") == "1" {
+		var req struct {
+			ConnectionID string `json:"connection_id"`
+			Schema       string `json:"schema"`
+			Layout       any    `json:"layout"`
+			Viewport     any    `json:"viewport"`
+		}
+		if json.NewDecoder(r.Body).Decode(&req) != nil {
+			writeJSON(w, 400, map[string]string{"error": "invalid json"})
+			return
+		}
+		if req.ConnectionID == "" || req.Schema == "" {
+			writeJSON(w, 400, map[string]string{"error": "connection_id and schema required"})
+			return
+		}
+		lb, _ := json.Marshal(req.Layout)
+		vb, _ := json.Marshal(req.Viewport)
+		if err := h.Store.UpsertErdLayout(r.Context(), h.UserID, req.ConnectionID, req.Schema, string(lb), string(vb)); err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"ok": true})
+		return
+	}
 	q, _, ok := h.q(r)
 	if !ok {
 		writeJSON(w, 401, map[string]string{"error": "not connected"})

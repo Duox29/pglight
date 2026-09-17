@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 /** Thrown for transport failures and non-JSON bodies. HTTP error statuses */
 /** resolve as `{error}` JSON per the backend contract — check `j.error`. */
@@ -73,7 +73,7 @@ function notifyUnauthorized(path: string, init?: RequestInit) {
   }
 }
 
-export function useLocalStorage<T>(key: string, initial: T) {
+export function useAppPreference<T>(key: string, initial: T) {
   const [value, setValue] = useState<T>(() => {
     try {
       const raw = localStorage.getItem(key)
@@ -82,14 +82,26 @@ export function useLocalStorage<T>(key: string, initial: T) {
       return initial
     }
   })
+  useEffect(() => {
+    let alive = true
+    void api<{ preferences?: Record<string, unknown> }>('/api/preferences').then((j) => {
+      if (!alive) return
+      if (j.preferences && Object.prototype.hasOwnProperty.call(j.preferences, key)) {
+        setValue(j.preferences[key] as T)
+      } else {
+        void api('/api/preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: value }) }).catch(() => undefined)
+      }
+    }).catch(() => undefined)
+    return () => { alive = false }
+    // Initial cache is only a fast first paint; backend becomes source of truth.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+
   const set = (v: T | ((prev: T) => T)) => {
     setValue((prev) => {
       const next = typeof v === 'function' ? (v as (p: T) => T)(prev) : v
-      try {
-        localStorage.setItem(key, JSON.stringify(next))
-      } catch {
-        /* ignore */
-      }
+      try { localStorage.setItem(key, JSON.stringify(next)) } catch { /* cache is best-effort */ }
+      void api('/api/preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: next }) }).catch(() => undefined)
       return next
     })
   }

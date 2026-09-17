@@ -202,4 +202,13 @@ export const apiClient = {
   deleteAlias: (trigger: string) =>
     api<{ ok?: boolean; error?: string }>(`/api/aliases?trigger=${encodeURIComponent(trigger)}`, { method: 'DELETE' }),
   resetAliases: () => api<{ ok?: boolean; error?: string }>(`/api/aliases`, { method: 'DELETE' }),
+  listSnippets: () => api<{ snippets: { id: string; name: string; sql: string }[] }>('/api/snippets'),
+  saveSnippet: (name: string, sql: string) => api<{ snippet?: { id: string; name: string; sql: string }; error?: string }>('/api/snippets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, sql }) }),
+  deleteSnippet: (name: string) => api<{ ok?: boolean; error?: string }>(`/api/snippets?name=${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  listHistory: () => api<{ history: { id: string; sql: string; ms?: number; n?: number; at: string }[] }>('/api/history'),
+  addHistory: (sql: string, ms?: number, n?: number) => api('/api/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql, ms, n }) }),
+  clearHistory: () => api<{ ok?: boolean; error?: string }>('/api/history', { method: 'DELETE' }),
+  listConnections: () => api<{ connections: { id: string; name: string; host: string; port: number; user: string; dbname: string; sslmode?: string }[] }>('/api/connections'),
+  saveConnection: (p: { name: string; host: string; port: number; user: string; dbname: string; sslmode: string }) => api<{ connection?: { id: string; name: string; host: string; port: number; user: string; dbname: string; sslmode?: string }; error?: string }>('/api/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
+  deleteConnection: (name: string) => api<{ ok?: boolean; error?: string }>(`/api/connections?name=${encodeURIComponent(name)}`, { method: 'DELETE' }),
 }

@@ -23,12 +23,10 @@ import { ErdToolbar } from './erd/ErdToolbar'
 import { layoutTables, type ErdPos } from './erd/erdLayout'
 import { dstHandle, mapErd, srcHandle, type ErdDataDto, type ErdLineType } from './erd/erdMapper'
 import {
-  clearErdLayout,
-  clearErdViewport,
-  loadErdLayout,
-  loadErdViewport,
-  saveErdLayout,
-  saveErdViewport,
+  clearErdPersistence,
+  loadErdPersistence,
+  saveErdPersistence,
+  type ErdViewport,
 } from './erd/erdStorage'
 import type { ErdTabT } from '@/types'
 import { cn } from '@/lib/utils'
@@ -53,6 +51,7 @@ function copyText(text: string) {
 
 function ErdCanvasInner(props: {
   tab: ErdTabT
+  connectionId?: string
   schemas: string[]
   onSchema: (s: string) => void
   onReload: () => void
@@ -72,13 +71,9 @@ function ErdCanvasInner(props: {
   })
   const flow = useReactFlow()
   const dragPos = useRef<Record<string, ErdPos>>({})
-  // Restored once per schema payload (inner is keyed, so init-only read is safe).
-  const savedViewport = useMemo(
-    () => loadErdViewport(t.sessionId, t.schema),
-    // Session/schema identify the stored view; reload constructs a fresh inner.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t.sessionId, t.schema, graph],
-  )
+  const persistedLayout = useRef<Record<string, ErdPos>>({})
+  const persistedViewport = useRef<ErdViewport | null>(null)
+  const [persistenceLoaded, setPersistenceLoaded] = useState(false)
 
   const openTable = useCallback(
     (schema: string, table: string) => props.onOpenTable(schema, table),
@@ -117,8 +112,7 @@ function ErdCanvasInner(props: {
   // Derived flow state, built once per payload (inner component is keyed by
   // schema+payload, so StrictMode-safe construction needs no reset effect).
   const initial = useMemo(() => {
-    const saved = loadErdLayout(t.sessionId, t.schema)
-    const pos = layoutTables(graph.tables, graph.relations, saved)
+    const pos = layoutTables(graph.tables, graph.relations, {})
     const degree = new Map<string, number>()
     for (const r of graph.relations) {
       degree.set(r.sourceTable, (degree.get(r.sourceTable) ?? 0) + 1)
@@ -155,6 +149,23 @@ function ErdCanvasInner(props: {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>(initial.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>(initial.edges)
+
+  useEffect(() => {
+    let cancelled = false
+    persistedLayout.current = {}
+    persistedViewport.current = null
+    void loadErdPersistence(props.connectionId ?? '', t.schema, t.sessionId).then((saved) => {
+      if (cancelled) return
+      persistedLayout.current = saved.layout
+      persistedViewport.current = saved.viewport
+      if (Object.keys(saved.layout).length) {
+        setNodes((prev) => prev.map((n) => saved.layout[n.id] ? { ...n, position: saved.layout[n.id] } : n))
+      }
+      if (saved.viewport) void flow.setViewport(saved.viewport, { duration: 0 })
+      setPersistenceLoaded(true)
+    })
+    return () => { cancelled = true }
+  }, [props.connectionId, t.schema, t.sessionId, flow, setNodes])
 
   // Toolbar line switch: push the shape into every edge's data (no rebuild).
   useEffect(() => {
@@ -230,11 +241,12 @@ function ErdCanvasInner(props: {
   }, [selected, neighborIds, selectedRel, matchIds, focusId, graph, setNodes, setEdges, line])
 
   const persistDrag = useCallback(() => {
-    if (Object.keys(dragPos.current).length === 0) return
-    const merged = { ...loadErdLayout(t.sessionId, t.schema), ...dragPos.current }
-    saveErdLayout(t.sessionId, t.schema, merged)
+    if (!persistenceLoaded || !props.connectionId || Object.keys(dragPos.current).length === 0) return
+    const merged = { ...persistedLayout.current, ...dragPos.current }
+    persistedLayout.current = merged
     dragPos.current = {}
-  }, [t.sessionId, t.schema])
+    void saveErdPersistence(props.connectionId, t.schema, merged, persistedViewport.current)
+  }, [persistenceLoaded, props.connectionId, t.schema])
 
   const onNodeDragStop = useCallback(
     (_: unknown, node: FlowNode) => {
@@ -246,29 +258,34 @@ function ErdCanvasInner(props: {
 
   // Persist pan/zoom at gesture end (pan, scroll-zoom, controls, minimap).
   const onMoveEnd = useCallback(
-    (_: unknown, vp: { x: number; y: number; zoom: number }) => {
-      saveErdViewport(t.sessionId, t.schema, { x: vp.x, y: vp.y, zoom: vp.zoom })
+    (_: unknown, vp: ErdViewport) => {
+      if (!persistenceLoaded || !props.connectionId) return
+      persistedViewport.current = vp
+      void saveErdPersistence(props.connectionId, t.schema, persistedLayout.current, vp)
     },
-    [t.sessionId, t.schema],
+    [persistenceLoaded, props.connectionId, t.schema],
   )
 
   const onResetLayout = useCallback(() => {
-    clearErdLayout(t.sessionId, t.schema)
-    clearErdViewport(t.sessionId, t.schema)
+    persistedLayout.current = {}
+    persistedViewport.current = null
+    dragPos.current = {}
+    if (props.connectionId) void clearErdPersistence(props.connectionId, t.schema)
     const pos = layoutTables(graph.tables, graph.relations, {})
     setNodes((prev) => prev.map((n) => (pos[n.id] ? { ...n, position: pos[n.id] } : n)))
     requestAnimationFrame(() => void flow.fitView({ ...FIT, duration: 200 }))
-  }, [t.sessionId, t.schema, graph, setNodes, flow])
+  }, [props.connectionId, t.schema, graph, setNodes, flow])
 
   const onFit = useCallback(() => void flow.fitView({ ...FIT, duration: 200 }), [flow])
 
   const onAutoLayout = useCallback(() => {
     const pos = layoutTables(graph.tables, graph.relations, {})
-    saveErdLayout(t.sessionId, t.schema, pos)
+    persistedLayout.current = pos
     dragPos.current = {}
+    if (props.connectionId) void saveErdPersistence(props.connectionId, t.schema, pos, persistedViewport.current)
     setNodes((prev) => prev.map((n) => (pos[n.id] ? { ...n, position: pos[n.id] } : n)))
     requestAnimationFrame(() => void flow.fitView({ ...FIT, duration: 200 }))
-  }, [t.sessionId, t.schema, graph, setNodes, flow])
+  }, [props.connectionId, t.schema, graph, setNodes, flow])
 
   const focusSearch = useCallback(() => {
     if (!matchIds?.size) return
@@ -327,9 +344,8 @@ function ErdCanvasInner(props: {
           onNodeDragStop={onNodeDragStop}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          fitView={!savedViewport}
+          fitView={!persistenceLoaded}
           fitViewOptions={FIT}
-          defaultViewport={savedViewport ?? undefined}
           onMoveEnd={onMoveEnd}
           minZoom={0.1}
           maxZoom={1.75}
@@ -423,6 +439,7 @@ function ErdCanvasInner(props: {
 
 export function ErdView(props: {
   tab: ErdTabT
+  connectionId?: string
   schemas: string[]
   onSchema: (s: string) => void
   onReload: () => void
