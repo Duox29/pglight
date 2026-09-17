@@ -1,9 +1,8 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { explainToText } from '../components/QueryConsole'
 import { api, apiClient, q } from '../lib/api'
 import { dropSnapshot, ensureSnapshot } from '../lib/schemaCache'
-import { useLocalStorage } from '../lib/storage'
 import { DDL_RE } from '../lib/tabs'
 import type { HistoryEntry, Snippet, Tab } from '../types'
 
@@ -21,14 +20,23 @@ export interface QueryRunnerDeps {
 export function useQueryRunner(deps: QueryRunnerDeps) {
   const { tabs, updateTab, session, autocommit, markTxn } = deps
   const [running, setRunning] = useState<Record<string, boolean>>({})
-  const [history, setHistory] = useLocalStorage<HistoryEntry[]>('hist', [])
-  const [snippets, setSnippets] = useLocalStorage<Snippet[]>('snippets', [])
+  const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [snippets, setSnippets] = useState<Snippet[]>([])
   // SQL actually sent per running tab (may be a selection, LIMIT-wrapped
   // server-side). Used to match the backend in pg_stat_activity on Cancel.
   const runSql = useRef<Record<string, string>>({})
 
+  useEffect(() => {
+    void Promise.all([apiClient.listHistory(), apiClient.listSnippets()]).then(([h, s]) => {
+      setHistory(h.history ?? [])
+      setSnippets((s.snippets ?? []).map((x) => ({ name: x.name, sql: x.sql })))
+    }).catch(() => undefined)
+  }, [])
+
   const pushHist = (sql: string, ms?: number, n?: number) => {
-    setHistory((h) => [{ sql: sql.slice(0, 2000), ms, n, at: new Date().toLocaleTimeString() }, ...h].slice(0, 200))
+    const entry: HistoryEntry = { sql: sql.slice(0, 2000), ms, n, at: new Date().toLocaleTimeString() }
+    setHistory((h) => [entry, ...h].slice(0, 200))
+    void apiClient.addHistory(entry.sql, ms, n).catch(() => undefined)
   }
 
   const runQuery = useCallback(
@@ -78,7 +86,6 @@ export function useQueryRunner(deps: QueryRunnerDeps) {
         delete runSql.current[id]
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [tabs, autocommit, updateTab, markTxn],
   )
 

@@ -38,6 +38,45 @@ export default function App() {
   const [sideView, setSideView] = useState<SideView>('history')
   const [paletteOpen, setPaletteOpen] = useState(false)
 
+  // One-time migration from the legacy browser-only stores. Upload first,
+  // verify through successful API responses, then remove only the migrated
+  // keys. Passwords are intentionally never migrated or persisted.
+  useEffect(() => {
+    const marker = 'pglight-data-migrated-v1'
+    if (localStorage.getItem(marker) === '1') return
+    void (async () => {
+      let ok = true
+      try {
+        const snippets = JSON.parse(localStorage.getItem('snippets') ?? '[]') as { name?: string; sql?: string }[]
+        for (const s of Array.isArray(snippets) ? snippets : []) {
+          if (!s.name || !s.sql) continue
+          const r = await apiClient.saveSnippet(s.name, s.sql)
+          if (r.error) { ok = false; break }
+        }
+        if (ok) {
+          const history = JSON.parse(localStorage.getItem('hist') ?? '[]') as { sql?: string; ms?: number; n?: number }[]
+          for (const h of Array.isArray(history) ? history.slice(0, 200) : []) {
+            if (!h.sql) continue
+            const r = await apiClient.addHistory(h.sql, h.ms, h.n) as { error?: string }
+            if (r.error) { ok = false; break }
+          }
+        }
+        if (ok) {
+          const conns = JSON.parse(localStorage.getItem('conns') ?? '[]') as { name?: string; host?: string; port?: string; user?: string; dbname?: string; sslmode?: string }[]
+          for (const c of Array.isArray(conns) ? conns : []) {
+            if (!c.name || !c.host || !c.user || !c.dbname) continue
+            const r = await apiClient.saveConnection({ name: c.name, host: c.host, port: Number(c.port) || 5432, user: c.user, dbname: c.dbname, sslmode: c.sslmode || 'prefer' })
+            if (r.error) { ok = false; break }
+          }
+        }
+      } catch { ok = false }
+      if (ok) {
+        localStorage.setItem(marker, '1')
+        for (const key of ['snippets', 'hist', 'conns']) localStorage.removeItem(key)
+      }
+    })()
+  }, [])
+
   // Ref bridges break the table↔explorer construction cycle: table ops
   // refresh the explorer after DDL, and explorer's create-table opens the
   // new table tab. Both only fire on user events, never during render.
@@ -169,6 +208,9 @@ export default function App() {
   }, [connected, activeId, sessions, bootDone, newQueryTab, restoreStoredTabs, tableApi, objectApi, remapRef, deadRef])
 
   const openTableForSession = (schema: string, table: string, sid?: string) => tableApi.openTableTab(schema, table, sid ?? activeId)
+  const erdConnectionId = cur?.kind === 'erd'
+    ? sessionsApi.saved.find((c) => c.id && c.host === (sessions.find((s) => s.id === cur.sessionId)?.host ?? '') && String(c.port) === String(sessions.find((s) => s.id === cur.sessionId)?.port ?? '') && c.user === (sessions.find((s) => s.id === cur.sessionId)?.user ?? '') && c.dbname === (sessions.find((s) => s.id === cur.sessionId)?.dbname ?? '') && c.sslmode === (sessions.find((s) => s.id === cur.sessionId)?.sslmode ?? ''))?.id
+    : undefined
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -218,7 +260,14 @@ export default function App() {
               const c = sessionsApi.saved[i]
               if (c) sessionsApi.setFields({ host: c.host, port: c.port, user: c.user, password: c.password, dbname: c.dbname, sslmode: c.sslmode })
             }}
-            onDeleteSaved={(i) => sessionsApi.setSaved((l) => l.filter((_, x) => x !== i))}
+            onDeleteSaved={(i) => {
+              const item = sessionsApi.saved[i]
+              if (!item) return
+              void apiClient.deleteConnection(item.name).then((j) => {
+                if (j.error) toast.error(j.error)
+                else sessionsApi.setSaved((l) => l.filter((_, x) => x !== i))
+              }).catch((e) => toast.error(e instanceof Error ? e.message : String(e)))
+            }}
             onConnect={() => {
               sessionsApi.connect(true).then((ok) => {
                 if (ok) sessionsApi.setCredOpen(false)
@@ -230,7 +279,11 @@ export default function App() {
                 defaultValue: `${sessionsApi.fields.host}/${sessionsApi.fields.dbname}`,
               })
               if (name == null) return
-              sessionsApi.setSaved((l) => [...l, { name: name.trim() || 'conn', ...sessionsApi.fields }])
+              const f = sessionsApi.fields
+              const savedName = name.trim() || 'conn'
+              const j = await apiClient.saveConnection({ name: savedName, host: f.host, port: Number(f.port) || 5432, user: f.user, dbname: f.dbname, sslmode: f.sslmode })
+              if (j.error || !j.connection) toast.error(j.error ?? 'Failed to save connection')
+              else sessionsApi.setSaved((l) => [{ id: j.connection!.id, name: j.connection!.name, host: j.connection!.host, port: String(j.connection!.port), user: j.connection!.user, password: '', dbname: j.connection!.dbname, sslmode: j.connection!.sslmode ?? f.sslmode }, ...l.filter((x) => x.name !== j.connection!.name)])
             }}
             onDisconnect={() => {
               sessionsApi.disconnect()
@@ -362,7 +415,11 @@ export default function App() {
                     title: 'Save snippet',
                     defaultValue: cur.sql.slice(0, 40),
                   })
-                  if (name) setSnippets((s) => [{ name, sql: cur.sql }, ...s])
+                  if (name) {
+                    const j = await apiClient.saveSnippet(name.trim(), cur.sql)
+                    if (j.error || !j.snippet) toast.error(j.error ?? 'Failed to save snippet')
+                    else setSnippets((s) => [{ name: j.snippet!.name, sql: j.snippet!.sql }, ...s.filter((x) => x.name !== j.snippet!.name)])
+                  }
                 }}
                 dialogs={dialogs}
               />
@@ -526,6 +583,7 @@ export default function App() {
             {cur?.kind === 'erd' && (
               <ErdView
                 tab={cur}
+                connectionId={erdConnectionId}
                 schemas={explorerApi.schemas.map((s) => s.schema)}
                 onSchema={(s) => {
                   updateTab(cur.id, (x) => (x.kind === 'erd' ? { ...x, schema: s, title: `ERD ${s}`, data: null } : x))
@@ -586,7 +644,14 @@ export default function App() {
               history={history}
               snippets={snippets}
               onOpenSql={(sql) => newQueryTab(sql, activeId)}
-              onDeleteSnippet={(i) => setSnippets((s) => s.filter((_, x) => x !== i))}
+              onDeleteSnippet={(i) => {
+                const item = snippets[i]
+                if (!item) return
+                void apiClient.deleteSnippet(item.name).then((j) => {
+                  if (j.error) toast.error(j.error)
+                  else setSnippets((s) => s.filter((_, x) => x !== i))
+                }).catch((e) => toast.error(e instanceof Error ? e.message : String(e)))
+              }}
               dialogs={dialogs}
             />
           </aside>

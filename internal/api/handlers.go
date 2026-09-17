@@ -11,14 +11,17 @@ import (
 
 	"pglight/internal/db"
 	"pglight/internal/logging"
+	"pglight/internal/store"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Handler struct {
-	Mgr *db.Manager
-	Log *logging.Logger
+	Mgr    *db.Manager
+	Log    *logging.Logger
+	Store  *store.Store
+	UserID string
 }
 
 // queryTimeout caps user query execution (console, table ops). Long enough

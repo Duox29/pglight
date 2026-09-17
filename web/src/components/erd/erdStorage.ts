@@ -1,36 +1,5 @@
 import type { ErdPos } from './erdLayout'
-
-const prefix = 'pglight-erd-layout'
-
-/** Local-only layout persistence. Keyed by session + schema, never credentials. */
-export const erdLayoutKey = (sessionId: string, schema: string) => `${prefix}:${sessionId}:${schema}`
-
-export function loadErdLayout(sessionId: string, schema: string): Record<string, ErdPos> {
-  try {
-    const raw = localStorage.getItem(erdLayoutKey(sessionId, schema))
-    if (!raw) return {}
-    const parsed = JSON.parse(raw) as Record<string, ErdPos>
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
-export function saveErdLayout(sessionId: string, schema: string, pos: Record<string, ErdPos>): void {
-  try {
-    localStorage.setItem(erdLayoutKey(sessionId, schema), JSON.stringify(pos))
-  } catch {
-    /* private mode / quota — layout just won't persist */
-  }
-}
-
-export function clearErdLayout(sessionId: string, schema: string): void {
-  try {
-    localStorage.removeItem(erdLayoutKey(sessionId, schema))
-  } catch {
-    /* ignore */
-  }
-}
+import { api } from '@/lib/api'
 
 export interface ErdViewport {
   x: number
@@ -38,48 +7,113 @@ export interface ErdViewport {
   zoom: number
 }
 
-const viewportPrefix = 'pglight-erd-viewport'
-
-export const erdViewportKey = (sessionId: string, schema: string) =>
-  `${viewportPrefix}:${sessionId}:${schema}`
-
-function isViewport(v: unknown): v is ErdViewport {
-  if (!v || typeof v !== 'object') return false
-  const o = v as Record<string, unknown>
-  return (
-    typeof o.x === 'number' &&
-    Number.isFinite(o.x) &&
-    typeof o.y === 'number' &&
-    Number.isFinite(o.y) &&
-    typeof o.zoom === 'number' &&
-    Number.isFinite(o.zoom) &&
-    o.zoom > 0
-  )
+interface ErdLayoutResponse {
+  layout?: Record<string, ErdPos>
+  viewport?: ErdViewport | null
+  updated_at?: string
+  error?: string
 }
 
-export function loadErdViewport(sessionId: string, schema: string): ErdViewport | null {
+function validLayout(v: unknown): v is Record<string, ErdPos> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  return Object.values(v as Record<string, unknown>).every((p) => {
+    if (!p || typeof p !== 'object') return false
+    const o = p as Record<string, unknown>
+    return typeof o.x === 'number' && Number.isFinite(o.x) && typeof o.y === 'number' && Number.isFinite(o.y)
+  })
+}
+
+function validViewport(v: unknown): v is ErdViewport {
+  if (!v || typeof v !== 'object') return false
+  const o = v as Record<string, unknown>
+  return typeof o.x === 'number' && Number.isFinite(o.x) &&
+    typeof o.y === 'number' && Number.isFinite(o.y) &&
+    typeof o.zoom === 'number' && Number.isFinite(o.zoom) && o.zoom > 0
+}
+
+// Backend is the source of truth. The optional legacy localStorage helpers are
+// retained only for one-time migration of layouts created before v2.
+const legacyLayoutKey = (sessionId: string, schema: string) => `pglight-erd-layout:${sessionId}:${schema}`
+const legacyViewportKey = (sessionId: string, schema: string) => `pglight-erd-viewport:${sessionId}:${schema}`
+
+function readLegacy(sessionId: string, schema: string): { layout: Record<string, ErdPos>; viewport: ErdViewport | null } | null {
   try {
-    const raw = localStorage.getItem(erdViewportKey(sessionId, schema))
-    if (!raw) return null
-    const parsed: unknown = JSON.parse(raw)
-    return isViewport(parsed) ? parsed : null
+    const rawLayout = localStorage.getItem(legacyLayoutKey(sessionId, schema))
+    const rawViewport = localStorage.getItem(legacyViewportKey(sessionId, schema))
+    if (!rawLayout && !rawViewport) return null
+    const layoutRaw: unknown = rawLayout ? JSON.parse(rawLayout) : {}
+    const viewportRaw: unknown = rawViewport ? JSON.parse(rawViewport) : null
+    return {
+      layout: validLayout(layoutRaw) ? layoutRaw : {},
+      viewport: validViewport(viewportRaw) ? viewportRaw : null,
+    }
   } catch {
     return null
   }
 }
 
-export function saveErdViewport(sessionId: string, schema: string, vp: ErdViewport): void {
+function clearLegacy(sessionId: string, schema: string): void {
   try {
-    localStorage.setItem(erdViewportKey(sessionId, schema), JSON.stringify(vp))
+    localStorage.removeItem(legacyLayoutKey(sessionId, schema))
+    localStorage.removeItem(legacyViewportKey(sessionId, schema))
   } catch {
-    /* private mode / quota — viewport just won't persist */
+    /* cache cleanup is best-effort */
   }
 }
 
-export function clearErdViewport(sessionId: string, schema: string): void {
+export async function loadErdPersistence(connectionId: string, schema: string, legacySessionId?: string): Promise<{
+  layout: Record<string, ErdPos>
+  viewport: ErdViewport | null
+}> {
+  if (!connectionId) return { layout: {}, viewport: null }
   try {
-    localStorage.removeItem(erdViewportKey(sessionId, schema))
+    const result = await api<ErdLayoutResponse>(`/api/erd?layout=1&connection_id=${encodeURIComponent(connectionId)}&schema=${encodeURIComponent(schema)}`)
+    if (result.error) throw new Error(result.error)
+    const layout = validLayout(result.layout) ? result.layout : {}
+    const viewport = validViewport(result.viewport) ? result.viewport : null
+    if (legacySessionId) {
+      const legacy = readLegacy(legacySessionId, schema)
+      if (legacy && (Object.keys(legacy.layout).length || legacy.viewport)) {
+        const merged = {
+          layout: Object.keys(layout).length ? layout : legacy.layout,
+          viewport: viewport ?? legacy.viewport,
+        }
+        const migrated = await saveErdPersistence(connectionId, schema, merged.layout, merged.viewport)
+        if (migrated) clearLegacy(legacySessionId, schema)
+        return migrated ? merged : { layout, viewport }
+      }
+    }
+    return { layout, viewport }
   } catch {
-    /* ignore */
+    return { layout: {}, viewport: null }
+  }
+}
+
+export async function saveErdPersistence(
+  connectionId: string,
+  schema: string,
+  layout: Record<string, ErdPos>,
+  viewport: ErdViewport | null,
+): Promise<boolean> {
+  if (!connectionId) return false
+  try {
+    const result = await api<{ ok?: boolean; error?: string }>('/api/erd?layout=1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connection_id: connectionId, schema, layout, viewport }),
+    })
+    return result.ok === true && !result.error
+  } catch {
+    return false
+  }
+}
+
+export async function clearErdPersistence(connectionId: string, schema: string): Promise<boolean> {
+  if (!connectionId) return false
+  try {
+    const result = await api<{ ok?: boolean; error?: string }>(`/api/erd?layout=1&connection_id=${encodeURIComponent(connectionId)}&schema=${encodeURIComponent(schema)}`, { method: 'DELETE' })
+    return result.ok === true && !result.error
+  } catch {
+    return false
   }
 }

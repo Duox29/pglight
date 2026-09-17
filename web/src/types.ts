@@ -10,6 +10,7 @@ export interface SessionInfo {
 }
 
 export interface SavedConnection {
+  id?: string
   name: string
   host: string
   port: string

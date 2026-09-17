@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"io/fs"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"pglight/internal/api"
 	"pglight/internal/db"
 	"pglight/internal/logging"
+	"pglight/internal/store"
 )
 
 //go:embed web/dist
@@ -20,7 +22,20 @@ func main() {
 	mgr := db.New()
 	mgr.StartSweeper(db.DefaultSweepInterval, db.DefaultIdleTTL)
 	appLog := logging.New("data/logging.json")
-	h := &api.Handler{Mgr: mgr, Log: appLog}
+	storePath := os.Getenv("PGLIGHT_STORE")
+	appStore, err := store.Open(storePath)
+	if err != nil {
+		log.Fatal("open app storage: ", err)
+	}
+	defer appStore.Close()
+	userID := os.Getenv("PGLIGHT_USER_ID")
+	if userID == "" {
+		userID = "default"
+	}
+	if err := appStore.EnsureUser(context.Background(), userID); err != nil {
+		log.Fatal("initialize app user: ", err)
+	}
+	h := &api.Handler{Mgr: mgr, Log: appLog, Store: appStore, UserID: userID}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/connect", h.Connect)
@@ -40,6 +55,10 @@ func main() {
 	mux.HandleFunc("/api/row", h.RowOp)
 	mux.HandleFunc("/api/complete", h.Complete)
 	mux.HandleFunc("/api/aliases", h.Aliases)
+	mux.HandleFunc("/api/snippets", h.Snippets)
+	mux.HandleFunc("/api/connections", h.Connections)
+	mux.HandleFunc("/api/preferences", h.Preferences)
+	mux.HandleFunc("/api/history", h.History)
 	mux.HandleFunc("/api/txn", h.Txn)
 	mux.HandleFunc("/api/server-info", h.ServerInfo)
 	mux.HandleFunc("/api/stats", h.Stats)
