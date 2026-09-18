@@ -108,7 +108,7 @@ func (h *Handler) Objects(w http.ResponseWriter, r *http.Request) {
 	case "foreign":
 		sql = `SELECT foreign_table_schema, foreign_table_name FROM information_schema.foreign_tables WHERE foreign_table_schema NOT IN ('pg_catalog','information_schema')`
 		if schema != "" {
-			sql += ` AND table_schema=$1`
+			sql += ` AND foreign_table_schema=$1`
 			args = append(args, schema)
 		}
 		sql += ` ORDER BY 1,2`
@@ -175,11 +175,18 @@ func (h *Handler) Columns(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	_, data, err := queryJSON(q, ctx, `
 		SELECT c.column_name, c.data_type, c.is_nullable, c.column_default,
-		CASE WHEN kcu.column_name IS NOT NULL THEN true ELSE false END AS is_pk,
-		COALESCE(col_description((c.table_schema||'.'||c.table_name)::regclass, c.ordinal_position), '') AS comment
+		CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END AS is_pk,
+		COALESCE(col_description(to_regclass(format('%I.%I', c.table_schema, c.table_name)), c.ordinal_position), '') AS comment
 		FROM information_schema.columns c
-		LEFT JOIN information_schema.table_constraints tc ON tc.table_schema=c.table_schema AND tc.table_name=c.table_name AND tc.constraint_type='PRIMARY KEY'
-		LEFT JOIN information_schema.key_column_usage kcu ON kcu.constraint_name=tc.constraint_name AND kcu.column_name=c.column_name AND kcu.table_schema=c.table_schema
+		LEFT JOIN (
+			SELECT src_ns.nspname AS sn, src.relname AS tn, a.attname AS column_name
+			FROM pg_constraint con
+			JOIN pg_class src ON src.oid = con.conrelid
+			JOIN pg_namespace src_ns ON src_ns.oid = src.relnamespace
+			JOIN LATERAL unnest(con.conkey) AS k(attnum) ON true
+			JOIN pg_attribute a ON a.attrelid = src.oid AND a.attnum = k.attnum
+			WHERE con.contype = 'p'
+		) pk ON pk.sn = c.table_schema AND pk.tn = c.table_name AND pk.column_name = c.column_name
 		WHERE c.table_name=$1 AND ($2='' OR c.table_schema=$2)
 		ORDER BY c.ordinal_position`, table, schema)
 	if err != nil {
@@ -217,11 +224,11 @@ func (h *Handler) DDL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, idx, _ := queryJSON(q, ctx, `SELECT indexname, indexdef FROM pg_indexes WHERE schemaname=$1 AND tablename=$2`, schema, table)
-	_, fk, _ := queryJSON(q, ctx, `SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid=($1||'.'||$2)::regclass`, schema, table)
-	_, cons, _ := queryJSON(q, ctx, `SELECT conname, CASE contype WHEN 'p' THEN 'PRIMARY KEY' WHEN 'f' THEN 'FOREIGN KEY' WHEN 'u' THEN 'UNIQUE' WHEN 'c' THEN 'CHECK' WHEN 'x' THEN 'EXCLUDE' ELSE contype::text END, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid=($1||'.'||$2)::regclass ORDER BY 2,1`, schema, table)
+	_, fk, _ := queryJSON(q, ctx, `SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid=to_regclass(format('%I.%I', $1::text, $2::text))`, schema, table)
+	_, cons, _ := queryJSON(q, ctx, `SELECT conname, CASE contype WHEN 'p' THEN 'PRIMARY KEY' WHEN 'f' THEN 'FOREIGN KEY' WHEN 'u' THEN 'UNIQUE' WHEN 'c' THEN 'CHECK' WHEN 'x' THEN 'EXCLUDE' ELSE contype::text END, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid=to_regclass(format('%I.%I', $1::text, $2::text)) ORDER BY 2,1`, schema, table)
 	_, trg, _ := queryJSON(q, ctx, `SELECT trigger_name, event_manipulation||' '||action_timing||' '||action_statement FROM information_schema.triggers WHERE event_object_schema=$1 AND event_object_table=$2`, schema, table)
 	var owner, comment string
-	_ = q.QueryRow(ctx, `SELECT COALESCE((SELECT relowner::regrole::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname=$2),''), COALESCE(obj_description(($1||'.'||$2)::regclass,'pg_class'),'')`, schema, table).Scan(&owner, &comment)
+	_ = q.QueryRow(ctx, `SELECT COALESCE((SELECT relowner::regrole::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname=$2),''), COALESCE(obj_description(to_regclass(format('%I.%I', $1::text, $2::text)),'pg_class'),'')`, schema, table).Scan(&owner, &comment)
 	writeJSON(w, 200, map[string]any{
 		"ddl": ddl, "owner": owner, "comment": comment,
 		"indexes":      rowsToMaps([]string{"name", "def"}, idx),
@@ -248,7 +255,7 @@ func (h *Handler) ViewDef(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	var def string
-	if err := q.QueryRow(ctx, `SELECT pg_get_viewdef(($1||'.'||$2)::regclass, true)`, schema, name).Scan(&def); err != nil {
+	if err := q.QueryRow(ctx, `SELECT pg_get_viewdef(to_regclass(format('%I.%I', $1::text, $2::text)), true)`, schema, name).Scan(&def); err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
@@ -323,7 +330,7 @@ func (h *Handler) SeqDef(w http.ResponseWriter, r *http.Request) {
 	}
 	dataType, startVal, minVal, maxVal, incr, cycle := str(data[0][0]), str(data[0][1]), str(data[0][2]), str(data[0][3]), str(data[0][4]), str(data[0][5])
 	var cacheSize int64 = 1
-	_ = q.QueryRow(ctx, `SELECT seqcache FROM pg_sequence WHERE seqrelid=($1||'.'||$2)::regclass`, schema, name).Scan(&cacheSize)
+	_ = q.QueryRow(ctx, `SELECT seqcache FROM pg_sequence WHERE seqrelid=to_regclass(format('%I.%I', $1::text, $2::text))`, schema, name).Scan(&cacheSize)
 	var lastVal string
 	_ = q.QueryRow(ctx, `SELECT last_value::text FROM `+pgx.Identifier{schema, name}.Sanitize()).Scan(&lastVal)
 	qi := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
@@ -431,7 +438,7 @@ func (h *Handler) Constraints(w http.ResponseWriter, r *http.Request) {
 	var sql string
 	var args []any
 	if table != "" {
-		sql = `SELECT conname, CASE contype WHEN 'p' THEN 'PRIMARY KEY' WHEN 'f' THEN 'FOREIGN KEY' WHEN 'u' THEN 'UNIQUE' WHEN 'c' THEN 'CHECK' WHEN 'x' THEN 'EXCLUDE' ELSE contype::text END, pg_get_constraintdef(oid, true) FROM pg_constraint WHERE conrelid=($1||'.'||$2)::regclass ORDER BY 2,1`
+		sql = `SELECT conname, CASE contype WHEN 'p' THEN 'PRIMARY KEY' WHEN 'f' THEN 'FOREIGN KEY' WHEN 'u' THEN 'UNIQUE' WHEN 'c' THEN 'CHECK' WHEN 'x' THEN 'EXCLUDE' ELSE contype::text END, pg_get_constraintdef(oid, true) FROM pg_constraint WHERE conrelid=to_regclass(format('%I.%I', $1::text, $2::text)) ORDER BY 2,1`
 		s := schema
 		if s == "" {
 			s = "public"
@@ -466,7 +473,7 @@ func (h *Handler) Triggers(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	sql := `SELECT trigger_name, event_object_table, event_manipulation, action_timing, action_statement,
-		COALESCE((SELECT tgenabled::text FROM pg_trigger t WHERE t.tgrelid=(event_object_schema||'.'||event_object_table)::regclass AND t.tgname=trigger_name LIMIT 1),'O')
+		COALESCE((SELECT tgenabled::text FROM pg_trigger t WHERE t.tgrelid=to_regclass(format('%I.%I', event_object_schema, event_object_table)) AND t.tgname=trigger_name LIMIT 1),'O')
 		FROM information_schema.triggers WHERE trigger_schema NOT IN ('pg_catalog','information_schema')`
 	var args []any
 	if schema != "" {
@@ -506,9 +513,9 @@ func (h *Handler) TableStats(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	_, data, err := queryJSON(q, ctx, `
-		SELECT pg_size_pretty(pg_total_relation_size(($1||'.'||$2)::regclass)),
-		       pg_size_pretty(pg_relation_size(($1||'.'||$2)::regclass)),
-		       pg_size_pretty(pg_indexes_size(($1||'.'||$2)::regclass)),
+		SELECT pg_size_pretty(pg_total_relation_size(to_regclass(format('%I.%I', $1::text, $2::text)))),
+		       pg_size_pretty(pg_relation_size(to_regclass(format('%I.%I', $1::text, $2::text)))),
+		       pg_size_pretty(pg_indexes_size(to_regclass(format('%I.%I', $1::text, $2::text)))),
 		       COALESCE((SELECT reltuples::bigint FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname=$2),0),
 		       COALESCE(s.seq_scan,0), COALESCE(s.idx_scan,0), COALESCE(s.n_live_tup,0), COALESCE(s.n_dead_tup,0),
 		       COALESCE(s.last_vacuum::text,''), COALESCE(s.last_autovacuum::text,''), COALESCE(s.last_analyze::text,''), COALESCE(s.last_autoanalyze::text,'')
@@ -520,7 +527,7 @@ func (h *Handler) TableStats(w http.ResponseWriter, r *http.Request) {
 	if len(data) == 0 {
 		// table may have no stats row yet (never vacuumed); return sizes only
 		var total, rel, idx string
-		_ = q.QueryRow(ctx, `SELECT pg_size_pretty(pg_total_relation_size(($1||'.'||$2)::regclass)), pg_size_pretty(pg_relation_size(($1||'.'||$2)::regclass)), pg_size_pretty(pg_indexes_size(($1||'.'||$2)::regclass))`, schema, table).Scan(&total, &rel, &idx)
+		_ = q.QueryRow(ctx, `SELECT pg_size_pretty(pg_total_relation_size(to_regclass(format('%I.%I', $1::text, $2::text)))), pg_size_pretty(pg_relation_size(to_regclass(format('%I.%I', $1::text, $2::text)))), pg_size_pretty(pg_indexes_size(to_regclass(format('%I.%I', $1::text, $2::text))))`, schema, table).Scan(&total, &rel, &idx)
 		writeJSON(w, 200, map[string]any{"total_size": total, "table_size": rel, "indexes_size": idx})
 		return
 	}
@@ -633,12 +640,22 @@ func (h *Handler) ERD(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+	// Foreign keys come from pg_constraint/pg_class/pg_attribute (OID joins),
+	// never information_schema constraint-name joins: names like fk_user_id
+	// repeat across tables and cross-match unrelated constraints.
 	_, edges, err := queryJSON(q, ctx, `
-		SELECT tc.constraint_name, tc.table_name, kcu.column_name, ccu.table_schema, ccu.table_name, ccu.column_name
-		FROM information_schema.table_constraints tc
-		JOIN information_schema.key_column_usage kcu ON kcu.constraint_name=tc.constraint_name AND kcu.table_schema=tc.table_schema
-		JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name=tc.constraint_name
-		WHERE tc.constraint_type='FOREIGN KEY' AND tc.table_schema=$1 LIMIT 500`, schema)
+		SELECT con.conname, src.relname, src_att.attname, dst_ns.nspname, dst.relname, dst_att.attname
+		FROM pg_constraint con
+		JOIN pg_class src ON src.oid = con.conrelid
+		JOIN pg_namespace src_ns ON src_ns.oid = src.relnamespace
+		JOIN pg_class dst ON dst.oid = con.confrelid
+		JOIN pg_namespace dst_ns ON dst_ns.oid = dst.relnamespace
+		JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS sk(attnum, ord) ON true
+		JOIN pg_attribute src_att ON src_att.attrelid = src.oid AND src_att.attnum = sk.attnum
+		JOIN LATERAL unnest(con.confkey) WITH ORDINALITY AS tk(attnum, ord) ON tk.ord = sk.ord
+		JOIN pg_attribute dst_att ON dst_att.attrelid = dst.oid AND dst_att.attnum = tk.attnum
+		WHERE con.contype = 'f' AND src_ns.nspname = $1
+		ORDER BY con.conname, sk.ord LIMIT 500`, schema)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -652,12 +669,14 @@ func (h *Handler) ERD(w http.ResponseWriter, r *http.Request) {
 			CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END AS is_pk
 		FROM information_schema.columns c
 		LEFT JOIN (
-			SELECT tc.table_schema, tc.table_name, kcu.column_name
-			FROM information_schema.table_constraints tc
-			JOIN information_schema.key_column_usage kcu
-				ON kcu.constraint_name=tc.constraint_name AND kcu.table_schema=tc.table_schema
-			WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_schema=$1
-		) pk ON pk.table_schema=c.table_schema AND pk.table_name=c.table_name AND pk.column_name=c.column_name
+			SELECT src_ns.nspname AS sn, src.relname AS tn, a.attname AS column_name
+			FROM pg_constraint con
+			JOIN pg_class src ON src.oid = con.conrelid
+			JOIN pg_namespace src_ns ON src_ns.oid = src.relnamespace
+			JOIN LATERAL unnest(con.conkey) AS k(attnum) ON true
+			JOIN pg_attribute a ON a.attrelid = src.oid AND a.attnum = k.attnum
+			WHERE con.contype = 'p' AND src_ns.nspname = $1
+		) pk ON pk.sn = c.table_schema AND pk.tn = c.table_name AND pk.column_name = c.column_name
 		WHERE c.table_schema=$1
 		ORDER BY c.table_name, c.ordinal_position
 		LIMIT 5000`, schema)

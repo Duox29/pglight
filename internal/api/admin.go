@@ -83,7 +83,7 @@ func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	_, tbls, _ := queryJSON(q, ctx, `SELECT schemaname, relname, pg_size_pretty(pg_total_relation_size((schemaname||'.'||relname)::regclass)), seq_scan, idx_scan, n_live_tup, n_dead_tup FROM pg_stat_user_tables ORDER BY pg_total_relation_size((schemaname||'.'||relname)::regclass) DESC LIMIT 20`)
+	_, tbls, _ := queryJSON(q, ctx, `SELECT schemaname, relname, pg_size_pretty(pg_total_relation_size(to_regclass(format('%I.%I', schemaname, relname)))), seq_scan, idx_scan, n_live_tup, n_dead_tup FROM pg_stat_user_tables ORDER BY pg_total_relation_size(to_regclass(format('%I.%I', schemaname, relname))) DESC LIMIT 20`)
 	writeJSON(w, 200, map[string]any{
 		"databases":  rowsToMaps([]string{"name", "backends", "commits", "rollbacks", "disk_reads", "cache_hits", "hit_ratio", "size"}, dbs),
 		"top_tables": rowsToMaps([]string{"schema", "table", "size", "seq_scan", "idx_scan", "live", "dead"}, tbls),
