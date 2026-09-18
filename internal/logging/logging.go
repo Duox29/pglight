@@ -122,11 +122,12 @@ func (l *Logger) UpdateConfig(c Config) (Config, error) {
 	defer l.mu.Unlock()
 	l.cfg = normalize(c)
 	if l.path != "" {
-		if err := os.MkdirAll(filepath.Dir(l.path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(l.path), 0o700); err != nil {
 			return l.cfg, err
 		}
 		raw, _ := json.MarshalIndent(l.cfg, "", "  ")
-		if err := os.WriteFile(l.path, raw, 0o644); err != nil {
+		// The log buffer can hold query text: keep the file private.
+		if err := os.WriteFile(l.path, raw, 0o600); err != nil {
 			return l.cfg, err
 		}
 	}

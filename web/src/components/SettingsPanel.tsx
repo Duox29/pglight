@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { RotateCcw, Save } from 'lucide-react'
+import { RotateCcw, Save, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
@@ -9,6 +9,8 @@ import { Card } from './ui/card'
 import { EmptyNote, ErrorText } from './ui/feedback'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { apiClient, type LoggingConfig } from '@/lib/api'
+import { useAppPreference } from '@/lib/storage'
+import type { DialogsApi } from './dialogs'
 
 const LEVELS = ['debug', 'info', 'warn', 'error']
 
@@ -22,10 +24,13 @@ const DEFAULTS: LoggingConfig = {
   max_entries: 500,
 }
 
-export function SettingsPanel() {
+export function SettingsPanel(p: { dialogs: DialogsApi }) {
   const [cfg, setCfg] = useState<LoggingConfig | null>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [persistHistory, setPersistHistory] = useAppPreference<boolean>('privacy.persistHistory', true)
+  const [persistSnapshots, setPersistSnapshots] = useAppPreference<boolean>('privacy.persistSnapshots', false)
+  const [retentionDays, setRetentionDays] = useAppPreference<number>('privacy.retentionDays', 30)
 
   useEffect(() => {
     let stop = false
@@ -78,6 +83,74 @@ export function SettingsPanel() {
   return (
     <div className="flex flex-col gap-2">
       <ErrorText message={error} />
+      <Card className="p-2.5">
+        <div className="mb-2 text-[12px] font-semibold">Privacy</div>
+        <div className="flex flex-col gap-2 text-[12px]">
+          <p className="text-[11px] text-muted-foreground">
+            Query text, snippets and history live in a private app database (0700/0600). Result rows are the most
+            sensitive part — they restore only when enabled below.
+          </p>
+          <label className="flex items-center justify-between gap-2">
+            <span>Persist query history</span>
+            <Switch checked={persistHistory} onCheckedChange={setPersistHistory} />
+          </label>
+          <label className="flex items-center justify-between gap-2">
+            <span>Restore result snapshots</span>
+            <Switch checked={persistSnapshots} onCheckedChange={setPersistSnapshots} />
+          </label>
+          <p className="-mt-1 text-[11px] text-muted-foreground">Keep up to 50 result rows per tab across reloads.</p>
+          <label className="flex items-center justify-between gap-2">
+            <span>History retention</span>
+            <span className="flex items-center gap-1">
+              <Input
+                type="number"
+                className="w-[80px]"
+                value={retentionDays}
+                onChange={(e) => setRetentionDays(Math.min(365, Math.max(1, Number(e.target.value) || 30)))}
+              />
+              <span className="text-muted-foreground">days</span>
+            </span>
+          </label>
+          <div className="flex gap-1.5">
+            <Button
+              size="sm"
+              variant="secondary"
+              className="flex-1"
+              onClick={async () => {
+                const j = await apiClient.clearHistory()
+                if (j.error) toast.error(j.error)
+                else toast.success('Query history cleared')
+              }}
+            >
+              <Trash2 /> Clear history
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="flex-1"
+              onClick={async () => {
+                const ok = await p.dialogs.confirm({
+                  title: 'Clear all local data?',
+                  description: 'Removes saved tabs, snapshots, preferences and server history. Sessions stay connected.',
+                  confirmText: 'Clear everything',
+                  danger: true,
+                })
+                if (!ok) return
+                await apiClient.clearHistory().catch(() => undefined)
+                try {
+                  localStorage.clear()
+                } catch {
+                  /* best-effort */
+                }
+                toast.success('Local data cleared — reloading')
+                setTimeout(() => window.location.reload(), 600)
+              }}
+            >
+              <Trash2 /> Clear all local data
+            </Button>
+          </div>
+        </div>
+      </Card>
       <Card className="p-2.5">
         <div className="mb-2 text-[12px] font-semibold">Logging (AOP)</div>
         {!cfg ? (

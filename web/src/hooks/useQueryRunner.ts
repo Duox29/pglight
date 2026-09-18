@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { explainToText } from '../components/QueryConsole'
 import { api, apiClient, q } from '../lib/api'
 import { dropSnapshot, ensureSnapshot } from '../lib/schemaCache'
-import { DDL_RE } from '../lib/tabs'
+import { DDL_RE, readJSON } from '../lib/tabs'
 import type { HistoryEntry, Snippet, Tab } from '../types'
 
 export interface QueryRunnerDeps {
@@ -27,6 +27,7 @@ export function useQueryRunner(deps: QueryRunnerDeps) {
   const runSql = useRef<Record<string, string>>({})
 
   useEffect(() => {
+    if (!readJSON<boolean>('privacy.persistHistory', true)) return
     void Promise.all([apiClient.listHistory(), apiClient.listSnippets()]).then(([h, s]) => {
       setHistory(h.history ?? [])
       setSnippets((s.snippets ?? []).map((x) => ({ name: x.name, sql: x.sql })))
@@ -36,6 +37,7 @@ export function useQueryRunner(deps: QueryRunnerDeps) {
   const pushHist = (sql: string, ms?: number, n?: number) => {
     const entry: HistoryEntry = { sql: sql.slice(0, 2000), ms, n, at: new Date().toLocaleTimeString() }
     setHistory((h) => [entry, ...h].slice(0, 200))
+    if (!readJSON<boolean>('privacy.persistHistory', true)) return
     void apiClient.addHistory(entry.sql, ms, n).catch(() => undefined)
   }
 

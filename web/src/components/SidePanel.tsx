@@ -148,7 +148,7 @@ export function SidePanel(p: Props) {
               <LocksView rows={payload as LockRow[]} />
             )}
             {p.view === 'stats' && payload != null && !(payload as { error?: string }).error && <StatsView data={payload as StatsInfo} />}
-            {p.view === 'settings' && <SettingsPanel />}
+            {p.view === 'settings' && <SettingsPanel dialogs={p.dialogs} />}
             {p.view === 'logs' && <LogsPanel />}
           </div>
         )}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func (h *Handler) Snippets(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +89,10 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 500, map[string]string{"error": err.Error()})
 			return
 		}
+		// Enforce the retention policy (Privacy settings, default 30 days,
+		// hard cap 2000 entries) so history cannot grow unbounded.
+		_ = h.Store.PruneHistory(r.Context(), h.UserID,
+			time.Now().AddDate(0, 0, -historyRetentionDays(r.Context(), h)), 2000)
 		writeJSON(w, 200, map[string]bool{"ok": true})
 	case http.MethodGet:
 		xs, err := h.Store.ListHistory(r.Context(), h.UserID, 200)

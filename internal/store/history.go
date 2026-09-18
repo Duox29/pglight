@@ -45,6 +45,23 @@ func (s *Store) AddHistory(ctx context.Context, userID, sqlText string, duration
 	return x, nil
 }
 
+// PruneHistory deletes entries older than before, then caps the per-user
+// history at keepMax rows. Retention is enforced on every add (see History).
+func (s *Store) PruneHistory(ctx context.Context, userID string, before time.Time, keepMax int) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM query_history WHERE user_id=? AND executed_at < ?`,
+		userID, before.UTC().Format(time.RFC3339Nano)); err != nil {
+		return fmt.Errorf("prune history by age: %w", err)
+	}
+	if keepMax > 0 {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM query_history WHERE user_id=? AND id NOT IN (
+			SELECT id FROM query_history WHERE user_id=? ORDER BY executed_at DESC LIMIT ?)`,
+			userID, userID, keepMax); err != nil {
+			return fmt.Errorf("prune history by count: %w", err)
+		}
+	}
+	return nil
+}
+
 func (s *Store) ClearHistory(ctx context.Context, userID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM query_history WHERE user_id=?`, userID)
 	if err != nil {

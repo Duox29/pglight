@@ -28,9 +28,11 @@ export function slimTab(t: Tab): StoredTab | null {
     case 'query': {
       // Keep a capped snapshot of the last result (never auto re-run: the SQL
       // could be DML). Oversized snapshots are dropped to protect storage.
+      // Snapshots hold result data, so they persist only when the Privacy
+      // setting allows it (default off).
       let snapshot: StoredTab['snapshot']
       const r = t.results?.[0]
-      if (r && r.columns?.length && !r.stale) {
+      if (r && r.columns?.length && !r.stale && readJSON<boolean>('privacy.persistSnapshots', false)) {
         const snap = {
           columns: r.columns,
           rows: (r.rows ?? []).slice(0, 50).map((row) => row.map((c) => (typeof c === 'string' ? c.slice(0, 200) : c))),

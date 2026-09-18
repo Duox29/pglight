@@ -23,7 +23,9 @@ func Open(path string) (*Store, error) {
 		path = "data/pglight.db"
 	}
 	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		// Application data can hold query text and snippets: keep the
+		// directory private where the OS supports it.
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("create store directory: %w", err)
 		}
 	}
@@ -31,6 +33,8 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
+	// Best-effort: the file may predate the 0600 policy.
+	_ = os.Chmod(path, 0o600)
 	db.SetMaxOpenConns(1)
 	s := &Store{db: db}
 	if err := s.migrate(context.Background()); err != nil {
