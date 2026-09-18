@@ -7,6 +7,8 @@ export interface SessionInfo {
   user: string
   dbname: string
   sslmode: string
+  /** True when a non-loopback host connects without certificate verification. */
+  tls_warn?: boolean
 }
 
 export interface SavedConnection {

@@ -43,6 +43,7 @@ func (h *Handler) Connect(w http.ResponseWriter, r *http.Request) {
 		id = fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	cs := db.ConnString(req.Host, req.Port, req.User, req.Password, req.DbName, req.SSLMode)
+	req.SSLMode = db.NormalizeSSLMode(req.SSLMode)
 	if err := h.Mgr.Add(id, cs); err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
@@ -61,6 +62,7 @@ func sessionInfo(id string, meta db.ConnMeta, inTxn bool) map[string]any {
 		"id": id, "host": meta.Host, "port": meta.Port, "user": meta.User,
 		"dbname": dbname, "sslmode": meta.SSLMode, "in_txn": inTxn,
 		"connected_at": meta.ConnectedAt.Format(time.RFC3339),
+		"tls_warn":     db.InsecureTLS(meta.Host, meta.SSLMode),
 	}
 }
 

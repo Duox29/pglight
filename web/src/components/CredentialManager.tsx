@@ -9,6 +9,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import type { SessionInfo } from '@/types'
 import type { ConnFields } from './ConnectionBar'
 
+/** Mirrors db.InsecureTLS on the backend: non-loopback host without verify-ca/full. */
+export function isInsecureTls(host: string, sslmode: string): boolean {
+  const h = host.trim().toLowerCase()
+  if (!h || h === 'localhost' || h === '127.0.0.1' || h === '::1') return false
+  if (/^127\./.test(h)) return false
+  const m = sslmode.trim().toLowerCase()
+  return m !== 'verify-ca' && m !== 'verify-full'
+}
+
 interface Props {
   fields: ConnFields
   setFields: (f: ConnFields) => void
@@ -107,6 +116,11 @@ export function CredentialManager(p: Props) {
                             {s.user}@{s.host}/{s.dbname}
                           </span>
                           {dead && <span className="shrink-0 rounded bg-red-500/15 px-1 text-[10px] text-red-400">dead</span>}
+                          {!dead && (s.tls_warn || isInsecureTls(s.host, s.sslmode)) && (
+                            <Tip content="Connected without certificate verification">
+                              <span className="shrink-0 rounded bg-amber-500/15 px-1 text-[10px] text-amber-600 dark:text-amber-400">insecure</span>
+                            </Tip>
+                          )}
                         </button>
                       </Tip>
                       {dead && (
@@ -177,7 +191,7 @@ export function CredentialManager(p: Props) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {['disable', 'prefer', 'require'].map((m) => (
+                  {['disable', 'prefer', 'require', 'verify-ca', 'verify-full'].map((m) => (
                     <SelectItem key={m} value={m}>
                       {m}
                     </SelectItem>
@@ -185,6 +199,11 @@ export function CredentialManager(p: Props) {
                 </SelectContent>
               </Select>
             </div>
+            {isInsecureTls(f.host, f.sslmode) && (
+              <p className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-[11px] text-amber-600 dark:text-amber-400">
+                Non-local host without certificate verification — traffic can be intercepted. Use verify-full with a trusted CA for production.
+              </p>
+            )}
             <div className="flex gap-1.5">
               <Button size="sm" className="flex-1" onClick={p.onConnect}>
                 {p.connected ? <PlugZap /> : <Plug />} Connect

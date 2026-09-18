@@ -13,7 +13,7 @@ import type { SavedConnection, SessionInfo } from '../types'
    live in each tab's own toolbar, bound to that tab's session. No passwords
    persist. Tab-id remapping on reconnect is injected (tabs owner). */
 export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: string) => void }) {
-  const [fields, setFields] = useState<ConnFields>({ host: 'localhost', port: '5432', user: 'postgres', password: '', dbname: 'postgres', sslmode: 'disable' })
+  const [fields, setFields] = useState<ConnFields>({ host: 'localhost', port: '5432', user: 'postgres', password: '', dbname: 'postgres', sslmode: 'prefer' })
   const [saved, setSaved] = useState<SavedConnection[]>([])
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [activeId, setActiveId] = useState<string>('')
@@ -102,7 +102,7 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
       }
       const sid = j.session_id
       const info: SessionInfo = j.info
-        ? { id: sid, host: j.info.host, port: String(j.info.port ?? f.port), user: j.info.user || f.user, dbname: j.info.dbname || dbname, sslmode: j.info.sslmode || f.sslmode }
+        ? { id: sid, host: j.info.host, port: String(j.info.port ?? f.port), user: j.info.user || f.user, dbname: j.info.dbname || dbname, sslmode: j.info.sslmode || f.sslmode, tls_warn: j.info.tls_warn }
         : { id: sid, host: f.host, port: f.port, user: f.user, dbname, sslmode: f.sslmode }
       setSessions((prev) => (prev.some((s) => s.id === sid) ? prev.map((s) => (s.id === sid ? info : s)) : [...prev, info]))
       if (activate) setActiveId(sid)
@@ -274,6 +274,7 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
           user: s.user || '',
           dbname: s.dbname || 'postgres',
           sslmode: s.sslmode || '',
+          tls_warn: s.tls_warn,
         }))
         setSessions((prev) => {
           const ids = new Set(mapped.map((s) => s.id))
