@@ -10,6 +10,9 @@ if [ -n "$OUT" ]; then echo "gofmt dirty:"; echo "$OUT"; exit 1; fi
 echo "== go vet =="
 go vet ./...
 
+echo "== go test =="
+go test ./...
+
 echo "== go build =="
 go build -o /tmp/pglight-check .
 

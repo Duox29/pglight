@@ -17,6 +17,18 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -39,6 +51,18 @@ jobs:
         run: test -z "$(gofmt -l main.go internal/)"
       - name: go vet
         run: go vet ./...
+      - name: go test
+        run: go test ./...
+        env:
+          PGPASSWORD: postgres
+      - name: go test -race
+        run: go test -race ./...
+        env:
+          PGPASSWORD: postgres
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
       - name: go build
         run: go build -o /tmp/pglight-check .
       - name: tsc

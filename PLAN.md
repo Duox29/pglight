@@ -107,9 +107,39 @@ DELETE /api/logs            clear the ring buffer
 GET  /api/aliases           → {aliases: [{trigger,expansion,detail?,builtin}]} (builtins merged with user overrides; global, no session/PG)
 POST /api/aliases           {trigger,expansion} → upsert user entry (trigger: [a-z][a-z0-9_]{0,31}, expansion ≤2000 chars; shadows builtin; 200-entry cap)
 DELETE /api/aliases?trigger= drop one user entry (builtin restored) · DELETE /api/aliases reset all to defaults
+POST /api/rows-delete       {session_id,schema,table,where[]} → {deleted} — atomic bulk delete (one txn; every entry must match exactly 1 row)
+POST /api/row               now accepts {single:true}: update/delete verify exactly 1 affected row (409 otherwise; own txn + rollback outside explicit txns)
 ```
 
-All txn-aware: `/api/query`, `/api/explain`, `/api/table-data`, `/api/row`, `/api/import`, `/api/alter-table`.
+Wire-format policy (exact numerics): int8/numeric/money (and their array
+variants) cross JSON as **strings** with the type OID alongside
+(`jsonSafeCells` in `handlers.go`); request bodies decode with
+`Decoder.UseNumber()`, and `/api/row` + `/api/import` coerce digit-strings
+against the real column `udt_name`, so bigint PKs survive the JS round-trip
+exactly. `resultToInserts`/`quoteLiteral` understand OID type tags.
+
+Txn concurrency: one explicit txn serializes all session operations through
+a per-session mutex (`db.serialQuerier`); Commit/Rollback/Close wait for
+in-flight work. `Manager.Snapshot` reads pool+txn state atomically
+(`/api/import` uses it). Transactions idle >15min are rolled back by the
+sweeper (surfaced via `in_txn: false` on next status poll).
+
+Catalog hardening: foreign-table filter uses `foreign_table_schema`;
+all `(schema||'.'||table)::regclass` lookups use
+`to_regclass(format('%I.%I', …))` (quoted/case/dotted names work); ERD and
+PK detection join `pg_constraint/pg_class/pg_attribute` by OID (duplicate
+constraint names can no longer cross-link). DSN is built from URL parts
+(spaces/IPv6 safe); sslmode allow-list
+`disable|prefer|require|verify-ca|verify-full` (default `prefer`);
+`sessions`/`connect` report `tls_warn` for unverified non-loopback links and
+the Connections panel warns visibly. App data is private: store/logging
+dirs 0700, files 0600; Settings → Privacy controls history persistence,
+result-snapshot restore (default off), retention days (server-enforced
+prune), and clear-history / clear-all-local-data. NULL is real JSON null
+with Set-NULL controls — the `__NULL__` sentinel is gone (literal text
+stores verbatim).
+
+All txn-aware: `/api/query`, `/api/explain`, `/api/table-data`, `/api/row`, `/api/rows-delete`, `/api/import`, `/api/alter-table`.
 
 ## Frontend stack (Phase 2 — shadcn)
 
@@ -164,7 +194,10 @@ frontend change before `go build`.
 ## CI & releases (`.github/workflows/build.yml`)
 
 Every push to `master`, PR, and manual dispatch runs the gate (`gofmt`, `go
-vet`, `tsc`, `eslint`) plus a 9-target matrix build. Tagging `v*` (e.g. `git
+vet`, `go test`, `go test -race`, `govulncheck`, `tsc`, `eslint`) against a
+postgres:14 service (integration tests run live; they skip without a DB)
+plus a 9-target matrix build. Toolchain: `go 1.26.8` via `go-version-file`.
+Tagging `v*` (e.g. `git
 tag v0.3.0 && git push origin v0.3.0`) additionally publishes a GitHub Release
 with all archives attached:
 
