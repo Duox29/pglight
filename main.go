@@ -20,7 +20,7 @@ var webFS embed.FS
 
 func main() {
 	mgr := db.New()
-	mgr.StartSweeper(db.DefaultSweepInterval, db.DefaultIdleTTL)
+	mgr.StartSweeper(db.DefaultSweepInterval, db.DefaultIdleTTL, db.DefaultTxnIdleTTL)
 	appLog := logging.New("data/logging.json")
 	storePath := os.Getenv("PGLIGHT_STORE")
 	appStore, err := store.Open(storePath)
@@ -53,6 +53,7 @@ func main() {
 	mux.HandleFunc("/api/activity", h.Activity)
 	mux.HandleFunc("/api/cancel", h.Cancel)
 	mux.HandleFunc("/api/row", h.RowOp)
+	mux.HandleFunc("/api/rows-delete", h.BatchDelete)
 	mux.HandleFunc("/api/complete", h.Complete)
 	mux.HandleFunc("/api/aliases", h.Aliases)
 	mux.HandleFunc("/api/snippets", h.Snippets)

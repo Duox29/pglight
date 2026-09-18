@@ -7,7 +7,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"log"
+	"net"
 	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -22,15 +25,34 @@ type Querier interface {
 // Manager holds one pgx pool per session plus optional explicit transaction state.
 // Explicit txns (DataGrip/pgAdmin-style) pin a single pooled connection so that
 // subsequent queries in the same session see uncommitted data.
+//
+// Concurrency model: pool queries run concurrently, but once an explicit
+// transaction is open, every operation on that session's pgx.Tx is serialized
+// through the txEntry mutex (see Q). Commit/Rollback/Close wait for any
+// in-flight txn operation to finish instead of racing it.
 type Manager struct {
 	mu       sync.RWMutex
 	pools    map[string]*pgxpool.Pool
-	txConns  map[string]*pgxpool.Conn
-	txs      map[string]pgx.Tx
+	txs      map[string]*txEntry
 	seen     map[string]time.Time
 	metas    map[string]ConnMeta
 	txnLocks map[string]*sync.Mutex
 }
+
+// txEntry is one open explicit transaction: the pinned connection, the pgx
+// transaction, and a mutex serializing all use of that transaction. done is
+// set once the txn is committed/rolled back so late arrivals fail cleanly
+// instead of touching a closed transaction. lastUse backs the
+// abandoned-transaction sweeper.
+type txEntry struct {
+	mu      sync.Mutex
+	tx      pgx.Tx
+	conn    *pgxpool.Conn
+	done    bool
+	lastUse time.Time
+}
+
+func (e *txEntry) touch() { e.lastUse = time.Now() }
 
 // ConnMeta is display-only connection info for a session (no password).
 type ConnMeta struct {
@@ -52,8 +74,7 @@ type SessionInfo struct {
 func New() *Manager {
 	return &Manager{
 		pools:    make(map[string]*pgxpool.Pool),
-		txConns:  make(map[string]*pgxpool.Conn),
-		txs:      make(map[string]pgx.Tx),
+		txs:      make(map[string]*txEntry),
 		seen:     make(map[string]time.Time),
 		metas:    make(map[string]ConnMeta),
 		txnLocks: make(map[string]*sync.Mutex),
@@ -81,21 +102,70 @@ func (m *Manager) txnLock(id string) *sync.Mutex {
 	return l
 }
 
+// validSSLModes is the full meaningful PostgreSQL set. Unknown values fall
+// back to prefer (encrypted when the server offers it, plaintext otherwise).
+var validSSLModes = map[string]bool{
+	"disable": true, "prefer": true, "require": true,
+	"verify-ca": true, "verify-full": true,
+}
+
+// NormalizeSSLMode lowercases/trims and allow-lists the sslmode; anything
+// unknown (or empty) becomes prefer.
+func NormalizeSSLMode(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if validSSLModes[s] {
+		return s
+	}
+	return "prefer"
+}
+
+// IsLoopbackHost reports whether host is a loopback address or name.
+func IsLoopbackHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "" || h == "localhost" || h == "127.0.0.1" || h == "::1" {
+		return true
+	}
+	if ip := net.ParseIP(strings.Trim(h, "[]")); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// InsecureTLS reports whether connecting to host with sslmode skips
+// certificate verification — worth a visible warning for non-loopback hosts.
+func InsecureTLS(host, sslmode string) bool {
+	if IsLoopbackHost(host) {
+		return false
+	}
+	m := NormalizeSSLMode(sslmode)
+	return m != "verify-ca" && m != "verify-full"
+}
+
 func ConnString(host string, port int, user, password, dbname, sslmode string) string {
 	if port == 0 {
 		port = 5432
 	}
-	if sslmode == "" {
-		sslmode = "disable"
-	}
+	sslmode = NormalizeSSLMode(sslmode)
 	if dbname == "" {
 		dbname = "postgres"
 	}
 	if host == "" {
 		host = "localhost"
 	}
-	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		url.QueryEscape(user), url.QueryEscape(password), host, port, url.QueryEscape(dbname), url.QueryEscape(sslmode))
+	// Build the URL from parts instead of Sprintf: UserPassword encodes
+	// userinfo correctly (QueryEscape turned spaces into `+`, which is not
+	// a space outside query strings), JoinHostPort brackets IPv6, and
+	// Path escaping handles special characters in the database name.
+	u := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(user, password),
+		Host:   net.JoinHostPort(host, strconv.Itoa(port)),
+		Path:   "/" + dbname,
+	}
+	q := u.Query()
+	q.Set("sslmode", sslmode)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func (m *Manager) Add(id, connStr string) error {
@@ -135,19 +205,20 @@ func (m *Manager) Add(id, connStr string) error {
 	}
 	m.mu.Lock()
 	oldPool := m.pools[id]
-	oldConn := m.txConns[id]
-	oldTx := m.txs[id]
-	delete(m.txConns, id)
+	oldEntry := m.txs[id]
 	delete(m.txs, id)
 	m.pools[id] = pool
 	m.seen[id] = time.Now()
 	m.mu.Unlock()
 
-	if oldTx != nil {
-		_ = oldTx.Rollback(context.Background())
-	}
-	if oldConn != nil {
-		oldConn.Release()
+	if oldEntry != nil {
+		oldEntry.mu.Lock()
+		if !oldEntry.done {
+			_ = oldEntry.tx.Rollback(context.Background())
+			oldEntry.done = true
+		}
+		oldEntry.mu.Unlock()
+		oldEntry.conn.Release()
 	}
 	if oldPool != nil {
 		oldPool.Close()
@@ -190,21 +261,23 @@ func (m *Manager) Close(id string) {
 	defer lock.Unlock()
 
 	m.mu.Lock()
-	tx := m.txs[id]
-	conn := m.txConns[id]
+	entry := m.txs[id]
 	pool := m.pools[id]
 	delete(m.txs, id)
-	delete(m.txConns, id)
 	delete(m.pools, id)
 	delete(m.seen, id)
 	delete(m.metas, id)
 	m.mu.Unlock()
 
-	if tx != nil {
-		_ = tx.Rollback(context.Background())
-	}
-	if conn != nil {
-		conn.Release()
+	if entry != nil {
+		// Wait for any in-flight txn operation before tearing down.
+		entry.mu.Lock()
+		if !entry.done {
+			_ = entry.tx.Rollback(context.Background())
+			entry.done = true
+		}
+		entry.mu.Unlock()
+		entry.conn.Release()
 	}
 	if pool != nil {
 		pool.Close()
@@ -260,8 +333,20 @@ func (m *Manager) List() []SessionInfo {
 func (m *Manager) InTxn(id string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	_, ok := m.txs[id]
-	return ok
+	e, ok := m.txs[id]
+	return ok && e != nil && !e.done
+}
+
+// Snapshot returns the pool and txn state for a session atomically, so
+// callers never observe Get() and InTxn() from different points in time.
+func (m *Manager) Snapshot(id string) (pool *pgxpool.Pool, hasPool, inTxn bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	pool, hasPool = m.pools[id]
+	if e, ok := m.txs[id]; ok && e != nil && !e.done {
+		inTxn = true
+	}
+	return pool, hasPool, inTxn
 }
 
 // Begin starts an explicit transaction for the session.
@@ -294,75 +379,156 @@ func (m *Manager) Begin(ctx context.Context, id string) error {
 	m.mu.Lock()
 	// The per-session lifecycle lock prevents another Begin/Close from
 	// changing this state while the PostgreSQL operation was in flight.
-	m.txConns[id] = conn
-	m.txs[id] = tx
+	m.txs[id] = &txEntry{tx: tx, conn: conn, lastUse: time.Now()}
 	m.seen[id] = time.Now()
 	m.mu.Unlock()
 	return nil
 }
 
 // Commit commits the session transaction and releases the pinned connection.
+// It waits for any in-flight txn query to finish first, so Query+Commit from
+// two tabs cannot race on the underlying connection.
 func (m *Manager) Commit(ctx context.Context, id string) error {
 	lock := m.txnLock(id)
 	lock.Lock()
 	defer lock.Unlock()
 
 	m.mu.RLock()
-	tx, ok := m.txs[id]
-	conn := m.txConns[id]
+	e, ok := m.txs[id]
 	m.mu.RUnlock()
-	if !ok {
+	if !ok || e == nil {
 		return fmt.Errorf("no open transaction")
 	}
 
-	err := tx.Commit(ctx)
-	if conn != nil {
-		conn.Release()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.done {
+		return fmt.Errorf("no open transaction")
 	}
+	err := e.tx.Commit(ctx)
+	e.done = true
+	e.conn.Release()
 	m.mu.Lock()
 	delete(m.txs, id)
-	delete(m.txConns, id)
 	m.seen[id] = time.Now()
 	m.mu.Unlock()
 	return err
 }
 
 // Rollback aborts the session transaction and releases the pinned connection.
+// Like Commit, it waits for in-flight txn work before rolling back.
 func (m *Manager) Rollback(ctx context.Context, id string) error {
 	lock := m.txnLock(id)
 	lock.Lock()
 	defer lock.Unlock()
 
 	m.mu.RLock()
-	tx, ok := m.txs[id]
-	conn := m.txConns[id]
+	e, ok := m.txs[id]
 	m.mu.RUnlock()
-	if !ok {
+	if !ok || e == nil {
 		return fmt.Errorf("no open transaction")
 	}
 
-	err := tx.Rollback(ctx)
-	if conn != nil {
-		conn.Release()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.done {
+		return fmt.Errorf("no open transaction")
 	}
+	err := e.tx.Rollback(ctx)
+	e.done = true
+	e.conn.Release()
 	m.mu.Lock()
 	delete(m.txs, id)
-	delete(m.txConns, id)
 	m.seen[id] = time.Now()
 	m.mu.Unlock()
 	return err
 }
 
-// Q returns the query target for a session: the open txn when present,
-// otherwise the pool. Caller must NOT close/release the result.
+// serialQuerier serializes every operation on one explicit transaction so
+// concurrent HTTP requests from multiple tabs cannot share the underlying
+// PostgreSQL connection. Pool queries bypass it and stay concurrent.
+type serialQuerier struct {
+	e *txEntry
+}
+
+func (s serialQuerier) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	s.e.mu.Lock()
+	if s.e.done {
+		s.e.mu.Unlock()
+		return nil, fmt.Errorf("transaction already closed")
+	}
+	s.e.touch()
+	rows, err := s.e.tx.Query(ctx, sql, args...)
+	if err != nil {
+		s.e.mu.Unlock()
+		return nil, err
+	}
+	return serialRows{Rows: rows, unlock: sync.OnceFunc(s.e.mu.Unlock)}, nil
+}
+
+func (s serialQuerier) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	s.e.mu.Lock()
+	defer s.e.mu.Unlock()
+	if s.e.done {
+		return pgconn.CommandTag{}, fmt.Errorf("transaction already closed")
+	}
+	s.e.touch()
+	return s.e.tx.Exec(ctx, sql, args...)
+}
+
+func (s serialQuerier) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	s.e.mu.Lock()
+	if s.e.done {
+		s.e.mu.Unlock()
+		return closedRow{err: fmt.Errorf("transaction already closed")}
+	}
+	s.e.touch()
+	return serialRow{Row: s.e.tx.QueryRow(ctx, sql, args...), unlock: sync.OnceFunc(s.e.mu.Unlock)}
+}
+
+// serialRows releases the txn mutex when the result set is closed. Handlers
+// already defer rows.Close(), so a forgotten Close can only hold the lock
+// until the transaction ends.
+type serialRows struct {
+	pgx.Rows
+	unlock func()
+}
+
+func (r serialRows) Close() {
+	r.Rows.Close()
+	r.unlock()
+}
+
+// serialRow releases the txn mutex on first Scan. pgx performs its network
+// work in Scan, so the lock must span QueryRow→Scan.
+type serialRow struct {
+	pgx.Row
+	unlock func()
+}
+
+func (r serialRow) Scan(dest ...any) error {
+	defer r.unlock()
+	return r.Row.Scan(dest...)
+}
+
+// closedRow is a pgx.Row that always fails (used after txn end).
+type closedRow struct {
+	err error
+}
+
+func (r closedRow) Scan(...any) error { return r.err }
+
+// Q returns the query target for a session: a serialized view of the open
+// txn when present, otherwise the pool. Caller must Close pgx.Rows and Scan
+// pgx.Row promptly so the txn lock is released; Exec needs no cleanup.
 func (m *Manager) Q(id string) (Querier, bool) {
 	m.mu.RLock()
-	tx, hasTx := m.txs[id]
+	e, hasTx := m.txs[id]
 	p, hasPool := m.pools[id]
 	m.mu.RUnlock()
-	if hasTx {
+	if hasTx && e != nil {
 		m.touch(id)
-		return tx, true
+		return serialQuerier{e}, true
 	}
 	if !hasPool {
 		return nil, false
@@ -375,12 +541,12 @@ func (m *Manager) Q(id string) (Querier, bool) {
 // helpers but must stay txn-aware. It returns the txn when open.
 func (m *Manager) PoolOrTxn(id string) (Querier, *pgxpool.Pool, bool) {
 	m.mu.RLock()
-	tx, hasTx := m.txs[id]
+	e, hasTx := m.txs[id]
 	p, hasPool := m.pools[id]
 	m.mu.RUnlock()
-	if hasTx {
+	if hasTx && e != nil {
 		m.touch(id)
-		return tx, nil, true
+		return serialQuerier{e}, nil, true
 	}
 	if hasPool {
 		m.touch(id)
@@ -390,10 +556,13 @@ func (m *Manager) PoolOrTxn(id string) (Querier, *pgxpool.Pool, bool) {
 
 // Sweep tuning: idle sessions (no query/txn/connect activity) are closed to
 // release their postgres connections. Sessions with an open explicit
-// transaction are spared — rolling those back silently could lose user work.
+// transaction are spared by SweepIdle — but a browser tab abandoned
+// mid-transaction would otherwise hold locks and block vacuum forever, so
+// SweepAbandonedTxns rolls back transactions idle longer than txnTTL.
 const (
 	DefaultSweepInterval = 5 * time.Minute
 	DefaultIdleTTL       = 30 * time.Minute
+	DefaultTxnIdleTTL    = 15 * time.Minute
 )
 
 // SweepIdle closes sessions idle longer than ttl (except open-txn ones) and
@@ -416,14 +585,48 @@ func (m *Manager) SweepIdle(ttl time.Duration) []string {
 	return stale
 }
 
+// SweepAbandonedTxns rolls back explicit transactions idle longer than ttl
+// and returns the affected session ids. The UI learns about it on its next
+// txn-status poll (in_txn flips to false), so abandoned work is surfaced
+// instead of silently holding locks.
+func (m *Manager) SweepAbandonedTxns(ttl time.Duration) []string {
+	cutoff := time.Now().Add(-ttl)
+	m.mu.RLock()
+	var stale []string
+	for id, e := range m.txs {
+		if e == nil {
+			continue
+		}
+		e.mu.Lock()
+		idle := e.lastUse.Before(cutoff) && !e.done
+		e.mu.Unlock()
+		if idle {
+			stale = append(stale, id)
+		}
+	}
+	m.mu.RUnlock()
+	var rolled []string
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, id := range stale {
+		if err := m.Rollback(ctx, id); err == nil {
+			rolled = append(rolled, id)
+		}
+	}
+	return rolled
+}
+
 // StartSweeper reaps idle sessions every interval until the process exits.
-func (m *Manager) StartSweeper(interval, ttl time.Duration) {
+func (m *Manager) StartSweeper(interval, ttl, txnTTL time.Duration) {
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for range t.C {
 			for _, id := range m.SweepIdle(ttl) {
 				log.Printf("pglight: swept idle session %s", id)
+			}
+			for _, id := range m.SweepAbandonedTxns(txnTTL) {
+				log.Printf("pglight: rolled back abandoned transaction for session %s", id)
 			}
 		}
 	}()
