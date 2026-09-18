@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"pglight/internal/store"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -69,6 +72,114 @@ func sessionFromBody(id string, r *http.Request) string {
 	return sessionID(r)
 }
 
+// decodeBody decodes a JSON request body preserving numeric fidelity:
+// json.Number keeps arbitrary precision instead of collapsing to float64.
+// Callers convert numbers via numVal before passing them to PostgreSQL.
+func decodeBody(r *http.Request, v any) error {
+	dec := json.NewDecoder(r.Body)
+	dec.UseNumber()
+	return dec.Decode(v)
+}
+
+// numVal converts a decoded JSON number to the most exact Go value: integral
+// numbers become int64 (exact through pgx), decimals stay float64 unless the
+// caller coerces them against a known column type. Non-numbers pass through.
+func numVal(v any) any {
+	n, ok := v.(json.Number)
+	if !ok {
+		return v
+	}
+	if i, err := n.Int64(); err == nil && json.Number(strconv.FormatInt(i, 10)) == n {
+		return i
+	}
+	if f, err := n.Float64(); err == nil {
+		return f
+	}
+	return string(n)
+}
+
+// numVals maps numVal over a slice (import rows) or a map (row ops).
+func numRow(row []any) []any {
+	for i, v := range row {
+		row[i] = numVal(v)
+	}
+	return row
+}
+
+func numMap(m map[string]any) map[string]any {
+	for k, v := range m {
+		m[k] = numVal(v)
+	}
+	return m
+}
+
+// exactOIDs are PostgreSQL types whose values lose precision as JSON/JS
+// numbers (IEEE-754 doubles only cover ±2^53 exactly). int8, numeric and
+// money cross the wire as strings; the type OID alongside tells the frontend
+// how to render and send them back. Array variants are element-wise strings.
+var exactOIDs = map[uint32]bool{
+	20:   true, // int8
+	790:  true, // money (pgx decodes as text already; kept for arrays)
+	1700: true, // numeric
+	1016: true, // _int8
+	791:  true, // _money
+	1231: true, // _numeric
+}
+
+// jsonSafeCells converts exact-numeric pgx values to strings before JSON
+// encoding so JavaScript cannot silently corrupt them (e.g. int8 PKs above
+// 9007199254740991). All other values pass through untouched.
+func jsonSafeCells(vals []any, fds []pgconn.FieldDescription) []any {
+	for i, v := range vals {
+		if v == nil {
+			continue
+		}
+		var oid uint32
+		if i < len(fds) {
+			oid = fds[i].DataTypeOID
+		}
+		if exactOIDs[oid] {
+			vals[i] = exactString(v)
+		}
+	}
+	return vals
+}
+
+func exactString(v any) any {
+	switch n := v.(type) {
+	case int64:
+		return strconv.FormatInt(n, 10)
+	case int32:
+		return strconv.FormatInt(int64(n), 10)
+	case int:
+		return strconv.Itoa(n)
+	case uint64:
+		return strconv.FormatUint(n, 10)
+	case pgtype.Numeric:
+		if s, err := n.Value(); err == nil {
+			if str, ok := s.(string); ok {
+				return str
+			}
+		}
+		if b, err := n.MarshalJSON(); err == nil {
+			return string(b)
+		}
+		return fmt.Sprint(v)
+	case string:
+		return n
+	default:
+		rv := reflect.ValueOf(v)
+		if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+			out := make([]any, rv.Len())
+			for i := 0; i < rv.Len(); i++ {
+				out[i] = exactString(rv.Index(i).Interface())
+			}
+			return out
+		}
+		return v
+	}
+}
+
 func queryJSON(q db.Querier, ctx context.Context, sql string, args ...any) ([]string, [][]any, error) {
 	rows, err := q.Query(ctx, sql, args...)
 	if err != nil {
@@ -91,7 +202,7 @@ func queryJSON(q db.Querier, ctx context.Context, sql string, args ...any) ([]st
 				vals[i] = string(b)
 			}
 		}
-		data = append(data, vals)
+		data = append(data, jsonSafeCells(vals, fields))
 	}
 	return cols, data, rows.Err()
 }
@@ -226,10 +337,14 @@ func (h *Handler) execQuery(w http.ResponseWriter, r *http.Request, qq db.Querie
 				vals[i] = string(b)
 			}
 		}
-		data = append(data, vals)
+		data = append(data, jsonSafeCells(vals, fields))
 		if len(data) >= 1001 {
 			break
 		}
+	}
+	if err := rows.Err(); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
 	}
 	cmd := rows.CommandTag()
 	hasMore := false

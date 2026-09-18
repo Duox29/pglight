@@ -344,7 +344,7 @@ func (h *Handler) runSingle(r *http.Request, qq db.Querier, sql string, limit in
 				vals[i] = string(b)
 			}
 		}
-		data = append(data, vals)
+		data = append(data, jsonSafeCells(vals, fields))
 		if len(data) >= 1000 {
 			break
 		}
