@@ -319,10 +319,10 @@ const SECTIONS: Section[] = [
           <P>The header shows the table name with <K>schema, total rows,</K> and <K>owner</K>. Use the <K>WHERE</K> box (for example <K>id &gt; 10</K>) and the <K>ORDER</K> box (for example <K>id DESC</K>), then <K>Apply</K>. Page with <K>Previous</K> and <K>Next</K>. The meta line shows row count, total, duration, and the edit hint.</P>
           <H>To edit, insert, or delete a row</H>
           <Ol>
-            <Li>Double-click a cell to edit it. Type <K>__NULL__</K> for NULL. Editing requires a primary key. A NULL primary key value blocks the edit. The server refuses UPDATE and DELETE without a key.</Li>
+            <Li>Double-click a cell to edit it. Use the <K>Set NULL</K> button for NULL. Editing requires a primary key. A NULL primary key value blocks the edit. Single edits and deletes are PK-scoped and the server refuses them unless exactly one row matches. The server refuses UPDATE and DELETE without a key.</Li>
             <Li>Single-click selects. Right-click a cell copies its value.</Li>
             <Li>Use the row action buttons to copy the row as INSERT or to delete the row with confirmation.</Li>
-            <Li>Use the <K>Row</K> button to open the insert form. Empty means skip the column. <K>__NULL__</K> means NULL.</Li>
+            <Li>Use the <K>Row</K> button to open the insert form. Empty means skip the column. The per-field <K>N</K> toggle means NULL.</Li>
           </Ol>
           <H>Bulk selection</H>
           <Ul>
@@ -342,10 +342,10 @@ const SECTIONS: Section[] = [
           <P>Header hiển thị tên bảng kèm <K>schema, tổng rows</K> và <K>owner</K>. Dùng ô <K>WHERE</K> (ví dụ <K>id &gt; 10</K>) và ô <K>ORDER</K> (ví dụ <K>id DESC</K>), rồi chọn <K>Apply</K>. Phân trang bằng <K>Previous</K> và <K>Next</K>. Dòng meta hiển thị số dòng, tổng, thời gian và gợi ý sửa.</P>
           <H>Để sửa, thêm hoặc xóa dòng</H>
           <Ol>
-            <Li>Double-click một cell để sửa. Nhập <K>__NULL__</K> cho NULL. Sửa cần primary key. Giá trị primary key NULL sẽ chặn sửa. Server từ chối UPDATE và DELETE không khóa.</Li>
+            <Li>Double-click một cell để sửa. Dùng nút <K>Set NULL</K> cho NULL. Sửa cần primary key. Giá trị primary key NULL sẽ chặn sửa. Sửa/xóa một dòng theo khóa chính và server từ chối trừ khi khớp đúng một dòng. Server từ chối UPDATE và DELETE không khóa.</Li>
             <Li>Single-click để chọn. Chuột phải lên cell để copy giá trị.</Li>
             <Li>Dùng nút actions trên dòng để copy dòng dạng INSERT hoặc xóa dòng kèm xác nhận.</Li>
-            <Li>Dùng nút <K>Row</K> để mở form insert. Ô trống nghĩa là bỏ qua cột. <K>__NULL__</K> nghĩa là NULL.</Li>
+            <Li>Dùng nút <K>Row</K> để mở form insert. Ô trống nghĩa là bỏ qua cột. Nút <K>N</K> từng ô nghĩa là NULL.</Li>
           </Ol>
           <H>Chọn nhiều dòng</H>
           <Ul>

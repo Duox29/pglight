@@ -74,6 +74,7 @@ export interface SessionInfo {
   sslmode?: string
   in_txn?: boolean
   connected_at?: string
+  tls_warn?: boolean
 }
 
 export const q = (session: string, path: string) =>
@@ -117,8 +118,16 @@ export const apiClient = {
     op: string
     values: Record<string, unknown>
     where: Record<string, unknown>
+    /** Single-row UI action: backend guarantees exactly one row affected. */
+    single?: boolean
   }) =>
     api<{ rows_affected?: number; in_txn?: boolean; error?: string }>('/api/row', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(p),
+    }),
+  batchDelete: (p: { session_id: string; schema: string; table: string; where: Record<string, unknown>[] }) =>
+    api<{ deleted?: number; in_txn?: boolean; error?: string }>('/api/rows-delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(p),

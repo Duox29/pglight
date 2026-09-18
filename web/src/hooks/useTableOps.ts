@@ -120,7 +120,7 @@ export function useTableOps(deps: TableOpsDeps) {
   )
 
   const rowOp = useCallback(
-    async (tabId: string, op: string, values: Record<string, unknown>, where: Record<string, unknown>) => {
+    async (tabId: string, op: string, values: Record<string, unknown>, where: Record<string, unknown>, single?: boolean) => {
       const t = tabs.find((x) => x.id === tabId)
       if (!t || t.kind !== 'table' || !t.sessionId) return
       const sid = t.sessionId
@@ -129,7 +129,7 @@ export function useTableOps(deps: TableOpsDeps) {
           const st = await apiClient.txn(sid, 'status')
           if (!st.in_txn) await apiClient.txn(sid, 'begin')
         }
-        const j = await apiClient.rowOp({ session_id: sid, schema: t.schema, table: t.table, op, values, where })
+        const j = await apiClient.rowOp({ session_id: sid, schema: t.schema, table: t.table, op, values, where, single })
         if (j.error) {
           toast.error(j.error)
           return

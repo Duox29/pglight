@@ -445,24 +445,33 @@ export default function App() {
                     toast.error(`Primary key column ${missing.join(', ')} is NULL — cannot identify this row`)
                     return
                   }
-                  const v = await dialogs.prompt({
+                  const v = await dialogs.promptNullable({
                     title: `Edit ${col}`,
-                    description: 'Type __NULL__ for NULL',
-                    defaultValue: orig[col] == null ? '__NULL__' : String(orig[col]),
+                    description: 'Leave empty to keep the value as-is, or Set NULL for NULL',
+                    defaultValue: orig[col] == null ? '' : String(orig[col]),
                   })
                   if (v == null) return
+                  const value = typeof v === 'object' ? null : v
                   const where: Record<string, unknown> = {}
                   for (const k of keys) where[k] = orig[k]
-                  tableApi.rowOp(cur.id, 'update', { [col]: v }, where)
+                  tableApi.rowOp(cur.id, 'update', { [col]: value }, where, true)
                 }}
                 onDeleteRow={async (orig) => {
+                  const keys = pkOf(cur)
+                  if (!keys.length) {
+                    toast.error('No primary key — deletion is disabled for this table')
+                    return
+                  }
                   const ok = await dialogs.confirm({
                     title: 'Delete row?',
                     description: `This will delete this row from ${cur.schema}.${cur.table}.`,
                     confirmText: 'Delete',
                     danger: true,
                   })
-                  if (ok) tableApi.rowOp(cur.id, 'delete', {}, orig)
+                  if (!ok) return
+                  const where: Record<string, unknown> = {}
+                  for (const k of keys) where[k] = orig[k]
+                  tableApi.rowOp(cur.id, 'delete', {}, where, true)
                 }}
                 onCopyInsert={(orig) => {
                   explorerApi.copyName(resultToInserts(Object.keys(orig), [Object.values(orig)], `${qi(cur.schema)}.${qi(cur.table)}`))
@@ -488,6 +497,11 @@ export default function App() {
                     toast.error('Session closed — reconnect to delete rows')
                     return
                   }
+                  const keys = pkOf(cur)
+                  if (!keys.length) {
+                    toast.error('No primary key — deletion is disabled for this table')
+                    return
+                  }
                   const ok = await dialogs.confirm({
                     title: `Delete ${rows.length} row${rows.length === 1 ? '' : 's'}?`,
                     description: `This will delete ${rows.length} row${rows.length === 1 ? '' : 's'} from ${cur.schema}.${cur.table}.`,
@@ -496,20 +510,15 @@ export default function App() {
                   })
                   if (!ok) return
                   try {
-                    if (!sessionsApi.autocommit) {
-                      const st = await apiClient.txn(cur.sessionId, 'status')
-                      if (!st.in_txn) await apiClient.txn(cur.sessionId, 'begin')
+                    // PK-only predicates; the server deletes them in one
+                    // transaction and aborts on the first non-unique match.
+                    const where = rows.map((r) => Object.fromEntries(keys.map((k) => [k, r[k]])))
+                    const j = await apiClient.batchDelete({ session_id: cur.sessionId, schema: cur.schema, table: cur.table, where })
+                    if (j.error) toast.error(j.error)
+                    else {
+                      sessionsApi.markTxn(cur.sessionId, !!j.in_txn)
+                      toast.success(`Deleted ${j.deleted ?? rows.length} row${(j.deleted ?? rows.length) === 1 ? '' : 's'}`)
                     }
-                    let failed = 0
-                    let curTxn = false
-                    for (const w of rows) {
-                      const j = await apiClient.rowOp({ session_id: cur.sessionId, schema: cur.schema, table: cur.table, op: 'delete', values: {}, where: w })
-                      if (j.error) failed++
-                      curTxn = !!j.in_txn
-                    }
-                    sessionsApi.markTxn(cur.sessionId, curTxn)
-                    if (failed) toast.error(`Failed to delete ${failed} row${failed === 1 ? '' : 's'}`)
-                    else toast.success(`Deleted ${rows.length} row${rows.length === 1 ? '' : 's'}`)
                     tableApi.loadTablePage(cur.sessionId, cur.id, cur.schema, cur.table, cur.limit, cur.offset, cur.filter, cur.order)
                   } catch (e) {
                     toast.error(e instanceof Error ? e.message : String(e))
@@ -520,13 +529,16 @@ export default function App() {
                   if (!cur.result) return
                   const vals = await dialogs.form({
                     title: `Insert into ${cur.schema}.${cur.table}`,
-                    description: 'Empty = skip · __NULL__ = NULL',
-                    fields: cur.result.columns.map((c) => ({ key: c, label: c })),
+                    description: 'Empty = skip · per-field N button = NULL',
+                    fields: cur.result.columns.map((c) => ({ key: c, label: c, allowNull: true })),
                     submitText: 'Insert',
                   })
                   if (!vals) return
                   const clean: Record<string, unknown> = {}
-                  for (const [k, v] of Object.entries(vals)) if (v !== '') clean[k] = v
+                  for (const [k, v] of Object.entries(vals)) {
+                    if (v === null) clean[k] = null
+                    else if (v !== '') clean[k] = v
+                  }
                   tableApi.rowOp(cur.id, 'insert', clean, {})
                 }}
                 onMaintenance={async (op) => {

@@ -9,16 +9,47 @@ export function quoteQualified(schema: string, table: string): string {
   return `${quoteIdent(schema)}.${quoteIdent(table)}`
 }
 
-/** Serialize a driver value to a SQL literal. Objects/arrays use JSON. */
+/** PostgreSQL type OIDs the backend sends in QueryResult.types. Exact
+ * numerics (int8/numeric/money) cross the wire as strings — see handlers.go
+ * jsonSafeCells — so literals must recognize OIDs, not just type names. */
+const PG_NUMERIC_OIDS = new Set([
+  '20', '21', '23', // int8, int2, int4
+  '700', '701', // float4, float8
+  '790', '1700', // money, numeric
+  '1005', '1007', '1016', // _int2, _int4, _int8
+  '1021', '1022', // _float4, _float8
+  '791', '1231', // _money, _numeric
+])
+
+const PG_NUMERIC_NAMES = ['int', 'serial', 'numeric', 'decimal', 'float', 'double', 'real', 'money']
+
+function isNumericType(type?: string): boolean {
+  if (!type) return false
+  const t = type.toLowerCase()
+  if (PG_NUMERIC_OIDS.has(t)) return true
+  return PG_NUMERIC_NAMES.some((n) => t.includes(n))
+}
+
+/** Canonical numeric literal (no quotes, no whitespace) safe to emit bare. */
+function isBareNumber(s: string): boolean {
+  return /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(s)
+}
+
+/** Serialize a driver value to a SQL literal. String-encoded exact numerics
+ * (backend wire format for int8/numeric/money) emit bare when the column
+ * type is numeric; everything else quotes as text. */
 export function quoteLiteral(v: unknown, type?: string): string {
   if (v == null) return 'NULL'
   if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE'
   if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL'
   if (typeof v === 'bigint') return String(v)
+  if (typeof v === 'string') {
+    if (isNumericType(type) && isBareNumber(v)) return v
+    return `'${v.replace(/'/g, "''")}'`
+  }
   if (typeof v === 'object') {
-    const t = (type ?? '').toLowerCase()
-    if (Array.isArray(v) && (t.includes('int') || t.includes('numeric') || t.includes('float') || t.includes('double') || t.includes('real') || t.includes('decimal'))) {
-      return `ARRAY[${v.map((x) => quoteLiteral(x)).join(', ')}]`
+    if (Array.isArray(v) && isNumericType(type)) {
+      return `ARRAY[${v.map((x) => quoteLiteral(x, type)).join(', ')}]`
     }
     return `'${JSON.stringify(v).replace(/'/g, "''")}'`
   }

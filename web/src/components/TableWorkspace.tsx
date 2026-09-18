@@ -311,10 +311,12 @@ export function TableWorkspace(p: Props) {
                                   <Copy className="h-3 w-3" />
                                 </Button>
                               </Tip>
-                              <Tip content="Delete row">
-                                <Button size="sm" variant="ghost" aria-label="Delete row" onClick={() => p.onDeleteRow(orig)}>
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
+                              <Tip content={hasIdentity ? 'Delete row' : 'No primary key — deletion disabled'}>
+                                <span className="inline-flex">
+                                  <Button size="sm" variant="ghost" aria-label="Delete row" disabled={!hasIdentity} onClick={() => p.onDeleteRow(orig)}>
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </span>
                               </Tip>
                             </div>
                           </TableCell>
@@ -338,8 +340,8 @@ export function TableWorkspace(p: Props) {
                   Copy
                 </ContextMenuItem>
                 <ContextMenuSeparator />
-                <ContextMenuItem disabled={!selRecs.length} className="text-red-400 focus:text-red-400" onSelect={() => p.onDeleteRows(selRecs)}>
-                  Delete
+                <ContextMenuItem disabled={!selRecs.length || !hasIdentity} className="text-red-400 focus:text-red-400" onSelect={() => p.onDeleteRows(selRecs)}>
+                  {hasIdentity ? 'Delete' : 'Delete (no primary key)'}
                 </ContextMenuItem>
               </ContextMenuContent>
             </ContextMenu>

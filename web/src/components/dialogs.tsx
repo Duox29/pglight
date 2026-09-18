@@ -20,6 +20,8 @@ export interface FormField {
   key: string
   label: string
   placeholder?: string
+  /** When true the field renders a NULL toggle; a nulled field resolves to null. */
+  allowNull?: boolean
 }
 
 export interface PendingDialog {
@@ -32,14 +34,18 @@ export interface PendingDialog {
   danger?: boolean
   placeholder?: string
   defaultValue?: string
+  /** Prompt shows an extra "Set NULL" action resolving { isNull: true }. */
+  nullable?: boolean
   fields?: FormField[]
-  resolve: (v: boolean | string | Record<string, string> | null) => void
+  resolve: (v: boolean | string | Record<string, string | null> | { isNull: boolean } | null) => void
 }
 
 export interface DialogsApi {
   confirm: (o: { title: string; description?: string; confirmText?: string; danger?: boolean }) => Promise<boolean>
   prompt: (o: { title: string; description?: string; placeholder?: string; defaultValue?: string; submitText?: string }) => Promise<string | null>
-  form: (o: { title: string; description?: string; fields: FormField[]; submitText?: string }) => Promise<Record<string, string> | null>
+  /** Like prompt, but the user can explicitly pick NULL (returned as { isNull: true }); null still means cancelled. */
+  promptNullable: (o: { title: string; description?: string; placeholder?: string; defaultValue?: string; submitText?: string }) => Promise<string | { isNull: true } | null>
+  form: (o: { title: string; description?: string; fields: FormField[]; submitText?: string }) => Promise<Record<string, string | null> | null>
 }
 
 export function createDialogs(setDlg: React.Dispatch<React.SetStateAction<PendingDialog | null>>): DialogsApi {
@@ -59,7 +65,8 @@ export function createDialogs(setDlg: React.Dispatch<React.SetStateAction<Pendin
   return {
     confirm: (o) => open<boolean>({ kind: 'confirm', confirmText: 'Confirm', ...o }),
     prompt: (o) => open<string | null>({ kind: 'prompt', submitText: 'OK', ...o }),
-    form: (o) => open<Record<string, string> | null>({ kind: 'form', submitText: 'Submit', ...o }),
+    promptNullable: (o) => open<string | { isNull: true } | null>({ kind: 'prompt', submitText: 'OK', nullable: true, ...o }),
+    form: (o) => open<Record<string, string | null> | null>({ kind: 'form', submitText: 'Submit', ...o }),
   }
 }
 
@@ -114,6 +121,11 @@ function PromptHost({ dlg }: { dlg: PendingDialog }) {
             <Button type="button" variant="ghost" onClick={() => dlg.resolve(null)}>
               Cancel
             </Button>
+            {dlg.nullable && (
+              <Button type="button" variant="secondary" onClick={() => dlg.resolve({ isNull: true })}>
+                Set NULL
+              </Button>
+            )}
             <Button type="submit">{dlg.submitText ?? 'OK'}</Button>
           </div>
         </form>
@@ -124,6 +136,7 @@ function PromptHost({ dlg }: { dlg: PendingDialog }) {
 
 function FormHost({ dlg }: { dlg: PendingDialog }) {
   const [values, setValues] = useState<Record<string, string>>({})
+  const [nulls, setNulls] = useState<Record<string, boolean>>({})
   return (
     <Dialog open onOpenChange={(open) => { if (!open) dlg.resolve(null) }}>
       <DialogContent className="max-h-[80vh] overflow-auto">
@@ -135,21 +148,38 @@ function FormHost({ dlg }: { dlg: PendingDialog }) {
           className="flex flex-col gap-2"
           onSubmit={(e) => {
             e.preventDefault()
-            const out: Record<string, string> = {}
-            for (const f of dlg.fields ?? []) out[f.key] = values[f.key] ?? ''
+            const out: Record<string, string | null> = {}
+            for (const f of dlg.fields ?? []) out[f.key] = nulls[f.key] ? null : (values[f.key] ?? '')
             dlg.resolve(out)
           }}
         >
           {(dlg.fields ?? []).map((f) => (
-            <label key={f.key} className="grid grid-cols-[140px_1fr] items-center gap-2 text-[12px]">
+            <label key={f.key} className="grid grid-cols-[140px_1fr_auto] items-center gap-2 text-[12px]">
               <Tip content={f.label}>
                 <span className="truncate text-muted-foreground">{f.label}</span>
               </Tip>
               <Input
                 placeholder={f.placeholder}
-                value={values[f.key] ?? ''}
+                disabled={!!nulls[f.key]}
+                value={nulls[f.key] ? 'NULL' : (values[f.key] ?? '')}
                 onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
               />
+              {f.allowNull ? (
+                <Tip content={nulls[f.key] ? 'Unset NULL (edit a value)' : 'Set NULL'}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={nulls[f.key] ? 'secondary' : 'ghost'}
+                    aria-pressed={!!nulls[f.key]}
+                    aria-label={`Set ${f.label} to NULL`}
+                    onClick={() => setNulls((n) => ({ ...n, [f.key]: !n[f.key] }))}
+                  >
+                    N
+                  </Button>
+                </Tip>
+              ) : (
+                <span />
+              )}
             </label>
           ))}
           <div className="mt-1 flex justify-end gap-1.5">
