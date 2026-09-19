@@ -1,4 +1,4 @@
-import type { StoredTab, Tab, TableTabT } from '../types'
+import type { SavedConnection, SessionInfo, StoredTab, Tab, TableTabT } from '../types'
 
 export const DEFAULT_SQL = 'SELECT * FROM information_schema.tables LIMIT 20;'
 
@@ -76,4 +76,16 @@ export function readStoredTabs(): StoredTab[] {
   } catch {
     return []
   }
+}
+
+/** Saved-connection id backing an ERD tab's session (for the ERD toolbar), or undefined. Pure derivation. */
+export function erdConnectionIdFor(sessions: SessionInfo[], saved: SavedConnection[], tab: Tab | null): string | undefined {
+  if (tab?.kind !== 'erd') return undefined
+  const sess = sessions.find((s) => s.id === tab.sessionId)
+  return saved.find((c) => c.id && c.host === (sess?.host ?? '') && String(c.port) === String(sess?.port ?? '') && c.user === (sess?.user ?? '') && c.dbname === (sess?.dbname ?? '') && c.sslmode === (sess?.sslmode ?? ''))?.id
+}
+
+/** Tabs eligible for the split right pane: everything except the pinned (left) one. */
+export function splitOptions(tabs: Tab[], pinnedId?: string): Tab[] {
+  return tabs.filter((t) => t.id !== pinnedId)
 }

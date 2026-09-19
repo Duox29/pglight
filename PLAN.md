@@ -170,11 +170,18 @@ Constraints/Triggers/Stats sub-tabs, cell edit/duplicate/delete, CSV import,
 FK canvas: `components/erd/` — column-level edges, FK-directed auto-layout (child-left/parent-right along edge arrows, longest-path layers, DFS cycle-break, barycenter ordering, isolated tables in one grid block, blocks shelf-packed; Auto arrange re-tidies + persists, Reset clears + rebuilds), drag persistence, viewport (pan/zoom) persistence per session+schema, search, high-contrast minimap with accent viewport frame), `SidePanel` (history/snippets/server/activity/locks/stats with
 auto-refresh), `SearchPalette` (Ctrl+K global search dialog), last-session restore (open tabs +
 active tab + autocommit persist to localStorage; autologin from last successful
-connection with an opt-out Switch in Connections). `App.tsx` is a thin shell
+connection with an opt-out Switch in Connections). Workspace split view (max 2
+panes over the single tabs array: `TabStrip` tab bar with Split Right/Down
+context items, `SplitWorkspace` resizable 2-pane chrome with secondary tab
+picker + direction/swap/close, `TabContent` per-tab composition root,
+`hooks/useSplit` pin state (splitting pins the current tab left and opens the
+adjacent tab right; flipping tabs in the strip then only swaps the right pane)
+with direction persisted via `useAppPreference`).
+`App.tsx` is a thin shell
 (hook composition + 3-column layout + tab strip); domain logic lives in
 `hooks/`: `useSessions` (multi-session connect/disconnect/reconnect/boot/
 heartbeat + txn map + autocommit), `useTabs` (tab model, open/close/remap,
-last-session restore), `useExplorer` (tree + schema/table actions),
+last-session restore), `useSplit` (2-pane split state), `useExplorer` (tree + schema/table actions),
 `useQueryRunner` (run/cancel/explain + history/snippets), `useTableOps`
 (table data/meta/row/alter), `useObjectOps` (function/sequence/type DDL);
 shared pure helpers (`qi`, tab-id builders, `slimTab`/restore) in
@@ -184,6 +191,7 @@ Dev workflow:
 ```sh
 cd web && npm install   # once
 npm run dev             # :5173, proxies /api → Go on :8080
+npm test                # vitest (jsdom): hooks + components
 npm run build           # emits web/dist (git-ignored; main.go embeds it, so always rebuild before go build)
 ```
 
