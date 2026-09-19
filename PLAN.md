@@ -233,6 +233,39 @@ go run ./scripts/rerun          # PORT=8080 default
 PORT=18080 go run ./scripts/rerun
 ```
 
+## Tests (`test/` — canonical, black-box)
+
+All Go tests live in top-level `test/` (package `test`), one file per
+domain (`session|query|explorer|data|admin|alter|appdata|db|store|logging`).
+They exercise only exported symbols through the real HTTP-handler surface
+(`httptest` + live docker PG, temp sqlite `Store`), never unexported
+helpers. White-box checks were ported to endpoint behavior (multi-statement
+error locations via `/api/query`, numeric fidelity via `/api/row`+`/api/query`,
+FK cross-match via `/api/erd`). Every endpoint has happy + fail + edge cases;
+PG-dependent tests skip when the test DB is down, pure unit tests always run:
+
+```sh
+go test -count=1 ./test/        # full suite
+go test -race -count=1 ./test/  # incl. txn concurrency (must stay race-clean)
+```
+
+Unit test is the standard: a failing test means the contract broke — fix the
+code, not the expectation (expects change only when proven wrong against the
+documented contract, e.g. miscounted script lines).
+
+Integration tests (`test/integration_test.go`) boot the full route table
+(mirroring `main.go`, behind `logging.Middleware`) with `httptest.NewServer`
+and drive cross-endpoint user journeys over real HTTP with `connect` as the
+entry point — session lifecycle, txn visibility across `/api/txn` +
+`/api/query` + `/api/table-data`, import → cell-edit → bulk-delete flow,
+explorer chain agreement (schemas/tables/columns/ddl/search/erd), and the
+`{error}` contract through transport. Per-endpoint tests prove each handler;
+integration proves the handlers share session/txn state through the mux.
+
+```sh
+go test -count=1 -run TestIntegration ./test/  # HTTP journeys only
+```
+
 ## Test database (docker/postgres:14-alpine)
 
 ```sh
@@ -254,3 +287,5 @@ triggers, table-stats, single + multi-statement query, EXPLAIN, txn
 begin→insert→rollback visibility, WHERE-less update refusal, server-info,
 stats, locks, activity, roles, extensions, complete, import, ANALYZE.
 Safety kept: UPDATE/DELETE without WHERE still refused; maintenance allow-lists ops.
+Fix 2026-09-18: `GET /api/ddl` `foreign_keys` now filters `contype='f'` —
+previously every constraint (incl. the PK) leaked into that list.

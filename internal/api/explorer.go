@@ -224,7 +224,7 @@ func (h *Handler) DDL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, idx, _ := queryJSON(q, ctx, `SELECT indexname, indexdef FROM pg_indexes WHERE schemaname=$1 AND tablename=$2`, schema, table)
-	_, fk, _ := queryJSON(q, ctx, `SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid=to_regclass(format('%I.%I', $1::text, $2::text))`, schema, table)
+	_, fk, _ := queryJSON(q, ctx, `SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid=to_regclass(format('%I.%I', $1::text, $2::text)) AND contype='f'`, schema, table)
 	_, cons, _ := queryJSON(q, ctx, `SELECT conname, CASE contype WHEN 'p' THEN 'PRIMARY KEY' WHEN 'f' THEN 'FOREIGN KEY' WHEN 'u' THEN 'UNIQUE' WHEN 'c' THEN 'CHECK' WHEN 'x' THEN 'EXCLUDE' ELSE contype::text END, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid=to_regclass(format('%I.%I', $1::text, $2::text)) ORDER BY 2,1`, schema, table)
 	_, trg, _ := queryJSON(q, ctx, `SELECT trigger_name, event_manipulation||' '||action_timing||' '||action_statement FROM information_schema.triggers WHERE event_object_schema=$1 AND event_object_table=$2`, schema, table)
 	var owner, comment string

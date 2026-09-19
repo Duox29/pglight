@@ -1,53 +1,65 @@
-package store
+package test
 
 import (
 	"context"
 	"path/filepath"
 	"testing"
+
+	"pglight/internal/store"
 )
 
-func TestOpenCreatesSchemaAndIsIdempotent(t *testing.T) {
+func TestStoreOpenSchemaIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pglight.db")
-	s, err := Open(path)
+	s, err := store.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
-
 	ctx := context.Background()
 	var version int
 	if err := s.DB().QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
+		s.Close()
 		t.Fatal(err)
 	}
 	if version != 1 {
+		s.Close()
 		t.Fatalf("schema version = %d, want 1", version)
 	}
-
 	for _, table := range []string{"app_users", "snippets", "query_history", "aliases", "connection_profiles", "user_preferences", "erd_layouts"} {
 		var got string
-		err := s.DB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&got)
-		if err != nil {
+		if err := s.DB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&got); err != nil {
+			s.Close()
 			t.Fatalf("table %s: %v", table, err)
 		}
 	}
-
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s2, err := Open(path)
+	// reopen is idempotent
+	s2, err := store.Open(path)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer s2.Close()
+	// edge: empty path defaults (must not crash); use temp cwd-safe check via error only
+	// (do not actually create data/ in repo — just verify Open("") picks default path logic
+	// by failing closedir? no: skip filesystem side effects, assert migrate is idempotent instead)
+	var v2 int
+	if err := s2.DB().QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&v2); err != nil || v2 != 1 {
+		t.Fatalf("reopen version=%d err=%v", v2, err)
+	}
 }
 
-func TestPersistentDomainsRoundTrip(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "pglight.db"))
+func TestStoreDomainsRoundTrip(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "pglight.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
 	ctx := context.Background()
+	if err := s.EnsureUser(ctx, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	// EnsureUser is idempotent (edge)
 	if err := s.EnsureUser(ctx, "u1"); err != nil {
 		t.Fatal(err)
 	}
@@ -86,10 +98,21 @@ func TestPersistentDomainsRoundTrip(t *testing.T) {
 	if err != nil || layout.LayoutJSON == "" {
 		t.Fatalf("erd layout=%+v err=%v", layout, err)
 	}
+	// edge: preferences round-trip + missing layout delete is safe
+	if err := s.SetPreferences(ctx, "u1", `{"a":1}`); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := s.GetPreferences(ctx, "u1")
+	if err != nil || raw == "" {
+		t.Fatalf("prefs=%q err=%v", raw, err)
+	}
+	if err := s.DeleteErdLayout(ctx, "u1", "nope", "public"); err != nil {
+		t.Fatalf("delete missing layout: %v", err)
+	}
 }
 
-func TestForeignKeysAndUserIsolationSchema(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "pglight.db"))
+func TestStoreFKAndIsolation(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "pglight.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,5 +140,9 @@ func TestForeignKeysAndUserIsolationSchema(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("cascade deleted snippets = %d, want 0", count)
+	}
+	// edge: u2 rows survive the cascade
+	if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM snippets WHERE user_id='u2'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("u2 isolation broken: count=%d err=%v", count, err)
 	}
 }
