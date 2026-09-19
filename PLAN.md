@@ -287,8 +287,10 @@ Preconfigured credentials (match the UI defaults, just type the password):
 
 `docker/init.sql` seeds tables with FK (`authors` → `books` → `reviews`),
 a view (`published_books`), matview (`author_stats`), function
-(`book_count_by_status`), enum (`mood`), trigger (`trg_books_touch`) and
-indexes — enough to exercise explorer groups, ERD, constraints, stats and
+(`book_count_by_status`), enum (`mood`), trigger (`trg_books_touch`),
+indexes, and a mock-generator fixture (`mock_users`: BIGSERIAL pk, UNIQUE
+email, `BETWEEN` + `IN` CHECKs, `created_at <= updated_at`) — enough to
+exercise explorer groups, ERD, constraints, stats and
 multi-result queries. Verified end-to-end 2026-09-10: connect, schemas,
 tables, all 8 object kinds, columns, DDL/view/func defs, constraints,
 triggers, table-stats, single + multi-statement query, EXPLAIN, txn

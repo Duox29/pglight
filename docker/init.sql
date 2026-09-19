@@ -72,3 +72,18 @@ INSERT INTO reviews(book_id, rating, feeling, note) VALUES
   (3, 4, 'neutral', 'ok');
 
 REFRESH MATERIALIZED VIEW author_stats;
+
+-- Mock-data generator fixture: exercises identity omission, UNIQUE retry,
+-- BETWEEN/IN CHECK inference, and the created_at <= updated_at cross-field
+-- rule (simple mode ignores them; advanced mode honors them).
+CREATE TABLE mock_users (
+    id BIGSERIAL PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    age INT NOT NULL CHECK (age BETWEEN 18 AND 100),
+    status TEXT NOT NULL CHECK (
+        status IN ('active', 'disabled')
+    ),
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    CHECK (created_at <= updated_at)
+);

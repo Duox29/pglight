@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, FileDown, Pencil, Plus, RefreshCw, Trash2, Upload, Copy } from 'lucide-react'
+import { ArrowLeft, ArrowRight, FileDown, Pencil, Plus, RefreshCw, Sparkles, Trash2, Upload, Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
@@ -14,6 +14,7 @@ import type { TableSubtab, TableTabT } from '@/types'
 import type { DialogsApi } from './dialogs'
 import { ColumnDialog, ConstraintDialog, type ColumnValues } from './ColumnEditor'
 import { IndexDialog, TriggerDialog } from './IndexTriggerEditor'
+import { MockDataDialog } from './MockDataDialog'
 import { download, parseCSV, quoteQualified, resultToCSV, resultToInserts } from '@/lib/format'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from './ui/context-menu'
 
@@ -69,6 +70,7 @@ export function TableWorkspace(p: Props) {
   const [conDlg, setConDlg] = useState(false)
   const [idxDlg, setIdxDlg] = useState(false)
   const [trgDlg, setTrgDlg] = useState(false)
+  const [mockOpen, setMockOpen] = useState(false)
   const colNames = (t.cols ?? []).map((c) => String(c['name'] ?? '')).filter(Boolean)
   const pkCols = (t.cols ?? [])
     .filter((c) => String(c['pk'] ?? '').toLowerCase() === 't' || c['pk'] === true)
@@ -209,6 +211,19 @@ export function TableWorkspace(p: Props) {
             <Button size="sm" variant="ghost" onClick={startImport}>
               <Upload /> Import CSV
             </Button>
+            <Tip content="Generate mock data">
+              <Button size="sm" variant="ghost" onClick={() => setMockOpen(true)} aria-label="Generate mock data">
+                <Sparkles /> Generate
+              </Button>
+            </Tip>
+            <MockDataDialog
+              open={mockOpen}
+              onOpenChange={setMockOpen}
+              sessionId={t.sessionId}
+              schema={t.schema}
+              table={t.table}
+              onGenerated={p.onApply}
+            />
             <input
               ref={fileRef}
               type="file"

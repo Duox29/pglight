@@ -15,6 +15,7 @@ import (
 	"pglight/internal/logging"
 	"pglight/internal/store"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -385,4 +386,49 @@ func rowsToMaps(cols []string, data [][]any) []map[string]any {
 		return []map[string]any{}
 	}
 	return out
+}
+
+// insertRowsBatched is the shared bulk-INSERT path for CSV import
+// (/api/import) and mock-data generation (/api/mock-data/generate):
+// 500-row parameterized batches, pgx-sanitized identifiers, atomic only
+// when the caller wraps it in a transaction (both callers do — either the
+// session's explicit txn or a private one they commit/rollback themselves).
+func insertRowsBatched(ctx context.Context, q db.Querier, schema, table string, columns []string, rows [][]any, suffix string) (int64, error) {
+	cols := make([]string, len(columns))
+	for i, c := range columns {
+		if strings.TrimSpace(c) == "" {
+			return 0, fmt.Errorf("empty column name")
+		}
+		cols[i] = pgx.Identifier{c}.Sanitize()
+	}
+	qt := pgx.Identifier{schema, table}.Sanitize()
+	const batchSize = 500
+	var total int64
+	for s := 0; s < len(rows); s += batchSize {
+		e := s + batchSize
+		if e > len(rows) {
+			e = len(rows)
+		}
+		ph := []string{}
+		args := []any{}
+		n := 1
+		for _, row := range rows[s:e] {
+			if len(row) != len(cols) {
+				return 0, fmt.Errorf("row width %d != columns %d", len(row), len(cols))
+			}
+			rowPh := make([]string, len(cols))
+			for i, v := range row {
+				rowPh[i] = fmt.Sprintf("$%d", n)
+				args = append(args, v)
+				n++
+			}
+			ph = append(ph, "("+strings.Join(rowPh, ",")+")")
+		}
+		tag, err := q.Exec(ctx, fmt.Sprintf("INSERT INTO %s (%s) VALUES %s%s", qt, strings.Join(cols, ","), strings.Join(ph, ","), suffix), args...)
+		if err != nil {
+			return 0, err
+		}
+		total += tag.RowsAffected()
+	}
+	return total, nil
 }

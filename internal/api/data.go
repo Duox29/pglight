@@ -137,15 +137,6 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
 
-	cols := make([]string, len(req.Columns))
-	for i, c := range req.Columns {
-		if strings.TrimSpace(c) == "" {
-			writeJSON(w, 400, map[string]string{"error": "empty column name"})
-			return
-		}
-		cols[i] = pgx.Identifier{c}.Sanitize()
-	}
-	qt := pgx.Identifier{schema, req.Table}.Sanitize()
 	suffix := ""
 	if req.OnConflict {
 		suffix = " ON CONFLICT DO NOTHING"
@@ -166,51 +157,20 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 	coerced := make([][]any, len(req.Rows))
 	for i, row := range req.Rows {
-		if len(row) != len(cols) {
-			writeJSON(w, 400, map[string]string{"error": fmt.Sprintf("row width %d != columns %d", len(row), len(cols))})
+		if len(row) != len(req.Columns) {
+			writeJSON(w, 400, map[string]string{"error": fmt.Sprintf("row width %d != columns %d", len(row), len(req.Columns))})
 			return
 		}
 		coerced[i] = coerceRow(numRow(row), req.Columns, udts)
 	}
-	insertBatch := func(q db.Querier, batch [][]any) (int64, error) {
-		ph := []string{}
-		args := []any{}
-		n := 1
-		for _, row := range batch {
-			if len(row) != len(cols) {
-				return 0, fmt.Errorf("row width %d != columns %d", len(row), len(cols))
-			}
-			rowPh := make([]string, len(cols))
-			for i, v := range row {
-				rowPh[i] = fmt.Sprintf("$%d", n)
-				args = append(args, v)
-				n++
-			}
-			ph = append(ph, "("+strings.Join(rowPh, ",")+")")
-		}
-		tag, err := q.Exec(ctx, fmt.Sprintf("INSERT INTO %s (%s) VALUES %s%s", qt, strings.Join(cols, ","), strings.Join(ph, ","), suffix), args...)
-		if err != nil {
-			return 0, err
-		}
-		return tag.RowsAffected(), nil
-	}
 
-	const batchSize = 500
 	if inTxn {
 		qqRaw, _ := h.Mgr.Q(id)
 		qq := logging.Wrap(qqRaw, h.Log, id)
-		var total int64
-		for s := 0; s < len(coerced); s += batchSize {
-			e := s + batchSize
-			if e > len(coerced) {
-				e = len(coerced)
-			}
-			n, err := insertBatch(qq, coerced[s:e])
-			if err != nil {
-				writeJSON(w, 400, map[string]string{"error": err.Error()})
-				return
-			}
-			total += n
+		total, err := insertRowsBatched(ctx, qq, schema, req.Table, req.Columns, coerced, suffix)
+		if err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
 		}
 		writeJSON(w, 200, map[string]any{"rows_affected": total, "in_txn": true})
 		return
@@ -225,25 +185,10 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	txq := logging.Wrap(tx, h.Log, id)
-	var total int64
-	failed := false
-	var failErr error
-	for s := 0; s < len(coerced); s += batchSize {
-		e := s + batchSize
-		if e > len(coerced) {
-			e = len(coerced)
-		}
-		n, err := insertBatch(txq, coerced[s:e])
-		if err != nil {
-			failed = true
-			failErr = err
-			break
-		}
-		total += n
-	}
-	if failed {
+	total, err := insertRowsBatched(ctx, txq, schema, req.Table, req.Columns, coerced, suffix)
+	if err != nil {
 		_ = tx.Rollback(ctx)
-		writeJSON(w, 400, map[string]string{"error": failErr.Error()})
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {

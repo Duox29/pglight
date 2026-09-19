@@ -11,6 +11,10 @@ const ScrollArea = React.forwardRef<
       {children}
     </ScrollAreaPrimitive.Viewport>
     <ScrollBar />
+    {/* Horizontal bar must be mounted for Radix to enable viewport
+        horizontal scrolling (otherwise overflowX is forced hidden and wide
+        tables clip with no scrollbar). Only appears when content overflows. */}
+    <ScrollBar orientation="horizontal" />
     <ScrollAreaPrimitive.Corner />
   </ScrollAreaPrimitive.Root>
 ))

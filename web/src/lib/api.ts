@@ -220,4 +220,103 @@ export const apiClient = {
   listConnections: () => api<{ connections: { id: string; name: string; host: string; port: number; user: string; dbname: string; sslmode?: string }[] }>('/api/connections'),
   saveConnection: (p: { name: string; host: string; port: number; user: string; dbname: string; sslmode: string }) => api<{ connection?: { id: string; name: string; host: string; port: number; user: string; dbname: string; sslmode?: string }; error?: string }>('/api/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
   deleteConnection: (name: string) => api<{ ok?: boolean; error?: string }>(`/api/connections?name=${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  getMockDataMeta: (session: string, schema: string, table: string) =>
+    api<MockDataMeta>(q(session, `/api/mock-data/meta?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)),
+  previewMockData: (p: MockDataRequest) =>
+    api<MockDataPreview>(`/api/mock-data/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(p),
+    }),
+  generateMockData: (p: MockDataRequest) =>
+    api<MockDataResult>(`/api/mock-data/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(p),
+    }),
+}
+
+export interface MockDataColumn {
+  name: string
+  data_type: string
+  udt: string
+  nullable: boolean
+  default: string | null
+  identity: boolean
+  generated: boolean
+  primary_key: boolean
+  unique: boolean
+  enum_values: string[]
+  semantic_hint: string
+}
+
+export interface MockDataFK {
+  name: string
+  column: string
+  ref_schema: string
+  ref_table: string
+  ref_column: string
+}
+
+export interface MockDataCheck {
+  name: string
+  definition: string
+  kind: string
+  warning?: string
+}
+
+export interface MockDataMeta {
+  columns: MockDataColumn[]
+  foreign_keys: MockDataFK[]
+  checks: MockDataCheck[]
+  error?: string
+}
+
+export interface MockFieldConfig {
+  column: string
+  generator: string
+  params?: Record<string, unknown>
+  unique?: boolean
+  null_probability?: number
+}
+
+export interface MockConstraintSide {
+  field?: string
+  value?: unknown
+}
+
+export interface MockConstraint {
+  kind: string
+  left: MockConstraintSide
+  right: MockConstraintSide
+  operator: string
+}
+
+export interface MockDataRequest {
+  session_id: string
+  schema: string
+  table: string
+  mode: 'simple' | 'advanced'
+  count: number
+  seed?: number
+  fields?: MockFieldConfig[]
+  constraints?: MockConstraint[]
+}
+
+export interface MockDataPreview {
+  columns?: string[]
+  rows?: unknown[][]
+  warnings?: string[]
+  seed?: number
+  in_txn?: boolean
+  error?: string
+}
+
+export interface MockDataResult {
+  generated?: number
+  inserted?: number
+  seed?: number
+  duration_ms?: number
+  in_txn?: boolean
+  error?: string
 }
