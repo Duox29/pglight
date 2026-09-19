@@ -84,6 +84,7 @@ func main() {
 	mux.HandleFunc("/api/alter-table", h.AlterTable)
 	mux.HandleFunc("/api/settings", h.Settings)
 	mux.HandleFunc("/api/logs", h.Logs)
+	mux.HandleFunc("/api/shutdown", h.Shutdown)
 
 	sub, _ := fs.Sub(webFS, "web/dist")
 	mux.Handle("/", spaHandler(sub, http.FileServer(http.FS(sub))))

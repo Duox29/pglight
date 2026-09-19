@@ -276,13 +276,20 @@ func splitList(s string) []string {
 	parts := strings.Split(s, ",")
 	out := []string{}
 	for _, p := range parts {
-		t := strings.Trim(strings.TrimSpace(p), "'\"")
+		t := strings.TrimSpace(p)
+		// PostgreSQL decorates normalized ANY elements with casts
+		// ('active'::text): strip the trailing ::type before unquoting.
+		t = castSuffixRe.ReplaceAllString(t, "")
+		t = strings.Trim(strings.TrimSpace(t), "'\"")
+		t = strings.ReplaceAll(t, "''", "'")
 		if t != "" {
 			out = append(out, t)
 		}
 	}
 	return out
 }
+
+var castSuffixRe = regexp.MustCompile(`::[\w\s()]+$`)
 
 // checkHintInt / checkHintIN consult hints stashed in the RowContext by the
 // engine (key "__hints"). They let Auto integer/choice generators respect

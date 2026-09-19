@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -204,4 +205,19 @@ func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": res})
+}
+
+// Shutdown closes all session pools and stops the process. POST-only; the
+// JSON reply flushes before exit so the client can show a farewell toast.
+func (h *Handler) Shutdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	h.Mgr.CloseAll()
+	writeJSON(w, 200, map[string]bool{"ok": true})
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		os.Exit(0)
+	}()
 }

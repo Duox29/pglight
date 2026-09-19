@@ -220,6 +220,7 @@ export const apiClient = {
   listConnections: () => api<{ connections: { id: string; name: string; host: string; port: number; user: string; dbname: string; sslmode?: string }[] }>('/api/connections'),
   saveConnection: (p: { name: string; host: string; port: number; user: string; dbname: string; sslmode: string }) => api<{ connection?: { id: string; name: string; host: string; port: number; user: string; dbname: string; sslmode?: string }; error?: string }>('/api/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
   deleteConnection: (name: string) => api<{ ok?: boolean; error?: string }>(`/api/connections?name=${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  shutdown: () => api<{ ok?: boolean; error?: string }>(`/api/shutdown`, { method: 'POST' }),
   getMockDataMeta: (session: string, schema: string, table: string) =>
     api<MockDataMeta>(q(session, `/api/mock-data/meta?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)),
   previewMockData: (p: MockDataRequest) =>

@@ -192,6 +192,24 @@ export default function App() {
           setSideOpen(true)
         }}
         onDocs={() => tabsApi.openDocsTab()}
+        onShutdown={() => {
+          void (async () => {
+            const ok = await dialogs.confirm({
+              title: 'Shutdown pglight?',
+              description: 'Close all connections and stop the server. You will need to restart it manually.',
+              confirmText: 'Shutdown',
+              danger: true,
+            })
+            if (!ok) return
+            try {
+              const j = await apiClient.shutdown()
+              if (j.error) toast.error(j.error)
+              else toast.success('Server shutting down — connections closed')
+            } catch (e) {
+              toast.error(e instanceof Error ? e.message : String(e))
+            }
+          })()
+        }}
       />
       <ResizablePanelGroup direction="horizontal" autoSaveId="pglight-main-layout" className="min-h-0 flex-1">
         <ResizablePanel defaultSize={20} minSize={12} maxSize={32} className="min-h-0">

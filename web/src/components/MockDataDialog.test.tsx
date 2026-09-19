@@ -94,8 +94,7 @@ describe('MockDataDialog', () => {
     expect(screen.getAllByText('public.companies.id').length).toBeGreaterThanOrEqual(2)
   })
 
-  it('renders all headers of a wide preview and keeps actions visible', async () => {
-    const cols = Array.from({ length: 12 }, (_, i) => `col_${i + 1}`)
+  it('renders all headers of a wide preview and keeps actions visible', async () => {    const cols = Array.from({ length: 12 }, (_, i) => `col_${i + 1}`)
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) => {
@@ -115,5 +114,106 @@ describe('MockDataDialog', () => {
     // Toolbar actions stay in the document (not pushed out by wide content).
     expect(screen.getByRole('button', { name: /Generate 1,000 Rows/ })).toBeVisible()
     expect(screen.getByRole('button', { name: /Preview/ })).toBeVisible()
+  })
+
+  it.each([
+    { records: '0', seed: '' },
+    { records: '1000', seed: 'abc' },
+    { records: '20001', seed: '' },
+  ])('refuses to send invalid input (records=$records seed=$seed)', async ({ records, seed }) => {
+    const user = userEvent.setup()
+    renderUi(<MockDataDialog {...props()} />)
+    await waitFor(() => expect(screen.getByText(/Generate 1,000 Rows/)).toBeEnabled())
+    const fetchMock = vi.mocked(fetch)
+    const postsBefore = fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/mock-data/preview') || String(url).includes('/api/mock-data/generate')).length
+    await user.clear(screen.getByLabelText(/Records/))
+    await user.type(screen.getByLabelText(/Records/), records)
+    await user.clear(screen.getByLabelText(/Seed/))
+    if (seed) await user.type(screen.getByLabelText(/Seed/), seed)
+    await user.click(screen.getByRole('button', { name: /Generate/ }))
+    const postsAfter = fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/mock-data/preview') || String(url).includes('/api/mock-data/generate')).length
+    expect(postsAfter).toBe(postsBefore)
+  })
+
+  it('sends the advanced field configs and clamps preview count', async () => {
+    const user = userEvent.setup()
+    renderUi(<MockDataDialog {...props()} />)
+    await waitFor(() => expect(screen.getByText(/Generate 1,000 Rows/)).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: 'Advanced' }))
+    await user.click(screen.getByRole('button', { name: /Preview/ }))
+    const fetchMock = vi.mocked(fetch)
+    const previewCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/mock-data/preview'))
+    expect(previewCall).toBeDefined()
+    const req = JSON.parse(String(previewCall?.[1]?.body ?? '{}')) as {
+      mode?: string
+      count?: number
+      seed?: number
+      fields?: { column?: string; generator?: string; unique?: boolean; params?: Record<string, unknown> }[]
+      constraints?: unknown
+    }
+    expect(req.mode).toBe('advanced')
+    // Preview never asks for more than 20 rows even with Records=1000.
+    expect(req.count).toBe(20)
+    expect(req.seed).toBeUndefined()
+    expect(req.constraints).toBeUndefined()
+    const byCol = new Map((req.fields ?? []).map((f) => [f.column, f]))
+    expect(byCol.get('id')?.generator).toBe('db_default')
+    expect(byCol.get('email')).toMatchObject({ generator: 'auto', unique: true })
+    expect(byCol.get('age')?.generator).toBe('auto')
+    // FK column resolves through Auto; the picked source travels as params.
+    expect(byCol.get('company_id')?.generator).toBe('auto')
+  })
+
+  it('sends source params after picking an FK source', async () => {
+    const user = userEvent.setup()
+    renderUi(<MockDataDialog {...props()} />)
+    await waitFor(() => expect(screen.getByText(/Generate 1,000 Rows/)).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: 'Advanced' }))
+    // Re-pick the (single) source so ref_* params are attached.
+    // Trigger label and popover option share text; the option lives last.
+    await user.click(screen.getByRole('button', { name: 'FK value source' }))
+    const matches = screen.getAllByText('public.companies.id')
+    const optionBtn = matches[matches.length - 1].closest('button')
+    if (!optionBtn) throw new Error('source option button missing')
+    await user.click(optionBtn)
+    await user.click(screen.getByRole('button', { name: /Preview/ }))
+    const fetchMock = vi.mocked(fetch)
+    const previewCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/mock-data/preview'))
+    const req = JSON.parse(String(previewCall?.[1]?.body ?? '{}')) as {
+      fields?: { column?: string; params?: Record<string, unknown> }[]
+    }
+    const company = (req.fields ?? []).find((f) => f.column === 'company_id')
+    expect(company?.params).toMatchObject({ ref_schema: 'public', ref_table: 'companies', ref_column: 'id' })
+  })
+
+  it('keeps the dialog open when generation fails', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        const body = url.includes('/api/mock-data/meta') ? meta : { error: 'PG blew up' }
+        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(body)) })
+      }),
+    )
+    const p = props()
+    renderUi(<MockDataDialog {...p} />)
+    await waitFor(() => expect(screen.getByText(/Generate 1,000 Rows/)).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: /Generate 1,000 Rows/ }))
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/mock-data/generate'))).toBe(true))
+    expect(p.onGenerated).not.toHaveBeenCalled()
+    expect(p.onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(screen.getByRole('button', { name: /Generate 1,000 Rows/ })).toBeInTheDocument()
+  })
+
+  it('sends a bare simple request without fields', async () => {
+    const user = userEvent.setup()
+    renderUi(<MockDataDialog {...props()} />)
+    await waitFor(() => expect(screen.getByText(/Generate 1,000 Rows/)).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: /Preview/ }))
+    const previewCall = vi.mocked(fetch).mock.calls.find(([url]) => String(url).includes('/api/mock-data/preview'))
+    const req = JSON.parse(String(previewCall?.[1]?.body ?? '{}')) as Record<string, unknown>
+    expect(req.mode).toBe('simple')
+    expect(req.fields).toBeUndefined()
+    expect(req.constraints).toBeUndefined()
   })
 })

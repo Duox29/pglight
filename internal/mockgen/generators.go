@@ -347,6 +347,11 @@ func generateField(ctx *RowContext, c ColumnMeta, f FieldSpec) (any, error) {
 		tp := paramFloat(f.Params, "true_probability", 0.5)
 		return r.Float64() < tp, nil
 	case "string":
+		// A supported IN check narrows free text to the allowed values
+		// (e.g. Auto on a status column with CHECK IN (...)).
+		if hintVals := checkHintIN(c.Name, ctx); len(hintVals) > 0 {
+			return weightedPick(r, hintVals, paramWeights(f.Params)), nil
+		}
 		minL := paramInt(f.Params, "min_length", 8)
 		maxL := paramInt(f.Params, "max_length", 24)
 		return randString(r, minL, maxL), nil
@@ -364,6 +369,12 @@ func generateField(ctx *RowContext, c ColumnMeta, f FieldSpec) (any, error) {
 		vals := paramValues(f.Params)
 		if len(vals) == 0 {
 			vals = checkHintIN(c.Name, ctx)
+		}
+		if len(vals) == 0 && len(c.EnumValues) > 0 {
+			vals = make([]any, len(c.EnumValues))
+			for i, v := range c.EnumValues {
+				vals[i] = v
+			}
 		}
 		if len(vals) == 0 {
 			vals = []any{"a", "b", "c"}

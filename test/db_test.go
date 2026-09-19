@@ -307,3 +307,39 @@ func TestDBSnapshotAtomic(t *testing.T) {
 	defer cancel()
 	_ = m.Rollback(ctx, "snap")
 }
+
+func TestDBCloseAll(t *testing.T) {
+	m := requireMgr(t)
+	// Empty manager: no-op, no panic.
+	m.CloseAll()
+	for _, id := range []string{"ca1", "ca2"} {
+		if err := m.Add(id, testConnStr()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := m.Begin(ctx, "ca1"); err != nil {
+		t.Fatal(err)
+	}
+	if !m.InTxn("ca1") {
+		t.Fatal("txn not open")
+	}
+	m.CloseAll()
+	// Pools gone, txn flag cleared, listing empty.
+	for _, id := range []string{"ca1", "ca2"} {
+		if _, ok := m.Q(id); ok {
+			t.Fatalf("session %s still queryable after CloseAll", id)
+		}
+		if m.InTxn(id) {
+			t.Fatalf("session %s still in txn after CloseAll", id)
+		}
+	}
+	if len(m.List()) != 0 {
+		t.Fatalf("sessions remain: %v", m.List())
+	}
+	// Unknown ids stay unknown (no panic, no resurrection).
+	if _, ok := m.Q("ghost"); ok {
+		t.Fatal("ghost session queryable")
+	}
+}

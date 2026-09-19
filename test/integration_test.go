@@ -74,9 +74,16 @@ func integrationMux(h *api.Handler) http.Handler {
 	mux.HandleFunc("/api/search", h.Search)
 	mux.HandleFunc("/api/maintenance", h.Maintenance)
 	mux.HandleFunc("/api/import", h.Import)
+	mux.HandleFunc("/api/mock-data/meta", h.MockMeta)
+	mux.HandleFunc("/api/mock-data/preview", h.MockPreview)
+	mux.HandleFunc("/api/mock-data/generate", h.MockGenerate)
 	mux.HandleFunc("/api/alter-table", h.AlterTable)
 	mux.HandleFunc("/api/settings", h.Settings)
 	mux.HandleFunc("/api/logs", h.Logs)
+	// NOTE: /api/shutdown is deliberately unrouted here — it calls os.Exit
+	// after replying, which would kill the test runner. Its building block
+	// (Manager.CloseAll) is covered by TestDBCloseAll; the 405 method guard
+	// is covered per-endpoint style below via direct handler call.
 	return logging.Middleware(h.Log, mux)
 }
 
@@ -398,4 +405,98 @@ func TestIntegrationErrorContract(t *testing.T) {
 	// wrong method → 405
 	code, _ = iget(t, base+"/api/query?session_id="+sid)
 	requireStatus(t, "", code, 405)
+	code, _ = iget(t, base+"/api/mock-data/preview?session_id="+sid)
+	requireStatus(t, "", code, 405)
+	code, _ = iget(t, base+"/api/mock-data/generate?session_id="+sid)
+	requireStatus(t, "", code, 405)
+}
+
+// --- mock-data generation journey over the wire ---
+//
+// meta → preview → generate → table-data must agree through real HTTP:
+// routing, session propagation, the {columns,rows,warnings,seed} preview
+// shape, atomic insertion and the {error} contract on every failure.
+func TestIntegrationMockDataJourney(t *testing.T) {
+	base, sid := newIntegrationServer(t)
+	tbl := tempTable(t)
+
+	code, body := iquery(t, base, sid, fmt.Sprintf(
+		`CREATE TABLE %s (id SERIAL PRIMARY KEY, name TEXT NOT NULL, age INT CHECK (age BETWEEN 18 AND 99))`, tbl))
+	requireStatus(t, body, code, 200)
+	defer func() { _, _ = iquery(t, base, sid, fmt.Sprintf(`DROP TABLE IF EXISTS %s`, tbl)) }()
+
+	// meta describes columns, checks and the (empty) FK list.
+	code, body = iget(t, base+"/api/mock-data/meta?session_id="+sid+"&schema=public&table="+tbl)
+	requireStatus(t, body, code, 200)
+	meta := decodeObj(t, body)
+	requireKeys(t, "meta", meta, "columns", "foreign_keys", "checks")
+	names := map[string]bool{}
+	for _, c := range meta["columns"].([]any) {
+		names[c.(map[string]any)["name"].(string)] = true
+	}
+	for _, want := range []string{"id", "name", "age"} {
+		if !names[want] {
+			t.Fatalf("meta missing column %s: %s", want, body)
+		}
+	}
+	if kinds := checkKinds(t, body, meta); !kinds["between"] {
+		t.Fatalf("meta missing between CHECK kind: %s", body)
+	}
+
+	// preview: shape, row count, no database writes.
+	code, body = ipost(t, base+"/api/mock-data/preview", fmt.Sprintf(
+		`{"session_id":%q,"schema":"public","table":%q,"mode":"advanced","count":5,"seed":8,`+
+			`"fields":[{"column":"age","generator":"integer"}]}`, sid, tbl))
+	requireStatus(t, body, code, 200)
+	prev := decodeObj(t, body)
+	requireKeys(t, "preview", prev, "columns", "rows", "warnings", "seed", "in_txn")
+	requireDeep(t, body, "preview.seed", prev["seed"], 8)
+	if len(prev["rows"].([]any)) != 5 {
+		t.Fatalf("want 5 preview rows: %s", body)
+	}
+	code, body = iquery(t, base, sid, fmt.Sprintf(`SELECT count(*) FROM %s`, tbl))
+	requireStatus(t, body, code, 200)
+	requireRows(t, body, [][]any{{"0"}}) // int8 counts cross JSON as strings
+
+	// generate: atomic insert visible through table-data, ages inferred.
+	code, body = ipost(t, base+"/api/mock-data/generate", fmt.Sprintf(
+		`{"session_id":%q,"schema":"public","table":%q,"mode":"advanced","count":10,"seed":8,`+
+			`"fields":[{"column":"age","generator":"integer"}]}`, sid, tbl))
+	requireStatus(t, body, code, 200)
+	gen := decodeObj(t, body)
+	requireKeys(t, "generate", gen, "generated", "inserted", "seed", "duration_ms", "in_txn")
+	requireDeep(t, body, "gen.counts", []any{gen["generated"], gen["inserted"]}, []any{10, 10})
+	code, body = iget(t, base+"/api/table-data?session_id="+sid+"&schema=public&table="+tbl+"&order=id&limit=100")
+	requireStatus(t, body, code, 200)
+	if len(rowsOf(t, body)) != 10 {
+		t.Fatalf("want 10 generated rows via table-data: %s", body)
+	}
+	code, body = iquery(t, base, sid, fmt.Sprintf(
+		`SELECT count(*) FROM %s WHERE age NOT BETWEEN 18 AND 99`, tbl))
+	requireStatus(t, body, code, 200)
+	requireRows(t, body, [][]any{{"0"}})
+
+	// error contract over the wire: ghost session, bad mode, bad column.
+	code, body = iget(t, base+"/api/mock-data/meta?session_id=ghost-xyz&schema=public&table="+tbl)
+	requireErrContains(t, body, code, 401, "not connected")
+	code, body = ipost(t, base+"/api/mock-data/generate", fmt.Sprintf(
+		`{"session_id":%q,"schema":"public","table":%q,"mode":"weird","count":5}`, sid, tbl))
+	requireErrContains(t, body, code, 400, "unknown mode")
+	code, body = ipost(t, base+"/api/mock-data/generate", fmt.Sprintf(
+		`{"session_id":%q,"schema":"public","table":%q,"mode":"advanced","count":5,`+
+			`"fields":[{"column":"ghost","generator":"integer"}]}`, sid, tbl))
+	requireErrContains(t, body, code, 400, "unknown column")
+}
+
+func checkKinds(t *testing.T, body string, meta map[string]any) map[string]bool {
+	t.Helper()
+	kinds := map[string]bool{}
+	chks, ok := meta["checks"].([]any)
+	if !ok {
+		t.Fatalf("meta missing checks array: %s", body)
+	}
+	for _, c := range chks {
+		kinds[c.(map[string]any)["kind"].(string)] = true
+	}
+	return kinds
 }

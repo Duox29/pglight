@@ -109,7 +109,47 @@ POST /api/aliases           {trigger,expansion} → upsert user entry (trigger: 
 DELETE /api/aliases?trigger= drop one user entry (builtin restored) · DELETE /api/aliases reset all to defaults
 POST /api/rows-delete       {session_id,schema,table,where[]} → {deleted} — atomic bulk delete (one txn; every entry must match exactly 1 row)
 POST /api/row               now accepts {single:true}: update/delete verify exactly 1 affected row (409 otherwise; own txn + rollback outside explicit txns)
+POST /api/shutdown          → {ok:true} — close all session pools, then stop the server (header Power button, confirm dialog; POST-only, 405 otherwise; reply flushes 200ms before `os.Exit`, so it is never invoked by tests — `Manager.CloseAll` is covered in `db_test.go` instead)
+GET  /api/mock-data/meta?session_id=&schema=&table= → {columns[{name,data_type,udt,nullable,default,identity,generated,primary_key,unique,enum_values,semantic_hint}],foreign_keys[],checks[{name,definition,kind}]} — normalized introspection (catalogs/information_schema; React never parses DDL)
+POST /api/mock-data/preview  {session_id,schema,table,mode,count≤100,seed?,fields?,constraints?} → {columns,rows,warnings,seed,in_txn} — generates without touching the DB; DB-filled columns render as `<database default>`
+POST /api/mock-data/generate {session_id,schema,table,mode,count≤20000,seed?,fields?,constraints?} → {generated,inserted,seed,duration_ms,in_txn} — atomic bulk insert via the shared `insertRowsBatched` helper (500-row batches, txn-aware: inside the explicit txn when open, else a private all-or-nothing txn)
 ```
+
+Mock Data Generator (Table workspace → Generate → `MockDataDialog`):
+Simple = datatype-only, zero-config (random strings for `email`/`first_name`
+— no semantic inference, no CHECK/UNIQUE/FK intelligence; identity/generated/
+serial/default columns omitted for PostgreSQL to fill; seeded runs are
+deterministic via a seed-anchored clock, unseeded runs use wall time).
+PostgreSQL stays the final validator — insertion failures return the PG error
+plus "Use Advanced mode to configure constraints" in Simple mode only
+(advanced errors stay raw).
+Advanced = schema-aware: semantic Auto generators (Email/Name/Phone/URL…),
+numeric/date ranges, Choice/Sequence/Constant/JSON/Array, NULL probability
+(clamped 0..1 server-side; NULLs bypass uniqueness tracking, matching PG),
+UNIQUE (schema-promoted for non-PK unique columns; bounded 50-attempt retry,
+never infinite), existing-row FK pools (uniform/sequential round-robin;
+unknown mode falls back to uniform; empty non-nullable FK errors; per-field
+source picker overrides the pool via params `ref_schema/ref_table/ref_column`,
+identifiers sanitized, same-session read so uncommitted parents are visible),
+BETWEEN/comparison/IN CHECK inference (incl. PG-normalized `>= AND <=` and
+`= ANY (ARRAY[…])` forms with `::type` casts stripped and `''` unescaped;
+multiple checks on one column merge to the tightest bound; explicit params win
+per-side; unsupported CHECKs warn and defer to PG), enum columns resolve Auto
+to Choice over their labels, IN-checks narrow Auto strings, Auto on
+identity/serial resolves to DB Default, custom compare constraints
+(`= != < <= > >=` plus `<>`, structured JSON only — no expression eval;
+literals allowed as sides; NULLs compare only via `=`/`!=`), and Relative
+DateTime dependents ordered by a dependency graph (cycles rejected; missing
+source, unknown source and default-omitted source all error clearly).
+Request bodies decode with `Decoder.UseNumber()`, so numeric params arrive as
+`json.Number` — the engine coerces them (ints, floats, weights, scales).
+Engine is pure/deterministic under `internal/mockgen/` (schema, generators,
+constraints, generator); HTTP orchestration in `internal/api/mockdata.go`
+(preview ≤100 rows, generate ≤20000, both txn-aware; FK pools load once per
+request and feed random + sequential modes).
+```
+
+Wire-format policy (exact numerics): int8/numeric/money (and their array
 
 Wire-format policy (exact numerics): int8/numeric/money (and their array
 variants) cross JSON as **strings** with the type OID alongside
@@ -146,7 +186,12 @@ All txn-aware: `/api/query`, `/api/explain`, `/api/table-data`, `/api/row`, `/ap
 The hand-rolled vanilla UI (`web/app.js` + `web/style.css`) was replaced with a
 React + Vite + Tailwind v3 app built on **shadcn-style prebuilt components**
 (`web/src/components/ui/*`: Button, Input, Textarea, Badge, Card, Table,
-Tabs, Dialog, Select, Separator, ScrollArea, Collapsible, Switch, Resizable
+Tabs, Dialog, Select, SearchSelect (searchable single-select: Radix Popover +
+filter input + option list, for FK sources and other user-named lists — plain
+Select has no search), Separator, ScrollArea (always mounts vertical +
+horizontal bars; Radix only enables horizontal scrolling when the horizontal
+bar is mounted, otherwise wide tables clip with no scrollbar), Collapsible,
+Switch, Resizable
 (react-resizable-panels, persisted via autoSaveId) for the 3-column layout,
 DataGrid) on top of Radix
 primitives, `class-variance-authority`, `clsx` + `tailwind-merge`,
@@ -156,7 +201,9 @@ notifications, and a promise-based `dialogs.tsx` host on top of shadcn
 `alert()`/`confirm()`/`prompt()` anywhere — instead of reimplemented
 widgets, to avoid custom-CSS and bespoke-component bugs.
 
-Feature views: slim `ConnectionBar` (status/badges/actions + Settings gear) +
+Feature views: slim `ConnectionBar` (status/badges/actions + Settings gear +
+destructive Power button → `onShutdown`: confirm dialog, farewell toast, then
+`POST /api/shutdown`) +
 `SettingsPanel` (logging config: enabled/level/http/query/slow-threshold/max
 + live log viewer with level/category filters, auto-refresh, clear) +
 `CredentialManager` (saved servers + credential form in a floating Radix
@@ -166,6 +213,11 @@ tables/views/matviews/foreign/functions/sequences/types + server objects),
 `QueryConsole` (multi-result, EXPLAIN text plan, formatter, per-result
 CSV/JSON/INSERT export), `TableWorkspace` (Data/Columns/DDL/Indexes/
 Constraints/Triggers/Stats sub-tabs, cell edit/duplicate/delete, CSV import,
+Generate mock data (`MockDataDialog`: Simple zero-config vs Advanced
+per-column grid with Generator select + params, NULL % and Unique switch,
+pk/fk/unique/not-null badges with ref-target tooltips, compare-constraint
+builder, FK source `SearchSelect`, 20-row `DataGrid` preview with warnings,
+Generate N Rows with client-side validation),
 `VACUUM/ANALYZE/REINDEX), `BrowserView` (extensions/roles), `ErdView` (React Flow
 FK canvas: `components/erd/` — column-level edges, FK-directed auto-layout (child-left/parent-right along edge arrows, longest-path layers, DFS cycle-break, barycenter ordering, isolated tables in one grid block, blocks shelf-packed; Auto arrange re-tidies + persists, Reset clears + rebuilds), drag persistence, viewport (pan/zoom) persistence per session+schema, search, high-contrast minimap with accent viewport frame), `SidePanel` (history/snippets/server/activity/locks/stats with
 auto-refresh), `SearchPalette` (Ctrl+K global search dialog), last-session restore (open tabs +
@@ -244,13 +296,19 @@ PORT=18080 go run ./scripts/rerun
 ## Tests (`test/` — canonical, black-box)
 
 All Go tests live in top-level `test/` (package `test`), one file per
-domain (`session|query|explorer|data|admin|alter|appdata|db|store|logging`).
+domain (`session|query|explorer|data|admin|alter|appdata|db|store|logging`,
+plus `mockgen` for the pure generation engine — no DB needed —
+and `mockdata` for the `/api/mock-data/*` surface).
 They exercise only exported symbols through the real HTTP-handler surface
 (`httptest` + live docker PG, temp sqlite `Store`), never unexported
 helpers. White-box checks were ported to endpoint behavior (multi-statement
 error locations via `/api/query`, numeric fidelity via `/api/row`+`/api/query`,
 FK cross-match via `/api/erd`). Every endpoint has happy + fail + edge cases;
-PG-dependent tests skip when the test DB is down, pure unit tests always run:
+PG-dependent tests skip when the test DB is down, pure unit tests always run.
+`db_test.go` covers `Manager.CloseAll` (the shutdown building block);
+`MockDataDialog`/`SearchSelect`/`ConnectionBar` are covered in vitest
+(jsdom, mocked `fetch`): dialog validation guards, request-body shapes, FK
+badge + searchable source, preview clamping, failure paths, header wiring.
 
 ```sh
 go test -count=1 ./test/        # full suite
@@ -266,9 +324,13 @@ Integration tests (`test/integration_test.go`) boot the full route table
 and drive cross-endpoint user journeys over real HTTP with `connect` as the
 entry point — session lifecycle, txn visibility across `/api/txn` +
 `/api/query` + `/api/table-data`, import → cell-edit → bulk-delete flow,
+mock-data journey (meta → preview → generate → table-data agreement plus the
+`{error}` contract on ghost sessions, bad modes and ghost columns),
 explorer chain agreement (schemas/tables/columns/ddl/search/erd), and the
 `{error}` contract through transport. Per-endpoint tests prove each handler;
 integration proves the handlers share session/txn state through the mux.
+`/api/shutdown` is routed in `main.go` but excluded from the integration mux:
+it calls `os.Exit`, which would kill the runner.
 
 ```sh
 go test -count=1 -run TestIntegration ./test/  # HTTP journeys only
@@ -280,6 +342,7 @@ go test -count=1 -run TestIntegration ./test/  # HTTP journeys only
 docker compose -f docker/docker-compose.yml up -d   # pg14 + seed demo data
 docker compose -f docker/docker-compose.yml down    # stop (keeps data)
 docker compose -f docker/docker-compose.yml down -v # reset + reseed
+docker exec pglight-pg14 psql -U postgres -d postgres -c "ANALYZE;"  # refresh planner stats after reseed (reltuples starts at -1; TestExplorerBasics reads authors.est_rows)
 ```
 
 Preconfigured credentials (match the UI defaults, just type the password):

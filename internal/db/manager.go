@@ -284,6 +284,20 @@ func (m *Manager) Close(id string) {
 	}
 }
 
+// CloseAll closes every session pool, rolling back any open explicit txn.
+// Used by /api/shutdown before stopping the process.
+func (m *Manager) CloseAll() {
+	m.mu.RLock()
+	ids := make([]string, 0, len(m.pools))
+	for id := range m.pools {
+		ids = append(ids, id)
+	}
+	m.mu.RUnlock()
+	for _, id := range ids {
+		m.Close(id)
+	}
+}
+
 // SetMeta stores display-only connection info for a session (no password).
 // ConnectedAt is stamped on first set and preserved across re-Add calls.
 func (m *Manager) SetMeta(id string, meta ConnMeta) {

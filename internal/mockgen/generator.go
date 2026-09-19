@@ -187,6 +187,12 @@ func BuildPlan(meta TableMeta, req Request) (*Plan, error) {
 	deps := map[string]string{}
 	for _, c := range meta.Columns {
 		f := byCol[c.Name]
+		if f.Generator == "auto" && autoGenerator(c) == "db_default" {
+			// Explicit auto on an identity/generated/serial column means
+			// "let PostgreSQL fill it", same as the implicit default.
+			f.Generator = "db_default"
+			byCol[c.Name] = f
+		}
 		if f.Generator == "db_default" {
 			p.Omitted = append(p.Omitted, c.Name)
 			continue
@@ -286,6 +292,9 @@ func fkRef(fk ForeignKeyMeta) string {
 // slices aligned with Plan.InsertCols; omitted columns are NOT included.
 func (p *Plan) GenerateRows(seed int64, count int, fkValues map[string][]any) ([][]any, error) {
 	r := rand.New(rand.NewSource(seed))
+	if fkValues == nil {
+		fkValues = map[string][]any{}
+	}
 	now := time.Now().UTC()
 	if p.Seeded {
 		now = anchorTime(p.SeedVal)
