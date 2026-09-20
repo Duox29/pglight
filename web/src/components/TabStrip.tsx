@@ -170,7 +170,7 @@ export function TabStrip(p: TabStripProps) {
       })}
       </div>
       <div className="flex shrink-0 items-center gap-0.5 border-l border-border px-2">
-      <Tip content="New query (Ctrl+K then Enter)">
+      <Tip content="New query tab">
         <button
           onClick={p.onNewQuery}
           className="flex shrink-0 items-center gap-1 whitespace-nowrap px-2 py-1.5 text-[12px] text-muted-foreground hover:text-foreground"
@@ -180,7 +180,7 @@ export function TabStrip(p: TabStripProps) {
       </Tip>
       {p.splitHint && (
         <>
-          <Tip content="Split right — pin this tab, open the adjacent tab beside it">
+          <Tip content="Split right">
             <button
               onClick={() => p.onSplit(p.activeTab ?? '', 'horizontal')}
               className="flex shrink-0 items-center px-1.5 py-1.5 text-muted-foreground hover:text-foreground"
@@ -189,7 +189,7 @@ export function TabStrip(p: TabStripProps) {
               <Columns2 className="h-3.5 w-3.5" />
             </button>
           </Tip>
-          <Tip content="Split down — pin this tab, open the adjacent tab below it">
+          <Tip content="Split down">
             <button
               onClick={() => p.onSplit(p.activeTab ?? '', 'vertical')}
               className="flex shrink-0 items-center px-1.5 py-1.5 text-muted-foreground hover:text-foreground"

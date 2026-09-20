@@ -237,7 +237,7 @@ export function Explorer(p: Props) {
               <Tip content="Users, groups and their attributes">
                 <div className="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-0.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => p.onOpenBrowser('roles', 'Roles')}><Users className="h-3 w-3" /> Roles</div>
               </Tip>
-              <Tip content="Foreign-key graph of a schema">
+              <Tip content="Graph of a schema">
                 <div className="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-0.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => p.onOpenErd('public')}><Network className="h-3 w-3" /> ERD</div>
               </Tip>
             </div>
