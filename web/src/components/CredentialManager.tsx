@@ -83,7 +83,7 @@ export function CredentialManager(p: Props) {
             {!active && <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" />}
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" side="bottom" sideOffset={4} className="max-h-[min(70vh,560px)] w-[min(320px,90vw)] overflow-y-auto">
+        <PopoverContent align="start" side="bottom" sideOffset={4} className="max-h-[min(70vh,560px)] w-[min(320px,90vw)] overflow-x-hidden overflow-y-auto">
           <div className="flex flex-col gap-1.5">
             {p.sessions.length > 0 && (
               <div className="flex flex-col gap-1">

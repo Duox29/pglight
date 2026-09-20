@@ -82,7 +82,7 @@ export function TabStrip(p: TabStripProps) {
 
   return (
     <div className="flex h-10 items-stretch border-b bg-card pt-1.5">
-      <div ref={tablistRef} className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="tablist" aria-label="Workspace tabs">
+      <div ref={tablistRef} className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto overflow-y-hidden px-2" role="tablist" aria-label="Workspace tabs">
       {p.tabs.map((t) => {
         const sid = (t as { sessionId?: string }).sessionId
         const db = p.sessions.find((s) => s.id === sid)?.dbname ?? ''

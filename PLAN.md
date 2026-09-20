@@ -234,7 +234,10 @@ bar is mounted, otherwise wide tables clip with no scrollbar), Collapsible,
 Switch, Resizable
 (react-resizable-panels, persisted via autoSaveId) for the 3-column layout,
 ContextMenu, DropdownMenu, Popover, Tooltip/`Tip` (single global dark
-`bg-popover` style — never native `title=`),
+`bg-popover` style — never native `title=`); app scrollbars use a fixed
+overlay layer, stay transparent until their scroll container is hovered, and
+support both axes; visibility is configurable as `hover|always|never` in
+`web/src/lib/scrollbar.ts`,
 DataGrid) on top of Radix
 primitives, `class-variance-authority`, `clsx` + `tailwind-merge`,
 `lucide-react` icons, Sonner `<Toaster>` (monochrome thin style) for all

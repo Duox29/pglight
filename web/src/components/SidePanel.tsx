@@ -78,7 +78,7 @@ export function SidePanel(p: Props) {
       </div>
       <div className="px-2.5 py-2">
         <Tabs value={p.view} onValueChange={(v) => p.onView(v as SideView)}>
-          <TabsList className="w-full flex-nowrap justify-start overflow-x-auto">
+          <TabsList className="w-full flex-nowrap justify-start overflow-x-auto overflow-y-hidden">
             {WORKSPACE_VIEWS.map((v) => {
               const Icon = WORKSPACE_VIEW_META[v].icon
               return <TabsTrigger key={v} value={v} className="gap-1.5"><Icon className="h-3.5 w-3.5" />{WORKSPACE_VIEW_META[v].label}</TabsTrigger>

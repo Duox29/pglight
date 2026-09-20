@@ -11,6 +11,7 @@ import { SearchPalette } from './components/SearchPalette'
 import { SplitWorkspace } from './components/SplitWorkspace'
 import { TabContent } from './components/TabContent'
 import { TabStrip } from './components/TabStrip'
+import { FloatingScrollbars } from './components/FloatingScrollbars'
 import { apiClient } from './lib/api'
 import { readStoredTabs } from './lib/tabs'
 import { useTabs } from './hooks/useTabs'
@@ -219,6 +220,7 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={200}>
     <div className="flex h-screen flex-col">
+      <FloatingScrollbars />
       <DialogHost dlg={dlg} />
       <Toaster
         theme="dark"

@@ -32,12 +32,18 @@
     @apply bg-background text-foreground text-[13px];
     font-family: system-ui, -apple-system, sans-serif;
   }
-  ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: hsl(var(--border));
-    border-radius: 6px;
-  }
+}
+
+/* Native scrollbars are hidden globally. FloatingScrollbars renders the
+   equivalent thumb in a fixed, pointer-transparent layer so it cannot take
+   space from the scroll container. Radix ScrollArea supplies its own layer. */
+:where(html, body, #root, *) {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+:where(html, body, #root, *)::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }

@@ -24,13 +24,17 @@ export interface SplitWorkspaceProps {
   renderPane: (tab: Tab | null) => ReactNode
 }
 
+function paneOverflowClass(tab: Tab | null) {
+  return tab?.kind === 'workspace' ? 'overflow-hidden' : 'overflow-auto'
+}
+
 /* Two-pane (max 2) workspace layout. Single pane when secondary is null;
    otherwise a right-pane header (tab picker + direction + swap + close) over
    a resizable split whose sizes persist via autoSaveId. Owns no domain
    state; panes arrive via renderPane. */
 export function SplitWorkspace(p: SplitWorkspaceProps) {
   if (p.secondary == null) {
-    return <div className="min-h-0 flex-1 overflow-auto p-3">{p.renderPane(p.primary)}</div>
+    return <div className={cn('min-h-0 flex-1 p-3', paneOverflowClass(p.primary))}>{p.renderPane(p.primary)}</div>
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -82,11 +86,11 @@ export function SplitWorkspace(p: SplitWorkspaceProps) {
       <div className="min-h-0 flex-1">
         <ResizablePanelGroup key={p.dir} direction={p.dir} autoSaveId="pglight-split-layout" className="h-full">
           <ResizablePanel defaultSize={50} minSize={20} className="min-h-0">
-            <div className="h-full overflow-auto p-3">{p.renderPane(p.primary)}</div>
+            <div className={cn('h-full p-3', paneOverflowClass(p.primary))}>{p.renderPane(p.primary)}</div>
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize={50} minSize={20} className="min-h-0">
-            <div className="h-full overflow-auto p-3">{p.renderPane(p.secondary)}</div>
+            <div className={cn('h-full p-3', paneOverflowClass(p.secondary))}>{p.renderPane(p.secondary)}</div>
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>

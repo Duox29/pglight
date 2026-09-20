@@ -86,10 +86,6 @@ export function SettingsPanel(p: { dialogs: DialogsApi }) {
       <Card className="p-2.5">
         <div className="mb-2 text-[12px] font-semibold">Privacy</div>
         <div className="flex flex-col gap-2 text-[12px]">
-          <p className="text-[11px] text-muted-foreground">
-            Query text, snippets and history live in a private app database (0700/0600). Result rows are the most
-            sensitive part — they restore only when enabled below.
-          </p>
           <label className="flex items-center justify-between gap-2">
             <span>Persist query history</span>
             <Switch checked={persistHistory} onCheckedChange={setPersistHistory} />
