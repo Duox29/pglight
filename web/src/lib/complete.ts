@@ -233,7 +233,7 @@ export function createCompleteSource(session: string): CompletionSource {
         )
       }
       for (const k of KEYWORDS) {
-        if (/^(FROM|JOIN|WHERE|LIMIT)$/.test(k)) push({ label: k, type: 'keyword' }, -30)
+        if (/^(FROM|JOIN|WHERE|ORDER|BY|OFFSET|LIMIT)$/.test(k)) push({ label: k, type: 'keyword' }, -30)
       }
       return { from, options: opts.sort((a, b) => (b.boost ?? 0) - (a.boost ?? 0)).slice(0, 50) }
     }
