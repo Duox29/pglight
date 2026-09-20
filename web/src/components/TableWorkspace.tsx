@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, FileDown, Pencil, Plus, RefreshCw, Sparkles, Trash2, Upload, Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from './ui/button'
@@ -16,6 +16,7 @@ import { ColumnDialog, ConstraintDialog, type ColumnValues } from './ColumnEdito
 import { IndexDialog, TriggerDialog } from './IndexTriggerEditor'
 import { MockDataDialog } from './MockDataDialog'
 import { download, parseCSV, quoteQualified, resultToCSV, resultToInserts } from '@/lib/format'
+import { useGridSelection } from '@/hooks/useGridSelection'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from './ui/context-menu'
 
 interface Props {
@@ -80,30 +81,19 @@ export function TableWorkspace(p: Props) {
   const hasIdentity = pkIdx.length > 0
   // Bulk row selection. Keyed by primary-key values when the table exposes
   // them; falls back to serialized row content (duplicate rows share a key).
-  const [sel, setSel] = useState<Set<string>>(new Set())
-  const anchor = useRef(0)
+  // Flow: plain click = select single (drops the rest), ctrl/meta = toggle,
+  // shift = range, right-click keeps multi-selection when inside it.
   const pageRows = t.result?.rows ?? []
   const pageCols = t.result?.columns ?? []
   const rowKey = (r: unknown[]) => (hasIdentity ? JSON.stringify(pkIdx.map((i) => r[i])) : JSON.stringify(r))
+  const gridSel = useGridSelection(pageRows, rowKey)
+  const { sel, setSel } = gridSel
+  // New page / new data → drop the old selection (keys belong to other rows).
+  useEffect(() => {
+    gridSel.clear()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t.id, t.offset, t.result])
   const selRecs = pageRows.filter((r) => sel.has(rowKey(r))).map((r) => Object.fromEntries(pageCols.map((c, i) => [c, r[i]])))
-  const toggleRow = (ri: number, r: unknown[]) => {
-    const k = rowKey(r)
-    setSel((prev) => {
-      const next = new Set(prev)
-      if (next.has(k)) next.delete(k)
-      else next.add(k)
-      return next
-    })
-    anchor.current = ri
-  }
-  const rangeTo = (ri: number) => {
-    const [a, b] = anchor.current < ri ? [anchor.current, ri] : [ri, anchor.current]
-    setSel((prev) => {
-      const next = new Set(prev)
-      for (let i = a; i <= b; i++) if (pageRows[i]) next.add(rowKey(pageRows[i]))
-      return next
-    })
-  }
 
   const startImport = () => fileRef.current?.click()
 
@@ -272,9 +262,10 @@ export function TableWorkspace(p: Props) {
           {t.result ? (
             <ContextMenu>
               <ContextMenuTrigger asChild>
+                <div>
                 <Table>
                   <TableHeader>
-                    <TableRow>
+                    <TableRow onContextMenu={() => gridSel.setCtxCell(null)}>
                       {t.result.columns.map((c) => (
                         <TableHead key={c}>{c}</TableHead>
                       ))}
@@ -289,12 +280,7 @@ export function TableWorkspace(p: Props) {
                         <TableRow
                           key={ri}
                           data-state={sel.has(k) ? 'selected' : undefined}
-                          onContextMenu={() => {
-                            if (!sel.has(k)) {
-                              setSel(new Set([k]))
-                              anchor.current = ri
-                            }
-                          }}
+                          onContextMenu={() => gridSel.handleRowContextMenu(ri, r)}
                         >
                           {r.map((c, ci) => (
                               <TableCell
@@ -302,18 +288,14 @@ export function TableWorkspace(p: Props) {
                                 onDoubleClick={() => p.onEditCell(t.result!.columns[ci], orig)}
                                 onClick={(e) => {
                                   if (e.detail > 1) return
-                                  if (e.ctrlKey || e.metaKey) {
-                                    toggleRow(ri, r)
-                                    return
-                                  }
-                                  if (e.shiftKey) {
-                                    rangeTo(ri)
-                                    return
-                                  }
+                                  gridSel.handleCellClick(e, ri, r)
                                 }}
-                                onContextMenu={(e) => {
-                                  e.preventDefault()
-                                  if (c != null && navigator.clipboard) navigator.clipboard.writeText(String(c))
+                                // Record the cell for "Copy cell value" but
+                                // NEVER preventDefault — that would stop the
+                                // Radix menu from opening (see useGridSelection).
+                                onContextMenu={() => {
+                                  gridSel.handleCellContextMenu(c, t.result!.columns[ci])
+                                  gridSel.handleRowContextMenu(ri, r)
                                 }}
                               >
                                 {c == null ? <span className="italic text-muted-foreground">NULL</span> : String(c).slice(0, 200)}
@@ -340,9 +322,18 @@ export function TableWorkspace(p: Props) {
                     })}
                   </TableBody>
                 </Table>
+                </div>
               </ContextMenuTrigger>
               <ContextMenuContent>
                 <ContextMenuLabel>{selRecs.length ? `${selRecs.length} row${selRecs.length === 1 ? '' : 's'} selected` : 'No rows selected'}</ContextMenuLabel>
+                <ContextMenuItem
+                  disabled={gridSel.ctxCell == null || gridSel.ctxCell.value == null}
+                  onSelect={() => {
+                    if (gridSel.ctxCell?.value != null && navigator.clipboard) navigator.clipboard.writeText(String(gridSel.ctxCell.value))
+                  }}
+                >
+                  Copy cell value{gridSel.ctxCell ? ` (${gridSel.ctxCell.col})` : ''}
+                </ContextMenuItem>
                 <ContextMenuSub>
                   <ContextMenuSubTrigger disabled={!selRecs.length}>Export</ContextMenuSubTrigger>
                   <ContextMenuSubContent>
@@ -352,11 +343,14 @@ export function TableWorkspace(p: Props) {
                   </ContextMenuSubContent>
                 </ContextMenuSub>
                 <ContextMenuItem disabled={!selRecs.length} onSelect={() => p.onCopyRows(selRecs)}>
-                  Copy
+                  Copy {selRecs.length ? `${selRecs.length} row${selRecs.length === 1 ? '' : 's'}` : 'rows'}
                 </ContextMenuItem>
                 <ContextMenuSeparator />
                 <ContextMenuItem disabled={!selRecs.length || !hasIdentity} className="text-red-400 focus:text-red-400" onSelect={() => p.onDeleteRows(selRecs)}>
                   {hasIdentity ? 'Delete' : 'Delete (no primary key)'}
+                </ContextMenuItem>
+                <ContextMenuItem disabled={!selRecs.length} onSelect={gridSel.clear}>
+                  Clear selection
                 </ContextMenuItem>
               </ContextMenuContent>
             </ContextMenu>

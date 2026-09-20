@@ -146,13 +146,48 @@ describe('swapSplit / closeSplit / direction', () => {
     expect(result.current.pinnedId).toBeNull()
   })
 
-  it('closeSplit clears the pin', () => {
-    const { result } = setup([tab('a'), tab('b')], 'b')
+  it('closeSplit clears the pin and returns to the pinned tab', () => {
+    const { result, onActivate } = setup([tab('a'), tab('b')], 'b')
     act(() => { result.current.openSplit('a', 'horizontal') })
     expect(result.current.pinnedId).toBe('a')
     act(() => { result.current.closeSplit() })
+    expect(onActivate).toHaveBeenCalledWith('a')
     expect(result.current.pinnedId).toBeNull()
     expect(result.current.pinnedTab).toBeNull()
+  })
+
+  it('closeSplit returns to the split origin (split from A, close lands on A)', () => {
+    const { result, rerender, onActivate } = setup([tab('a'), tab('b')], 'a')
+    act(() => { result.current.openSplit('a', 'horizontal') })
+    expect(result.current.pinnedId).toBe('a')
+    expect(onActivate).toHaveBeenCalledWith('b')
+    // Emulate App: strip moved to b, pin stays on a.
+    rerender({ tabs: [tab('a'), tab('b')], activeTab: 'b' })
+    onActivate.mockClear()
+    act(() => { result.current.closeSplit() })
+    expect(onActivate).toHaveBeenCalledWith('a')
+    expect(result.current.pinnedId).toBeNull()
+  })
+
+  it('closeSplit does not re-activate when the pin is already active', () => {
+    const { result, rerender, onActivate } = setup([tab('a'), tab('b')], 'b')
+    act(() => { result.current.openSplit('a', 'horizontal') })
+    // User flips the strip onto the pinned tab: split hidden, pin persists.
+    rerender({ tabs: [tab('a'), tab('b')], activeTab: 'a' })
+    onActivate.mockClear()
+    act(() => { result.current.closeSplit() })
+    expect(onActivate).not.toHaveBeenCalled()
+    expect(result.current.pinnedId).toBeNull()
+  })
+
+  it('closeSplit does not re-activate a closed pinned tab', () => {
+    const { result, rerender, onActivate } = setup([tab('a'), tab('b')], 'b')
+    act(() => { result.current.openSplit('a', 'horizontal') })
+    rerender({ tabs: [tab('b')], activeTab: 'b' })
+    onActivate.mockClear()
+    act(() => { result.current.closeSplit() })
+    expect(onActivate).not.toHaveBeenCalled()
+    expect(result.current.pinnedId).toBeNull()
   })
 
   it('direction can be toggled', () => {

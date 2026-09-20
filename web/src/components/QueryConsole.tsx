@@ -216,16 +216,14 @@ export function QueryConsole(p: Props) {
                       onSort={(i) => {
                         setSort((prev) => (prev?.column === i ? { column: i, direction: prev.direction === 'asc' ? 'desc' : 'asc' } : { column: i, direction: 'asc' }))
                       }}
-                      onCellClick={(v) => {
-                        if (v != null && navigator.clipboard) navigator.clipboard.writeText(String(v))
-                      }}
+                      selectable
                     />
                     <div className="mt-1.5 flex items-center gap-2 text-[12px] text-muted-foreground">
                       <span className="font-medium text-foreground">{res.rows.length} row{res.rows.length === 1 ? '' : 's'}</span>
                       <span>·</span>
                       <span>{res.duration_ms ?? 0}ms</span>
                       <span>·</span>
-                      <span>click a cell to copy · click a header to sort</span>
+                      <span>click to select · ctrl/shift for multi-select · right-click for copy/export · click a header to sort</span>
                     </div>
                   </>
                 )}

@@ -14,7 +14,8 @@ interface UseSplitOpts {
 /* Split-view state for the workspace (max 2 panes) with pin semantics. The
    left pane shows the pinned tab; the right pane keeps following activeTab,
    so flipping tabs in the strip only swaps the right half while the pin stays
-   put. pinnedTab is derived — never synced via effect — so a closed tab, or
+   put. Closing the split re-activates the pinned tab (split origin).
+   pinnedTab is derived — never synced via effect — so a closed tab, or
    one equal to the active tab, simply hides the split instead of cascading
    renders. Direction persists via useAppPreference (the sanctioned
    localStorage path per AGENTS.md §3.4). */
@@ -55,7 +56,15 @@ export function useSplit({ tabs, activeTab, onActivate }: UseSplitOpts) {
     setPinnedId(a)
   }, [pinnedTab, activeTab, onActivate])
 
-  const closeSplit = useCallback(() => setPinnedId(null), [])
+  // Closing the split returns to the pinned tab (the split origin) instead
+  // of staying on the neighbor the primary pane had moved to. No-op when
+  // there is no visible pin (already active, or pinned tab closed).
+  const closeSplit = useCallback(() => {
+    if (pinnedId != null && pinnedId !== activeTab && tabs.some((t) => t.id === pinnedId)) {
+      onActivate(pinnedId)
+    }
+    setPinnedId(null)
+  }, [pinnedId, activeTab, tabs, onActivate])
 
   return { pinnedId, setPinnedId, splitDir, setSplitDir, pinnedTab, openSplit, swapSplit, closeSplit }
 }

@@ -3,6 +3,20 @@ import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './table'
 import { EmptyNote } from './feedback'
 import { Tip } from './tooltip'
+import { Button } from './button'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from './context-menu'
+import { useGridSelection } from '@/hooks/useGridSelection'
+import { download, resultToCSV, resultToJSON } from '@/lib/format'
 
 export interface GridData {
   columns: string[]
@@ -33,6 +47,15 @@ function isJsonType(v: unknown, t?: string) {
 
 function toBool(v: unknown): boolean {
   return v === true || v === 't' || v === 'true' || v === 'TRUE' || v === '1' || v === 1
+}
+
+function copyText(text: string) {
+  try {
+    const p = navigator.clipboard?.writeText(text)
+    if (p) p.catch(() => {})
+  } catch {
+    /* clipboard unavailable — menu still closes normally */
+  }
 }
 
 /** Type-aware cell comparator: numerics numerically, bools false<true, NULLs last. */
@@ -66,18 +89,41 @@ export function DataGrid({
   sort,
   onCellClick,
   cellClassName,
+  selectable,
 }: {
   data: GridData | null | undefined
   onSort?: (colIndex: number) => void
   sort?: { column: number; direction: 'asc' | 'desc' } | null
+  /** Legacy click-to-copy. Ignored when `selectable` is on (selection + context menu take over). */
   onCellClick?: (value: unknown, col: string) => void
   cellClassName?: (value: unknown) => string | undefined
+  /** Opt-in row selection + right-click menu (single/bulk select, copy/export).
+      Off by default so read-only panels (logs, stats, browser) stay plain. */
+  selectable?: boolean
 }) {
+  const pageRows = data?.rows ?? []
+  // Always called (cheap) so hook order stays stable; only wired when selectable.
+  const gridSel = useGridSelection(pageRows, (r) => JSON.stringify(r))
   if (!data || !data.columns) return <EmptyNote text="No data" />
-  return (
+  const selRows = selectable ? pageRows.filter((r) => gridSel.sel.has(JSON.stringify(r))) : []
+
+  const copySelectedCSV = () => {
+    if (!selRows.length) return
+    copyText(resultToCSV(data.columns, selRows))
+  }
+  const exportSelected = (fmt: 'csv' | 'json') => {
+    if (!selRows.length) return
+    if (fmt === 'csv') download(resultToCSV(data.columns, selRows), 'selected-rows.csv', 'text/csv')
+    else download(resultToJSON(data.columns, selRows), 'selected-rows.json', 'application/json')
+  }
+
+  const grid = (
     <Table>
       <TableHeader>
-        <TableRow className="hover:bg-transparent">
+        <TableRow
+          className="hover:bg-transparent"
+          onContextMenu={selectable ? () => gridSel.setCtxCell(null) : undefined}
+        >
           {data.columns.map((c, i) => (
             <Tip key={i} content={data.types?.[i] ? `${c} · ${data.types[i]}` : c}>
               <TableHead
@@ -104,31 +150,101 @@ export function DataGrid({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {(data.rows ?? []).map((r, ri) => (
-          <TableRow key={ri} className={ri % 2 ? 'bg-muted/20' : undefined}>
-            {r.map((c, ci) => {
-              const t = data.types?.[ci]
-              const json = c != null && isJsonType(c, t)
-              const full = c == null ? 'NULL' : json ? String(c).slice(0, 2000) : String(c).slice(0, 500)
-              const cell = (
-                <TableCell
-                  onClick={onCellClick ? () => onCellClick(c, data.columns[ci]) : undefined}
-                  className={`${c == null ? 'italic text-muted-foreground' : ''} ${cellClassName?.(c) ?? ''} ${onCellClick ? 'cursor-pointer' : ''} ${isNumericType(t) ? 'text-right font-mono' : ''} ${isBoolType(t) ? 'text-center' : ''} ${json ? 'font-mono text-[11px]' : ''}`}
-                >
-                  {c == null ? 'NULL' : isBoolType(t) ? (c === true || c === 't' || c === 'true' ? 'true' : c === false || c === 'f' || c === 'false' ? 'false' : String(c)) : String(c).slice(0, 300)}
-                </TableCell>
-              )
-              return full.length > 40 ? (
-                <Tip key={ci} content={<span className="break-all font-mono text-[11px]">{full}</span>}>
-                  {cell}
-                </Tip>
-              ) : (
-                <Fragment key={ci}>{cell}</Fragment>
-              )
-            })}
-          </TableRow>
-        ))}
+        {(data.rows ?? []).map((r, ri) => {
+          const selected = selectable && gridSel.sel.has(JSON.stringify(r))
+          return (
+            <TableRow
+              key={ri}
+              className={ri % 2 ? 'bg-muted/20' : undefined}
+              data-state={selected ? 'selected' : undefined}
+            >
+              {r.map((c, ci) => {
+                const t = data.types?.[ci]
+                const json = c != null && isJsonType(c, t)
+                const full = c == null ? 'NULL' : json ? String(c).slice(0, 2000) : String(c).slice(0, 500)
+                const cell = (
+                  <TableCell
+                    onClick={
+                      selectable
+                        ? (e) => gridSel.handleCellClick(e, ri, r)
+                        : onCellClick
+                          ? () => onCellClick(c, data.columns[ci])
+                          : undefined
+                    }
+                    // Record the cell for "Copy cell value" but NEVER
+                    // preventDefault here — Radix skips handleOpen when
+                    // defaultPrevented, which would kill the menu.
+                    onContextMenu={
+                      selectable
+                        ? () => {
+                            gridSel.handleCellContextMenu(c, data.columns[ci])
+                            gridSel.handleRowContextMenu(ri, r)
+                          }
+                        : undefined
+                    }
+                    className={`${c == null ? 'italic text-muted-foreground' : ''} ${cellClassName?.(c) ?? ''} ${selectable ? '' : onCellClick ? 'cursor-pointer' : ''} ${isNumericType(t) ? 'text-right font-mono' : ''} ${isBoolType(t) ? 'text-center' : ''} ${json ? 'font-mono text-[11px]' : ''}`}
+                  >
+                    {c == null ? 'NULL' : isBoolType(t) ? (c === true || c === 't' || c === 'true' ? 'true' : c === false || c === 'f' || c === 'false' ? 'false' : String(c)) : String(c).slice(0, 300)}
+                  </TableCell>
+                )
+                return full.length > 40 ? (
+                  <Tip key={ci} content={<span className="break-all font-mono text-[11px]">{full}</span>}>
+                    {cell}
+                  </Tip>
+                ) : (
+                  <Fragment key={ci}>{cell}</Fragment>
+                )
+              })}
+            </TableRow>
+          )
+        })}
       </TableBody>
     </Table>
+  )
+
+  if (!selectable) return grid
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div>
+          {selRows.length > 0 && (
+            <div className="mb-1 flex items-center gap-2 text-[12px] text-muted-foreground">
+              <span>
+                <b className="font-medium text-foreground">{selRows.length} selected</b>
+              </span>
+              <Button size="sm" variant="ghost" onClick={gridSel.clear}>
+                Clear
+              </Button>
+            </div>
+          )}
+          {grid}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuLabel>{selRows.length ? `${selRows.length} row${selRows.length === 1 ? '' : 's'} selected` : 'No rows selected'}</ContextMenuLabel>
+        <ContextMenuItem
+          disabled={gridSel.ctxCell == null || gridSel.ctxCell.value == null}
+          onSelect={() => {
+            if (gridSel.ctxCell?.value != null) copyText(String(gridSel.ctxCell.value))
+          }}
+        >
+          Copy cell value{gridSel.ctxCell ? ` (${gridSel.ctxCell.col})` : ''}
+        </ContextMenuItem>
+        <ContextMenuItem disabled={!selRows.length} onSelect={copySelectedCSV}>
+          Copy {selRows.length ? `${selRows.length} row${selRows.length === 1 ? '' : 's'}` : 'rows'} (CSV)
+        </ContextMenuItem>
+        <ContextMenuSub>
+          <ContextMenuSubTrigger disabled={!selRows.length}>Export selected</ContextMenuSubTrigger>
+          <ContextMenuSubContent>
+            <ContextMenuItem onSelect={() => exportSelected('csv')}>CSV</ContextMenuItem>
+            <ContextMenuItem onSelect={() => exportSelected('json')}>JSON</ContextMenuItem>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+        <ContextMenuSeparator />
+        <ContextMenuItem disabled={!selRows.length} onSelect={gridSel.clear}>
+          Clear selection
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
