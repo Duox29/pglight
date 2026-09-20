@@ -153,7 +153,7 @@ export interface ObjectTabT {
 
 export type Tab = QueryTabT | TableTabT | BrowserTabT | ErdTabT | DocsTabT | ObjectTabT
 
-export type SideView = 'history' | 'snippets' | 'aliases' | 'server' | 'activity' | 'locks' | 'stats' | 'settings' | 'logs'
+export type SideView = 'history' | 'snippets' | 'aliases' | 'server' | 'activity' | 'locks' | 'stats' | 'settings' | 'shortcuts' | 'logs'
 
 /** Capped result snapshot kept for query tabs (never auto re-run). */
 export interface QuerySnapshot {

@@ -1,4 +1,4 @@
-import { BookOpen, Database, History, LayoutDashboard, MoreHorizontal, Power, Search, Settings, Star, Zap } from 'lucide-react'
+import { BookOpen, Database, History, Keyboard, LayoutDashboard, MoreHorizontal, Power, Search, Settings, Star, Zap } from 'lucide-react'
 import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
@@ -16,7 +16,7 @@ export function ConnectionBar(props: {
   connected: boolean
   onSearch: () => void
   searchShortcut?: string
-  onPanel: (v: 'history' | 'snippets' | 'aliases' | 'server' | 'settings') => void
+  onPanel: (v: 'history' | 'snippets' | 'aliases' | 'server' | 'settings' | 'shortcuts') => void
   onDocs: () => void
   onShutdown: () => void
 }) {
@@ -54,6 +54,9 @@ export function ConnectionBar(props: {
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => props.onPanel('settings')}>
             <Settings /> Settings
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => props.onPanel('shortcuts')}>
+            <Keyboard /> Keyboard Shortcuts
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={props.onDocs}>
             <BookOpen /> Docs

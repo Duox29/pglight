@@ -2,37 +2,40 @@
 
 Source features surveyed: JetBrains DataGrip (explorer, consoles, diff, Explain, data editor, import/export, diagrams, search) and pgAdmin 4 (browser tree, dashboard, Query Tool, Properties panels, maintenance, backup, roles).
 
-## Where pglight is now (v0.2)
+## Where pglight is now (v0.2, `web` 0.2.0)
 
 | Area | Status |
 |---|---|
-| Connect + saved servers (localStorage) | ✅ |
+| Connect + saved servers (sqlite profiles + legacy migration) | ✅ |
 | Explorer: schemas → tables + est.rows, filter | ✅ |
 | Table browse: WHERE filter, ORDER, paging | ✅ |
-| Cell edit, insert, guarded delete | ✅ |
-| Query console: run, Ctrl+Enter, limit, history | ✅ |
+| Cell edit, insert, guarded delete | ✅ (PK-scoped, `single:true`, bulk `rows-delete`) |
+| Query console: run, Ctrl+Enter, limit, history | ✅ (limits 200/1k/5k/10k/no-limit + 64 MiB guard) |
 | EXPLAIN (JSON) + text plan | ✅ |
-| DDL + indexes + FKs | ✅ |
-| CSV/JSON export of result | ✅ |
-| Activity (pg_stat_activity) + cancel/kill | ✅ |
+| DDL + indexes + FKs | ✅ (OID-joined, `to_regclass` quoted names) |
+| CSV/JSON export of result | ✅ (+ INSERT export, OID exact numerics) |
+| Activity (pg_stat_activity) + cancel/kill | ✅ (`application_name` attribution) |
 | Autocomplete (tables/columns/keywords) | ✅ smart (context-aware, cached) |
-| Multi-statement / multi-result | ✅ |
-| Transactions (BEGIN/COMMIT/ROLLBACK) | ✅ |
+| Multi-statement / multi-result | ✅ (`results[]`, per-statement error locations) |
+| Transactions (BEGIN/COMMIT/ROLLBACK) | ✅ (serial querier + lease + 15min sweeper) |
 | Full tree (views/matviews/foreign/functions/seq/types/triggers/extensions/roles) | ✅ |
 | Properties (constraints/triggers/stats/sizes/comments) | ✅ |
-| Dashboard (locks, db stats, server info) | ✅ |
+| Dashboard (locks, db stats, server info) | ✅ (Server/Activity/Locks/Stats tabs) |
 | Global object search (Ctrl+K) | ✅ |
-| SQL format + CodeMirror editor + snippets | ✅ |
-| Import CSV / export as INSERTs | ✅ |
-| ER diagram (FK graph) | ✅ |
-| Maintenance (VACUUM/ANALYZE/REINDEX) | ✅ |
+| SQL format + CodeMirror editor + snippets | ✅ (sqlite-backed snippets/history) |
+| Import CSV / export as INSERTs | ✅ (20k cap, 500-row batches, atomic) |
+| ER diagram (FK graph) | ✅ (`@xyflow/react`, auto-layout, persisted) |
+| Maintenance (VACUUM/ANALYZE/REINDEX) | ✅ (allow-listed, txn-refused) |
 | Roles / privileges viewer | ✅ basic |
+| Mock-data generator (Simple/Advanced) | ✅ (`meta`/preview≤100/generate≤20000) |
+| Split workspace (2-pane) + Docs tab + shutdown | ✅ |
+| Privacy controls + TLS warnings + exact numerics | ✅ |
 | Diff / schema compare, backup/restore | ❌ (later) |
 | Debugger, SSH tunnel | ❌ (out of scope) |
 
 ## Plan — phased
 
-### Phase 1 — parity core (THIS CHANGE)
+### Phase 1 — parity core (shipped, v0.2)
 Goal: cover 80% of daily DataGrip/pgAdmin use without new deps.
 
 Backend (`internal/db`, `internal/api`):
@@ -78,9 +81,19 @@ Frontend (`web/`):
 ## API added in Phase 1
 
 ```
-POST /api/txn              {session_id, action}
+POST /api/connect           {host,port,user,password,dbname,sslmode} → {session_id,info,tls_warn}
 GET  /api/sessions          → {sessions: [{id,host,port,user,dbname,sslmode,in_txn,connected_at}]} (display info only, no passwords)
-POST /api/connect           (now also returns {info} alongside session_id, additive)
+GET  /api/disconnect?session_id=
+POST /api/txn              {session_id, action}
+GET  /api/databases?session_id= | GET /api/schemas?session_id= | GET /api/tables?session_id=&schema=
+GET  /api/objects?session_id=&schema= (views/matviews/foreign/functions/sequences/types)
+GET  /api/columns?session_id=&schema=&table= | GET /api/ddl?session_id=&schema=&table=
+GET  /api/table-data?session_id=&schema=&table=&limit=&offset=&filter=&order= → {columns,types,rows,total,has_more,in_txn}
+POST /api/query             {session_id,sql,limit} (multi-statement → {results[]}; see below)
+POST /api/explain           {session_id,sql,analyze}
+GET  /api/activity?session_id= | GET /api/cancel?session_id=&pid=[&kill=1]
+POST /api/row               {session_id,schema,table,op,values,where[,single]} (`single:true` verifies exactly 1 affected row, 409 otherwise)
+POST /api/rows-delete       {session_id,schema,table,where[]} → {deleted} — atomic bulk delete (one txn; every entry must match exactly 1 row)
 GET  /api/server-info?session_id=
 GET  /api/stats?session_id=
 GET  /api/locks?session_id=
@@ -100,7 +113,7 @@ POST /api/maintenance       {session_id,schema,table,op}
 POST /api/import            {session_id,schema,table,columns,rows,on_conflict_do_nothing}
 POST /api/alter-table       {session_id,schema,table,op,…} — columns: add_column|drop_column|rename_column|alter_type|set_nullable|set_default|rename_table (types validated via to_regtype, custom enums ok); constraints: add_constraint|drop_constraint; indexes: create_index{index?,unique,method,columns[],include[],where}|drop_index|rename_index (CREATE INDEX takes an unqualified name — always lands in the table's schema); triggers: create_trigger{trigger,timing,events[],for_each,function,update_of[],when}|drop_trigger|enable_trigger|disable_trigger
 Object tabs (functions/sequences/types): view definition + properties; edits run through `POST /api/query` with quoted identifiers — sequence ALTER (increment/min/max/cache/restart/cycle), function CREATE OR REPLACE, enum ADD VALUE, sequence/type RENAME, DROP (functions resolved via `regprocedure`, all overloads confirmed). No new backend endpoint.
-POST /api/query             (now multi-statement aware → {results[]} when >1; console limits: 200/1000/5000/10000 rows or no limit; no-limit results are guarded at 64 MiB with an actionable 413 error; large grids virtualize DOM rows)
+Multi-statement: `POST /api/query` returns `{results[]}` when >1 statement; console limits 200/1000/5000/10000 rows or no limit; no-limit results guarded at 64 MiB with an actionable 413 error; large grids virtualize DOM rows.
 GET  /api/settings          → {logging: {enabled,level,log_http,log_query,slow_ms,max_entries}}
 POST /api/settings          {logging: {...}} (normalized + persisted to data/logging.json)
 GET  /api/logs?limit=&level=&category= → {entries[]} (newest first; /api/logs not self-logged)
@@ -108,8 +121,12 @@ DELETE /api/logs            clear the ring buffer
 GET  /api/aliases           → {aliases: [{trigger,expansion,detail?,builtin}]} (builtins merged with user overrides; global, no session/PG)
 POST /api/aliases           {trigger,expansion} → upsert user entry (trigger: [a-z][a-z0-9_]{0,31}, expansion ≤2000 chars; shadows builtin; 200-entry cap)
 DELETE /api/aliases?trigger= drop one user entry (builtin restored) · DELETE /api/aliases reset all to defaults
-POST /api/rows-delete       {session_id,schema,table,where[]} → {deleted} — atomic bulk delete (one txn; every entry must match exactly 1 row)
-POST /api/row               now accepts {single:true}: update/delete verify exactly 1 affected row (409 otherwise; own txn + rollback outside explicit txns)
+GET  /api/snippets | POST /api/snippets {name,sql} | DELETE /api/snippets?name= (sqlite-backed, per user)
+GET  /api/history | POST /api/history {sql,ms?,n?} | DELETE /api/history (sqlite-backed, retention-pruned)
+GET  /api/connections | POST /api/connections {name,host,port,user,dbname,sslmode} | DELETE /api/connections?name= (saved profiles, no passwords stored client-side)
+GET  /api/preferences | POST /api/preferences {…} (per-user JSON blob: autocommit, privacy, layout)
+GET  /api/preferences/shortcuts | PUT /api/preferences/shortcuts {version,overrides} (validated application-wide command-key overrides)
+GET  /api/complete?session_id=[&refresh=1] (+ ETag/If-None-Match → 304; auto-invalidated after DDL/disconnect)
 POST /api/shutdown          → {ok:true} — close all session pools, then stop the server (header Power button, confirm dialog; POST-only, 405 otherwise; reply flushes 200ms before `os.Exit`, so it is never invoked by tests — `Manager.CloseAll` is covered in `db_test.go` instead)
 GET  /api/mock-data/meta?session_id=&schema=&table= → {columns[{name,data_type,udt,nullable,default,identity,generated,primary_key,unique,enum_values,semantic_hint}],foreign_keys[],checks[{name,definition,kind}],composite_uniques?,has_partial_unique?} — normalized introspection (catalogs/information_schema; React never parses DDL). Composite UNIQUE members are NOT flagged per-column unique; composite/partial uniques surface as planner warnings (insert-validated, not pre-satisfied).
 POST /api/mock-data/preview  {session_id,schema,table,mode,count≤100,seed?,fields?,constraints?} → {columns,rows,warnings,seed,in_txn} — generates without touching the DB; DB-filled columns render as `<database default>`
@@ -209,13 +226,15 @@ All txn-aware: `/api/query`, `/api/explain`, `/api/table-data`, `/api/row`, `/ap
 The hand-rolled vanilla UI (`web/app.js` + `web/style.css`) was replaced with a
 React + Vite + Tailwind v3 app built on **shadcn-style prebuilt components**
 (`web/src/components/ui/*`: Button, Input, Textarea, Badge, Card, Table,
-Tabs, Dialog, Select, SearchSelect (searchable single-select: Radix Popover +
+Tabs, Dialog, AlertDialog, Select, SearchSelect (searchable single-select: Radix Popover +
 filter input + option list, for FK sources and other user-named lists — plain
 Select has no search), Separator, ScrollArea (always mounts vertical +
 horizontal bars; Radix only enables horizontal scrolling when the horizontal
 bar is mounted, otherwise wide tables clip with no scrollbar), Collapsible,
 Switch, Resizable
 (react-resizable-panels, persisted via autoSaveId) for the 3-column layout,
+ContextMenu, DropdownMenu, Popover, Tooltip/`Tip` (single global dark
+`bg-popover` style — never native `title=`),
 DataGrid) on top of Radix
 primitives, `class-variance-authority`, `clsx` + `tailwind-merge`,
 `lucide-react` icons, Sonner `<Toaster>` (monochrome thin style) for all
@@ -240,10 +259,11 @@ Generate mock data (`MockDataDialog`: Simple zero-config vs Advanced
 per-column grid with Generator select + params, NULL % and Unique switch,
 pk/fk/unique/not-null badges with ref-target tooltips, compare-constraint
 builder, FK source `SearchSelect`, 20-row `DataGrid` preview with warnings,
-Generate N Rows with client-side validation),
-`VACUUM/ANALYZE/REINDEX), `BrowserView` (extensions/roles), `ErdView` (React Flow
-FK canvas: `components/erd/` — column-level edges, FK-directed auto-layout (child-left/parent-right along edge arrows, longest-path layers, DFS cycle-break, barycenter ordering, isolated tables in one grid block, blocks shelf-packed; Auto arrange re-tidies + persists, Reset clears + rebuilds), drag persistence, viewport (pan/zoom) persistence per session+schema, search, high-contrast minimap with accent viewport frame), `SidePanel` (history/snippets/server/activity/locks/stats with
-auto-refresh), `SearchPalette` (Ctrl+K global search dialog), last-session restore (open tabs +
+Generate N Rows with client-side validation,
+plus `ColumnEditor`/`IndexTriggerEditor` and row maintenance
+`VACUUM/ANALYZE/REINDEX`), `BrowserView` (extensions/roles), `ObjectView` (function/sequence/type defs + edits via `/api/query`), `ErdView` (React Flow
+FK canvas: `components/erd/` — column-level edges, FK-directed auto-layout (child-left/parent-right along edge arrows, longest-path layers, DFS cycle-break, barycenter ordering, isolated tables in one grid block, blocks shelf-packed; Auto arrange re-tidies + persists, Reset clears + rebuilds), drag persistence, viewport (pan/zoom) persistence per session+schema, search, high-contrast minimap with accent viewport frame), `SidePanel` (history/snippets/aliases/server/activity/locks/stats/settings/logs with
+auto-refresh), `AliasesPanel` + `LogsPanel` + `SettingsPanel` (logging config + privacy controls), `SearchPalette` (Ctrl+K global search dialog), `DocsView` (in-app docs tab), `TxnControls` (per-tab-tab autocommit/begin/commit/rollback badge), last-session restore (open tabs +
 active tab + autocommit persist to localStorage; autologin from last successful
 connection with an opt-out Switch in Connections). Workspace split view (max 2
 panes over the single tabs array: `TabStrip` tab bar with Split Right/Down
@@ -258,9 +278,11 @@ with direction persisted via `useAppPreference`).
 heartbeat + txn map + autocommit), `useTabs` (tab model, open/close/remap,
 last-session restore), `useSplit` (2-pane split state), `useExplorer` (tree + schema/table actions),
 `useQueryRunner` (run/cancel/explain + history/snippets), `useTableOps`
-(table data/meta/row/alter), `useObjectOps` (function/sequence/type DDL);
-shared pure helpers (`qi`, tab-id builders, `slimTab`/restore) in
-`lib/tabs.ts`.
+(table data/meta/row/alter), `useObjectOps` (function/sequence/type DDL),
+`useGridSelection` (shared single/toggle/range + right-click selection);
+shared pure helpers (`qi`, tab-id builders, `slimTab`/restore, `pkOf`, `DDL_RE`) in
+`lib/tabs.ts`, SQL formatting in `lib/format.ts`, editor completion in
+`lib/complete.ts` + `lib/schemaCache.ts`.
 Dev workflow:
 
 ```sh
@@ -280,7 +302,11 @@ Every push to `master`, PR, and manual dispatch runs the gate (`gofmt`, `go
 vet`, `go test`, `go test -race`, `govulncheck`, `tsc`, `eslint`, `npm test`
 in `web/`) against a
 postgres:14 service (integration tests run live; they skip without a DB)
-plus a 9-target matrix build. Toolchain: `go 1.26.8` via `go-version-file`.
+plus a 9-target matrix build. Toolchain: `go 1.26.8` via `go-version-file`,
+Node 22 via `setup-node` (`jsdom@30` needs it). Note: the local
+`./scripts/check.sh` runs the fast subset (gofmt, vet, test, build, tsc,
+eslint) — `-race`, `govulncheck`, and `npm test` are CI-only, run them
+manually before risky changes.
 Tagging `v*` (e.g. `git
 tag v0.3.0 && git push origin v0.3.0`) additionally publishes a GitHub Release
 with all archives attached:
@@ -367,8 +393,11 @@ decision about trusted callers and a broader frontend component migration.
 
 All Go tests live in top-level `test/` (package `test`), one file per
 domain (`session|query|explorer|data|admin|alter|appdata|db|store|logging`,
-plus `mockgen` for the pure generation engine — no DB needed —
-and `mockdata` for the `/api/mock-data/*` surface).
+`txn_lease` for the `AcquireLease` atomicity + `CloseAll`,
+`mockgen|mockgen_full|mockgen_fixes|mockgen_hardening` for the pure generation
+engine — no DB needed — and `mockdata|mockdata_full|mockdata_fixes` for the
+`/api/mock-data/*` surface; `internal/api/query_contract_test.go` pins the
+`{error}+in_txn` contract).
 They exercise only exported symbols through the real HTTP-handler surface
 (`httptest` + live docker PG, temp sqlite `Store`), never unexported
 helpers. White-box checks were ported to endpoint behavior (multi-statement
@@ -376,9 +405,13 @@ error locations via `/api/query`, numeric fidelity via `/api/row`+`/api/query`,
 FK cross-match via `/api/erd`). Every endpoint has happy + fail + edge cases;
 PG-dependent tests skip when the test DB is down, pure unit tests always run.
 `db_test.go` covers `Manager.CloseAll` (the shutdown building block);
-`MockDataDialog`/`SearchSelect`/`ConnectionBar` are covered in vitest
-(jsdom, mocked `fetch`): dialog validation guards, request-body shapes, FK
-badge + searchable source, preview clamping, failure paths, header wiring.
+vitest (jsdom, mocked `fetch`) covers `MockDataDialog` (validation guards,
+request-body shapes, preview clamping, failure paths), `SearchSelect` (FK
+badge + searchable source), `ConnectionBar` (header wiring), `DataGrid`
+(render + row menu), `TabStrip`/`SplitWorkspace`/`useSplit` (split UX),
+`useGridSelection` (single/toggle/range keys, refresh reset),
+`useTableOps.race` + `TableWorkspace.pagination` (`has_more`, stale-response
+token), and `lib/tabs` (slim/restore).
 
 ```sh
 go test -count=1 ./test/        # full suite
@@ -432,3 +465,34 @@ stats, locks, activity, roles, extensions, complete, import, ANALYZE.
 Safety kept: UPDATE/DELETE without WHERE still refused; maintenance allow-lists ops.
 Fix 2026-09-18: `GET /api/ddl` `foreign_keys` now filters `contype='f'` —
 previously every constraint (incl. the PK) leaked into that list.
+
+## Docs sync — 2026-09-20
+
+`AGENTS.md` + `PLAN.md` re-scanned against the tree (no code changes):
+`internal/api/` is 14 domains + kernel + complete cache (routes ~47 in
+`main.go`); `internal/store/` sqlite tables
+(`snippets/query_history/aliases/connection_profiles/user_preferences/erd_layouts`);
+`internal/mockgen/` pure engine vs `mockdata.go` HTTP; frontend tab kinds
+`query|table|browser|erd|docs|object`, hooks
+(`useSessions|useTabs|useSplit|useExplorer|useQueryRunner|useTableOps|useObjectOps|useGridSelection`),
+full `ui/*` widget list, `dialogs` `promptNullable`/`form` shapes, and the
+`schemaCache.ts` direct-`fetch` exception; API list de-duplicated
+(`rows-delete`/`row single`, single `query` multi-statement note) and
+completed with the missing appdata surface
+(`snippets/history/connections/preferences/complete`); status table extended
+(mock-data, split view, shutdown, privacy/TLS/numerics); `check.sh` vs CI
+gate difference recorded. Remaining follow-ups from the review above still
+stand (trusted-caller decision for free-form `filter`, raw-button drift
+migration).
+
+## Keyboard command system — 2026-09-20
+
+Implemented the application-wide command registry and rebindable shortcut
+resolver in `web/src/commands/` and `web/src/shortcuts/`. Defaults use logical
+`Mod` bindings and are merged with versioned server overrides from
+`GET|PUT /api/preferences/shortcuts`; the backend validates command IDs,
+modifiers, body size, binding count, and serialized length. The Command Palette
+now searches commands and database objects together, while Settings supports
+recording, conflict replacement, reserved-browser warnings, reset, and v0→v1
+shortcut migration. CodeMirror emits command IDs for run/autocomplete so
+custom bindings retain selection and completion behavior.

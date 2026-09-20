@@ -4,7 +4,7 @@ import { COMMANDS, getCommand } from '@/commands/registry'
 import type { CommandHandler, CommandId, CommandRegistrationOptions } from '@/commands/types'
 import { DEFAULT_BINDINGS } from './defaults'
 import { canDispatch, matchesShortcut } from './matcher'
-import { normalizeShortcut } from './normalize'
+import { normalizeShortcut, shortcutComparisonKey } from './normalize'
 import type { BindingMap } from './types'
 import { migrateShortcutSettings } from './migrate'
 
@@ -95,9 +95,9 @@ export function CommandProvider({ children }: { children: ReactNode }) {
   }, [persist])
 
   const conflictFor = useCallback((binding: string, except?: CommandId) => {
-    const normalized = normalizeShortcut(binding)
+    const normalized = shortcutComparisonKey(binding)
     if (!normalized) return null
-    const entry = Object.entries(bindings).find(([id, values]) => id !== except && values.includes(normalized))
+    const entry = Object.entries(bindings).find(([id, values]) => id !== except && values.some((value) => shortcutComparisonKey(value) === normalized))
     return entry?.[0] as CommandId | undefined ?? null
   }, [bindings])
 

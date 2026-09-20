@@ -32,6 +32,7 @@ export type CommandId =
   | 'workspace.snippets'
   | 'workspace.dashboard'
   | 'workspace.settings'
+  | 'workspace.shortcuts'
   | 'workspace.docs'
   | 'split.right'
   | 'split.down'

@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { RotateCcw, Save, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from './ui/button'
@@ -11,11 +11,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { apiClient, type LoggingConfig } from '@/lib/api'
 import { useAppPreference } from '@/lib/storage'
 import type { DialogsApi } from './dialogs'
-import { COMMANDS } from '@/commands/registry'
-import type { CommandId } from '@/commands/types'
-import { useCommand } from '@/shortcuts/ShortcutProvider'
-import { isReservedShortcut } from '@/shortcuts/reserved'
-import { normalizeShortcut, shortcutForDisplay, shortcutFromEvent } from '@/shortcuts/normalize'
 
 const LEVELS = ['debug', 'info', 'warn', 'error']
 
@@ -30,15 +25,12 @@ const DEFAULTS: LoggingConfig = {
 }
 
 export function SettingsPanel(p: { dialogs: DialogsApi }) {
-  const commands = useCommand()
   const [cfg, setCfg] = useState<LoggingConfig | null>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [persistHistory, setPersistHistory] = useAppPreference<boolean>('privacy.persistHistory', true)
   const [persistSnapshots, setPersistSnapshots] = useAppPreference<boolean>('privacy.persistSnapshots', false)
   const [retentionDays, setRetentionDays] = useAppPreference<number>('privacy.retentionDays', 30)
-  const [shortcutSearch, setShortcutSearch] = useState('')
-  const [recording, setRecording] = useState<CommandId | null>(null)
 
   useEffect(() => {
     let stop = false
@@ -86,31 +78,6 @@ export function SettingsPanel(p: { dialogs: DialogsApi }) {
     } finally {
       setSaving(false)
     }
-  }
-
-  const assignShortcut = async (id: CommandId, event: KeyboardEvent<HTMLButtonElement>) => {
-    event.preventDefault()
-    event.stopPropagation()
-    if (event.key === 'Escape') {
-      setRecording(null)
-      return
-    }
-    const binding = shortcutFromEvent(event.nativeEvent)
-    if (!binding) return
-    const normalized = normalizeShortcut(binding)
-    if (!normalized) return
-    const conflict = commands.conflictFor(normalized, id)
-    if (conflict) {
-      const replace = await p.dialogs.confirm({
-        title: 'Shortcut already assigned',
-        description: `${shortcutForDisplay(normalized)} is already assigned to ${COMMANDS.find((command) => command.id === conflict)?.title ?? conflict}. Replace it?`,
-        confirmText: 'Replace',
-      })
-      if (!replace) return
-      commands.setBindings(conflict, commands.formatBinding(conflict).filter((value) => value !== normalized))
-    }
-    commands.setBindings(id, [normalized])
-    setRecording(null)
   }
 
   return (
@@ -182,40 +149,6 @@ export function SettingsPanel(p: { dialogs: DialogsApi }) {
               <Trash2 /> Clear all local data
             </Button>
           </div>
-        </div>
-      </Card>
-      <Card className="p-2.5">
-        <div className="mb-2 text-[12px] font-semibold">Keyboard Shortcuts</div>
-        <Input value={shortcutSearch} onChange={(event) => setShortcutSearch(event.target.value)} placeholder="Search commands…" className="mb-2" />
-        <div className="max-h-[340px] overflow-auto">
-          {COMMANDS.filter((command) => `${command.title} ${command.id} ${command.category}`.toLowerCase().includes(shortcutSearch.toLowerCase())).map((command) => {
-            const bindings = commands.formatBinding(command.id)
-            const binding = bindings[0]
-            return (
-              <div key={command.id} className="flex items-center gap-2 border-b py-1.5 last:border-0">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[12px]">{command.title}</div>
-                  <div className="text-[10px] text-muted-foreground">{command.category}</div>
-                </div>
-                {recording === command.id ? (
-                  <Button size="sm" variant="secondary" autoFocus onKeyDown={(event) => void assignShortcut(command.id, event)}>Press keys…</Button>
-                ) : (
-                  <Button size="sm" variant="outline" onClick={() => setRecording(command.id)}>
-                    {binding ? shortcutForDisplay(binding) : 'Unassigned'}
-                  </Button>
-                )}
-                {binding && isReservedShortcut(binding) && <span className="text-[10px] text-amber-500">Browser reserved</span>}
-                {commands.formatBinding(command.id).length > 0 && <Button size="sm" variant="ghost" onClick={() => commands.resetBinding(command.id)} aria-label={`Reset ${command.title}`}>Reset</Button>}
-              </div>
-            )
-          })}
-        </div>
-        <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-          <span>Overrides sync to the server. Browser-reserved shortcuts may not reach pglight.</span>
-          <Button size="sm" variant="secondary" onClick={async () => {
-            const ok = await p.dialogs.confirm({ title: 'Reset keyboard shortcuts?', description: 'Restore every command to its default binding.', confirmText: 'Reset all' })
-            if (ok) commands.resetAll()
-          }}>Reset all</Button>
         </div>
       </Card>
       <Card className="p-2.5">

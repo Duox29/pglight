@@ -178,6 +178,7 @@ export default function App() {
   useCommandRegistration('workspace.snippets', () => { setSideView('snippets'); setSideOpen(true) })
   useCommandRegistration('workspace.dashboard', () => { setSideView('server'); setSideOpen(true) })
   useCommandRegistration('workspace.settings', () => { setSideView('settings'); setSideOpen(true) })
+  useCommandRegistration('workspace.shortcuts', () => { setSideView('shortcuts'); setSideOpen(true) })
   useCommandRegistration('workspace.docs', tabsApi.openDocsTab)
   useCommandRegistration('split.right', () => { if (activeTab) split.openSplit(activeTab, 'horizontal') }, { enabled: tabs.length > 1 })
   useCommandRegistration('split.down', () => { if (activeTab) split.openSplit(activeTab, 'vertical') }, { enabled: tabs.length > 1 })

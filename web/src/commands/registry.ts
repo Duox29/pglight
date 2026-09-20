@@ -26,6 +26,7 @@ const defs: CommandDefinition[] = [
   { id: 'workspace.snippets', title: 'Open Snippets', category: 'Workspace' },
   { id: 'workspace.dashboard', title: 'Open Dashboard', category: 'Workspace' },
   { id: 'workspace.settings', title: 'Open Settings', category: 'Workspace' },
+  { id: 'workspace.shortcuts', title: 'Open Keyboard Shortcuts', category: 'Workspace' },
   { id: 'workspace.docs', title: 'Open Documentation', category: 'Workspace' },
   { id: 'split.right', title: 'Split Workspace Right', category: 'Workspace' },
   { id: 'split.down', title: 'Split Workspace Down', category: 'Workspace' },

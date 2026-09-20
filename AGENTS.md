@@ -6,12 +6,26 @@
 ## 0. Stack map
 
 - **Backend**: Go 1.26.8, `github.com/jackc/pgx/v5`. API in `internal/api/`
-  (domain files: `session|explorer|query|data|admin|alter|complete|settings|aliases.go`,
-  shared core in `handlers.go`), connection pool + explicit-txn state in
-  `internal/db/manager.go`, routes in `main.go` (grouped by domain).
+  (domain files: `session|explorer|query|data|admin|alter|complete|settings|aliases`
+  + `connections|preferences|appdata|mockdata`, shared kernel in `handlers.go`,
+  autocomplete cache in `complete_cache.go`), connection pool + explicit-txn
+  state + operation leases in `internal/db/manager.go`, app data (sqlite
+  `data/pglight.db`: snippets, history, connections, preferences, aliases,
+  ERD layouts) in `internal/store/`, pure mock-data engine in
+  `internal/mockgen/` (HTTP orchestration in `mockdata.go`), HTTP/query/txn
+  logging in `internal/logging/`, flat route table in `main.go` (~47 `/api/*`
+  routes; `Manager.CloseAll` + `os.Exit` shutdown).
 - **Frontend**: React 18 + Vite 5 + Tailwind v3 + shadcn-style prebuilt
-  components (`web/src/components/ui/*`, Radix + cva + tailwind-merge +
-  lucide-react) + Sonner toasts + promise-based dialog host (`dialogs.tsx`).
+  components (`web/src/components/ui/*`: Button, Input, Textarea, Badge,
+  Card, Table, Tabs, Dialog, AlertDialog, Select, SearchSelect, Separator,
+  ScrollArea, Collapsible, Switch, Resizable, ContextMenu, DropdownMenu,
+  Popover, Tooltip/`Tip`, DataGrid) + CodeMirror SQL editor (`SqlEditor`,
+  `lib/complete.ts` + `lib/schemaCache.ts`) + ERD canvas (`@xyflow/react`,
+  `components/erd/`) + Sonner toasts + promise-based dialog host
+  (`dialogs.tsx`: `confirm`/`prompt`/`promptNullable`/`form`).
+  Domain logic in `hooks/` (`useSessions|useTabs|useSplit|useExplorer|`
+  `useQueryRunner|useTableOps|useObjectOps|useGridSelection`); tab kinds
+  `query|table|browser|erd|docs|object` (`types.ts`, helpers in `lib/tabs.ts`).
   Build output `web/dist` is **git-ignored** (local build artifact) — `main.go` embeds it.
 - **Test DB**: `docker/` → postgres:14-alpine + `init.sql` seed.
 
@@ -24,7 +38,12 @@ cd web && npm run dev              # Vite :5173, proxies /api → :8080
 ```
 
 Gate before finishing any change: `./scripts/check.sh` (gofmt, vet, test, build,
-  tsc, eslint). Frontend tests use Node 22+ (`jsdom` requires it). Frontend
+  tsc, eslint; on Windows `scripts/check.bat`). CI (`.github/workflows/build.yml`,
+  Node 22, postgres:14 service) additionally runs `go test -race`,
+  `govulncheck`, and `npm test` (vitest/jsdom) plus the 9-target release
+  matrix — run those locally when you touch txn concurrency, deps, or
+  frontend logic. Frontend tests use Node 22+ (`jsdom@30` requires it; Node 18
+  fails with `ERR_REQUIRE_ESM`). Frontend
 change ⇒ `cd web && npm run build` so the local `dist/` stays fresh (`dist/`
 is git-ignored: rebuild it, never commit it).
 
@@ -62,39 +81,65 @@ is git-ignored: rebuild it, never commit it).
    the web Settings panel — never by hand-editing the file.
 9. Formatting: `gofmt` clean, `go vet` clean, no new deps without a reason.
 10. **Domain layout (DDD-lite)**: one bounded context = one file `internal/api/<domain>.go`
-    owning its handler methods + request/response types + process-wide store
-    (e.g. `complete_cache.go`, `aliases.go`). `handlers.go` owns only the shared kernel
+    owning its handler methods + request/response types + process-wide store.
+    Current domains: `session` (connect/sessions/disconnect/txn),
+    `explorer` (databases/schemas/tables/objects/columns/ddl/defs/constraints/
+    triggers/stats/types/erd), `query` (query/explain), `data` (table-data/
+    search/import/row/rows-delete), `admin` (activity/locks/server-info/stats/
+    roles/extensions/maintenance/cancel/shutdown), `alter`, `complete`
+    (+ `complete_cache.go`), `settings` (settings/logs), `aliases`,
+    `connections`, `preferences`, `appdata` (snippets/history), `mockdata`
+    (HTTP orchestration over the pure `internal/mockgen/` engine).
+    `handlers.go` owns only the shared kernel
     (`Handler`, `writeJSON`, `sessionID`/`sessionFromBody`, `q`/`pool`, `queryJSON`/`execQuery`,
     `rowsToMaps`, `errLocation`, cross-domain detectors like `ddlRe`). NEVER copy kernel
     helpers into a domain file; NEVER touch another domain's unexported state — use its
     exported API (`globalComplete.Invalidate`, `globalAliases.List`). No `misc.go`/`utils.go` catch-alls.
+    App data lives in `internal/store/` (sqlite tables `snippets`,
+    `query_history`, `aliases`, `connection_profiles`, `user_preferences`,
+    `erd_layouts`) — never in PG target connections.
 
 ## 3. Frontend rules (React + shadcn)
 
 1. **Prebuilt UI only**: compose from `components/ui/*` (Button, Input,
-   Textarea, Badge, Card, Table, Tabs, Dialog, AlertDialog, Select, Separator,
-   ScrollArea, Collapsible, DataGrid) + `feedback.tsx` (Skeleton/ErrorText/
+   Textarea, Badge, Card, Table, Tabs, Dialog, AlertDialog, Select,
+   SearchSelect, Separator, ScrollArea, Collapsible, Switch, Resizable,
+   ContextMenu, DropdownMenu, Popover, Tooltip/`Tip`, DataGrid) +
+   `feedback.tsx` (Skeleton/ErrorText/
    EmptyNote). Do NOT hand-roll buttons/inputs/modals/tables, do NOT add raw
    CSS files — style via `cn()` + Tailwind theme tokens. New generic widget?
    Add it to `ui/` in shadcn style (cva variants, Radix under the hood).
+   Known drift (do not extend): a few feature components still contain raw
+   buttons/inputs — migrate them to `ui/*` when touched.
 2. **No native dialogs, ever**: no `alert/confirm/prompt` —
    - notifications → `toast.success/error/info` (Sonner; monochrome thin style
      on `<Toaster>` in `App.tsx`, don't restyle per-call),
    - confirmations → `dialogs.confirm({title, description, confirmText, danger})`,
-   - single input → `dialogs.prompt({title, description, defaultValue})`,
+   - single input → `dialogs.prompt({title, description, defaultValue})`
+     (nullable variant `promptNullable` returns `{isNull:true}` for explicit
+     Set-NULL; `null` still means cancelled),
    - multi-field input → `dialogs.form({title, fields[]})` (one dialog, not a
-     prompt loop). `dialogs` comes from `createDialogs` in `App.tsx`; pass it
-     down as a prop (`dialogs: DialogsApi`).
+     prompt loop; resolves `Record<string, string | null> | null`).
+   `dialogs` comes from `createDialogs` in `App.tsx`; pass it
+   down as a prop (`dialogs: DialogsApi`).
 3. **Icons**: `lucide-react` only, no emoji in UI chrome.
 4. **Data access**: all HTTP via `lib/api.ts` (`api`/`apiClient`/`q(session,…)`).
    No `fetch` elsewhere. LocalStorage only via `useLocalStorage` (or the
-   `useLocalStorage` hook in `lib/storage.ts`). Exception: ERD node layout +
+   `useLocalStorage` hook in `lib/storage.ts`). Exceptions: ERD node layout +
    viewport persist raw via `components/erd/erdStorage.ts` (keys
-   `pglight-erd-layout` / `pglight-erd-viewport`, session+schema scoped).
+   `pglight-erd-layout` / `pglight-erd-viewport`, session+schema scoped), and
+   the CodeMirror completion path in `lib/schemaCache.ts` (direct `fetch` to
+   `/api/complete` with in-memory snapshot + single-flight — do not copy this
+   pattern elsewhere).
 5. **State**: tabs are immutable (`setTabs(prev => prev.map(…))`, narrow by
-   `t.kind`); per-tab loaders are `loadTablePage`/`loadTableMeta`-style
+   `t.kind`: `query|table|browser|erd|docs|object`); per-tab loaders are
+   `loadTablePage`/`loadTableMeta`-style
    functions in `App.tsx`. Feature components stay presentational: props in,
-   callbacks out — no cross-component imports.
+   callbacks out — no cross-component imports. Domain logic lives in `hooks/`
+   (`useSessions`, `useTabs`, `useSplit`, `useExplorer`, `useQueryRunner`,
+   `useTableOps`, `useObjectOps`); shared selection in `useGridSelection`;
+   pure helpers (`qi`, tab-id builders, `slimTab`/restore, `pkOf`, `DDL_RE`)
+   in `lib/tabs.ts`.
 6. **Grids**: result/object tables use `<DataGrid>` or `ui/table` parts; cell
    values truncate (`max-w-[320px]`), NULL renders italic.
 7. **Tooltips — one global style**: always `<Tip>` (`components/ui/tooltip.tsx`,
@@ -104,38 +149,70 @@ is git-ignored: rebuild it, never commit it).
 8. **TS strict**: no `any`, no unused imports/locals, `@/` path alias (kept in
    sync in `tsconfig.json` + `vite.config.ts`). ESLint must pass;
    `eslint-disable` needs a one-line reason comment, never a blanket disable.
-9. **New view checklist**: component in `components/` → wire into `App.tsx`
+9. **New view checklist**: component in `components/` (top-level views:
+   `Explorer`, `QueryConsole`/`SqlEditor`, `TableWorkspace` (+`ColumnEditor`,
+   `IndexTriggerEditor`, `MockDataDialog`), `ObjectView`, `BrowserView`,
+   `ErdView` (+`components/erd/`), `SidePanel` (history/snippets/aliases/
+   server/activity/locks/stats/settings/logs), `SearchPalette`,
+   `CredentialManager`, `ConnectionBar`, `SettingsPanel`, `LogsPanel`,
+   `AliasesPanel`, `DocsView`, `TabStrip`/`TabContent`/`SplitWorkspace`,
+   `TxnControls`) → wire into `App.tsx`
    tabs/side/explorer → reuse `ui/*` + `dialogs`/`toast` → `npm run build`.
 
 ## 4. Test DB rules
 
 - `docker/init.sql` must stay re-runnable from scratch (`down -v` reseeds).
-  It must cover every explorer group (table+FK, view, matview, function,
-  sequence default, enum type, trigger, index, check/unique).
+  It must cover every explorer group: tables with FK (`authors` → `books` →
+  `reviews`), view (`published_books`), matview (`author_stats`), function
+  (`book_count_by_status`), sequence defaults, enum type (`mood`), trigger
+  (`trg_books_touch`), indexes, check/unique constraints, plus the
+  mock-generator fixture (`mock_users`: BIGSERIAL pk, UNIQUE email,
+  `BETWEEN` + `IN` CHECKs, `created_at <= updated_at`).
 - `docker/sample-authors.csv` stays in sync with the `authors` table for
   import testing. Never commit real credentials — the `postgres/postgres`
   test-only login lives in the compose file, nowhere else.
 
-## 5. Completed functionality (v0.2)
+## 5. Completed functionality (v0.2, `web` 0.2.0)
 
 The following non-auth functionality is implemented and covered by the current
 backend/frontend surface:
 
-- PostgreSQL sessions: saved connection profiles, multiple live sessions,
-  reconnect-after-restart, per-session transactions, and transaction-aware
-  query/data paths.
+- PostgreSQL sessions: saved connection profiles (sqlite `connection_profiles`
+  + legacy localStorage migration on boot), multiple live sessions,
+  reconnect-after-restart, per-session transactions (serial querier +
+  `AcquireLease` operation lease + 15min abandoned-txn sweeper), and
+  transaction-aware query/data paths. Safe DSN building (spaces/IPv6),
+  sslmode allow-list (`disable|prefer|require|verify-ca|verify-full`), TLS
+  warnings for unverified non-loopback links.
 - Explorer and schema work: databases, schemas, tables, views, materialized
   views, foreign tables, functions, sequences, types, indexes, triggers,
-  constraints, table statistics, DDL, ERD, global search, and autocomplete.
-- Query and data tools: single- and multi-statement queries, EXPLAIN, history,
-  snippets, cancellation, paging/filtering/ordering, guarded row edits,
-  CSV import, CSV/JSON/INSERT export, maintenance, and mock-data generation.
-- React workspace: shadcn-style UI components, table/query grids, split panes,
-  dashboard panels, object editors, session-aware tab restore, and Sonner/
-  promise-based dialogs.
+  constraints, table statistics, DDL, ERD (`@xyflow/react` canvas:
+  column-level FK edges, auto-layout, drag/viewport persistence, search,
+  minimap), global search, and context-aware cached autocomplete
+  (`/api/complete` + ETag/304 + DDL invalidation).
+- Query and data tools: single- and multi-statement queries (per-result
+  limits 200/1000/5000/10000/no-limit with 64 MiB guard → 413), EXPLAIN,
+  history, snippets, cancellation (`application_name=pglight:<session>` +
+  Dashboard), paging/filtering/ordering (`has_more`), guarded row edits
+  (PK-scoped, `single:true` 409 on non-1-row, real JSON null — no
+  `__NULL__` sentinel), bulk delete, CSV import, CSV/JSON/INSERT export
+  (OID-aware exact numerics: int8/numeric/money as strings + `UseNumber`
+  decode), maintenance, and mock-data generation (Simple zero-config vs
+  Advanced schema-aware: semantic generators, ranges, FK pools incl.
+  composite, CHECK inference, relative datetimes, `meta/preview≤100/`
+  `generate≤20000` — pure engine `internal/mockgen/`, txn-aware HTTP
+  `mockdata.go`).
+- React workspace: shadcn-style UI components, table/query grids, 2-pane
+  split view (`useSplit`, pinned tab, direction/swap), dashboard panels
+  (Server/Activity/Locks/Stats), object editors (function/sequence/type),
+  `DocsView`, session-aware tab restore (capped snapshots, privacy-gated),
+  Sonner/promise-based dialogs, and `POST /api/shutdown` Power button.
 - Observability and local app data: HTTP/query/transaction logging with the
-  Settings panel, aliases, preferences, privacy controls, and persisted ERD
-  layouts.
+  Settings panel (`data/logging.json` via `/api/settings` only), aliases
+  (builtin + user overrides), snippets/history/connections/preferences
+  (sqlite `Store`, `PGLIGHT_STORE`/`PGLIGHT_USER_ID` overridable),
+  privacy controls (history persistence, snapshot restore default off,
+  retention prune, clear-all), and persisted ERD layouts.
 
 ## 6. Docs & commits
 

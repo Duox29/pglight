@@ -36,6 +36,14 @@ export function normalizeShortcut(value: string): string | null {
   return [...ordered, key].join('+')
 }
 
+/** Canonical form for comparing a physical platform modifier with logical Mod. */
+export function shortcutComparisonKey(value: string): string | null {
+  const normalized = normalizeShortcut(value)
+  if (!normalized) return null
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+  return normalized.replace('Mod', isMac ? 'Meta' : 'Ctrl')
+}
+
 export function shortcutFromEvent(event: KeyboardEvent): string | null {
   const key = normalizeKey(event.key)
   if (!key || ['Control', 'Meta', 'Alt', 'Shift'].includes(key)) return null
