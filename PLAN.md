@@ -61,7 +61,8 @@ Frontend (`web/`):
 - [x] Session survive-restart: per-session credentials (`session-conns`), boot 1:1 reconnect so tabs keep their own DB (dead sessions badged, never collapsed onto another DB), global 401 hook + 30s/focus heartbeat with one-shot auto-retry, per-session Reconnect / Reconnect-all in Connections, tab ids remapped on reconnect.
 - [x] Dashboard panel: Server | Activity | Locks | Stats tabs (auto-refresh activity/locks).
 - [x] ERD tab per schema: SVG FK graph (click node → open table).
-- [x] Import CSV into open table (file picker, `.tsv` forced to tab delimiter + header detection + ragged-width reject, batch POST), Export as INSERT statements (identifier-quoted, typed literals: NULL/TRUE/FALSE/numbers/JSON/arrays), copy cell via right-click (single click only selects; double-click edits). CSV export quotes headers, NULL as empty, objects as JSON.
+- [x] Import CSV into open table (file picker, `.tsv` forced to tab delimiter + header detection + ragged-width reject, batch POST), Export as INSERT statements (identifier-quoted, typed literals: NULL/TRUE/FALSE/numbers/JSON/arrays), right-click opens the row menu (Copy cell value / Export / Copy / Delete — never `preventDefault` on the cell, or Radix skips open). CSV export quotes headers, NULL as empty, objects as JSON.
+- [x] Grid selection flow (shared `useGridSelection`, Open Data + query `DataGrid[selectable]`): plain left-click selects exactly one row, ctrl/meta toggles, shift ranges from anchor, right-click keeps multi-selection when inside it; query grids offer Copy cell value / Copy rows / Export selected CSV|JSON.
 - [x] Async safety: `api()` throws `ApiError` on transport/invalid-JSON (backend `{error}` JSON still resolved per contract); `runQuery` uses try/finally so the running flag always clears; txn/explorer/table/row/alter/cancel/maintenance/import paths surface transport errors via toast or tab error; reconnect-all is per-session guarded; browser/ERD/restore loads carry a token so late responses cannot overwrite newer tabs; search palette drops stale responses by sequence.
 - [x] Row identity: cell edit uses the table's primary key from `/api/columns` and refuses when there is none (or a PK value is NULL); bulk selection keys by PK values when known, falling back to serialized rows; pagination disables Prev at offset 0 and Next at `total`; query result sort is derived state with asc/desc instead of mutating tab results.
 
@@ -110,10 +111,16 @@ DELETE /api/aliases?trigger= drop one user entry (builtin restored) · DELETE /a
 POST /api/rows-delete       {session_id,schema,table,where[]} → {deleted} — atomic bulk delete (one txn; every entry must match exactly 1 row)
 POST /api/row               now accepts {single:true}: update/delete verify exactly 1 affected row (409 otherwise; own txn + rollback outside explicit txns)
 POST /api/shutdown          → {ok:true} — close all session pools, then stop the server (header Power button, confirm dialog; POST-only, 405 otherwise; reply flushes 200ms before `os.Exit`, so it is never invoked by tests — `Manager.CloseAll` is covered in `db_test.go` instead)
-GET  /api/mock-data/meta?session_id=&schema=&table= → {columns[{name,data_type,udt,nullable,default,identity,generated,primary_key,unique,enum_values,semantic_hint}],foreign_keys[],checks[{name,definition,kind}]} — normalized introspection (catalogs/information_schema; React never parses DDL)
+GET  /api/mock-data/meta?session_id=&schema=&table= → {columns[{name,data_type,udt,nullable,default,identity,generated,primary_key,unique,enum_values,semantic_hint}],foreign_keys[],checks[{name,definition,kind}],composite_uniques?,has_partial_unique?} — normalized introspection (catalogs/information_schema; React never parses DDL). Composite UNIQUE members are NOT flagged per-column unique; composite/partial uniques surface as planner warnings (insert-validated, not pre-satisfied).
 POST /api/mock-data/preview  {session_id,schema,table,mode,count≤100,seed?,fields?,constraints?} → {columns,rows,warnings,seed,in_txn} — generates without touching the DB; DB-filled columns render as `<database default>`
-POST /api/mock-data/generate {session_id,schema,table,mode,count≤20000,seed?,fields?,constraints?} → {generated,inserted,seed,duration_ms,in_txn} — atomic bulk insert via the shared `insertRowsBatched` helper (500-row batches, txn-aware: inside the explicit txn when open, else a private all-or-nothing txn)
+POST /api/mock-data/generate {session_id,schema,table,mode,count≤20000,seed?,fields?,constraints?} → {generated,inserted,seed,duration_ms,in_txn} — atomic bulk insert via the shared `insertRowsBatched` helper (batches sized for the 65535-parameter limit; zero-column plans batch DEFAULT VALUES statements; single-column FK pools ORDER BY for seed determinism). Txn-aware via the `Manager.AcquireLease` operation lease: when an explicit txn is open the raw pgx.Tx is held under e.mu for metadata → generation → ALL batches, so a racing Commit blocks until release instead of partially committing. Advanced validation: exact integer params (json.Number-safe, int2/int4/int8 bounds, min≤max for integer/decimal/relative offsets), strict full-consumption CHECK grammar (any unconsumed predicate → unsupported + warning), composite FKs treated as one unit (any per-member override/custom generator is a 400), weights capped/normalized once at plan time, constant/choice payloads capped, sequence arithmetic overflow-checked, large day offsets via AddDate. Uniqueness is batch-scoped (warned); compare literals accept json.Number (no lexicographic fallback).
 ```
+
+Mock-data hardening: CHECK integer bounds and custom numeric comparisons retain
+BIGINT precision (no float64 round-trip); strict decimal CHECKs fail closed.
+Sequence generation validates the complete range against int2/int4/int8 width,
+weights are normalized once per plan, and MATCH FULL composite foreign keys
+make NULL decisions at tuple level.
 
 Mock Data Generator (Table workspace → Generate → `MockDataDialog`):
 Simple = datatype-only, zero-config (random strings for `email`/`first_name`
@@ -126,23 +133,34 @@ plus "Use Advanced mode to configure constraints" in Simple mode only
 Advanced = schema-aware: semantic Auto generators (Email/Name/Phone/URL…),
 numeric/date ranges, Choice/Sequence/Constant/JSON/Array, NULL probability
 (clamped 0..1 server-side; NULLs bypass uniqueness tracking, matching PG),
-UNIQUE (schema-promoted for non-PK unique columns; bounded 50-attempt retry,
-never infinite), existing-row FK pools (uniform/sequential round-robin;
-unknown mode falls back to uniform; empty non-nullable FK errors; per-field
-source picker overrides the pool via params `ref_schema/ref_table/ref_column`,
+UNIQUE (single-column constraints/indexes only — composite UNIQUEs never mark
+members; single-key rule uses `indnkeyatts=1` and skips partial/expression
+indexes; bounded 50-attempt retry, never infinite), existing-row FK pools
+(uniform/sequential round-robin; composite FOREIGN KEYs pick one referenced
+tuple per row so members can't mix into nonexistent combinations; unknown
+mode falls back to uniform; empty non-nullable FK errors; per-field source
+picker overrides the pool via params `ref_schema/ref_table/ref_column`,
 identifiers sanitized, same-session read so uncommitted parents are visible),
-BETWEEN/comparison/IN CHECK inference (incl. PG-normalized `>= AND <=` and
-`= ANY (ARRAY[…])` forms with `::type` casts stripped and `''` unescaped;
-multiple checks on one column merge to the tightest bound; explicit params win
-per-side; unsupported CHECKs warn and defer to PG), enum columns resolve Auto
+conservative CHECK inference (OR/NOT/CASE/functions/multi-column expressions
+are unsupported and warn instead of partially inferring; BETWEEN/comparison/IN
+forms incl. PG-normalized `>= AND <=` and `= ANY (ARRAY[…])` with `::type`
+casts stripped and `''` unescaped; multiple checks on one column merge to the
+tightest bound; inferred ranges feed integer AND decimal generators, IN sets
+feed integer/string/choice; explicit params win), enum columns resolve Auto
 to Choice over their labels, IN-checks narrow Auto strings, Auto on
 identity/serial resolves to DB Default, custom compare constraints
-(`= != < <= > >=` plus `<>`, structured JSON only — no expression eval;
-literals allowed as sides; NULLs compare only via `=`/`!=`), and Relative
-DateTime dependents ordered by a dependency graph (cycles rejected; missing
-source, unknown source and default-omitted source all error clearly).
+(`= != < <= > >=` plus `<>`, structured JSON only — no expression eval,
+max 64 per request; literals allowed as sides; NULLs compare only via
+`=`/`!=`), and Relative DateTime dependents ordered by a dependency graph
+(cycles rejected; missing source, unknown source and default-omitted source
+all error clearly). Default-only tables (all identity/default) generate
+DEFAULT rows instead of erroring. Sequence/FK round-robin counters commit
+only on successful rows, so constraint retries leave no gaps.
 Request bodies decode with `Decoder.UseNumber()`, so numeric params arrive as
 `json.Number` — the engine coerces them (ints, floats, weights, scales).
+Advanced params are validated server-side at plan time (string lengths ≤4096,
+array items ≤1000, choices ≤1000 values, finite numbers, offsets ≤365000
+days, true_probability ∈ [0,1]); JSON bodies are capped at 64MB.
 Engine is pure/deterministic under `internal/mockgen/` (schema, generators,
 constraints, generator); HTTP orchestration in `internal/api/mockdata.go`
 (preview ≤100 rows, generate ≤20000, both txn-aware; FK pools load once per
@@ -160,8 +178,13 @@ exactly. `resultToInserts`/`quoteLiteral` understand OID type tags.
 
 Txn concurrency: one explicit txn serializes all session operations through
 a per-session mutex (`db.serialQuerier`); Commit/Rollback/Close wait for
-in-flight work. `Manager.Snapshot` reads pool+txn state atomically
-(`/api/import` uses it). Transactions idle >15min are rolled back by the
+in-flight work (lock order is always txnLock → e.mu → m.mu; the sweeper
+copies entry refs under m.mu and releases it before touching e.mu, so no
+m.mu→e.mu vs e.mu→m.mu deadlock; `done` is an atomic flag, race-clean).
+Write paths (`/api/mock-data/*`, `/api/import`) hold a `Manager.AcquireLease`
+operation lease for the whole metadata → generation → all-batches sequence,
+so a racing Commit blocks until release instead of partially committing.
+Transactions idle >15min are rolled back by the
 sweeper (surfaced via `in_txn: false` on next status poll).
 
 Catalog hardening: foreign-table filter uses `foreign_table_schema`;
@@ -254,7 +277,8 @@ frontend change before `go build`.
 ## CI & releases (`.github/workflows/build.yml`)
 
 Every push to `master`, PR, and manual dispatch runs the gate (`gofmt`, `go
-vet`, `go test`, `go test -race`, `govulncheck`, `tsc`, `eslint`) against a
+vet`, `go test`, `go test -race`, `govulncheck`, `tsc`, `eslint`, `npm test`
+in `web/`) against a
 postgres:14 service (integration tests run live; they skip without a DB)
 plus a 9-target matrix build. Toolchain: `go 1.26.8` via `go-version-file`.
 Tagging `v*` (e.g. `git

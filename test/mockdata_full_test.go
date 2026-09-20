@@ -92,10 +92,60 @@ func TestMockMetaRichTable(t *testing.T) {
 		t.Fatalf("want exactly 1 FK, got %s", body)
 	}
 	fk := fks[0].(map[string]any)
-	requireKeys(t, "fk", fk, "name", "column", "ref_schema", "ref_table", "ref_column")
+	requireKeys(t, "fk", fk, "name", "column", "ref_schema", "ref_table", "ref_column", "match_type")
 	requireDeep(t, body, "fk.column", fk["column"], "pid")
 	requireDeep(t, body, "fk.ref", []any{fk["ref_schema"], fk["ref_table"], fk["ref_column"]},
 		[]any{"public", parent, "id"})
+	requireDeep(t, body, "fk.match_type", fk["match_type"], "s")
+}
+
+func TestMockMatchFullMetadataAndGeneration(t *testing.T) {
+	h, sid := newHandler(t)
+	parent := tempTable(t)
+	child := tempTable(t)
+	execSQL(t, h, sid, fmt.Sprintf(`CREATE TABLE public.%s (
+		a INT NOT NULL,
+		b INT NOT NULL,
+		UNIQUE (a, b)
+	)`, parent))
+	execSQL(t, h, sid, fmt.Sprintf("INSERT INTO public.%s (a, b) VALUES (1, 10), (2, 20)", parent))
+	execSQL(t, h, sid, fmt.Sprintf(`CREATE TABLE public.%s (
+		a INT,
+		b INT,
+		FOREIGN KEY (a, b) REFERENCES public.%s (a, b) MATCH FULL
+	)`, child, parent))
+	t.Cleanup(func() {
+		execSQL(t, h, sid, "DROP TABLE IF EXISTS public."+child)
+		execSQL(t, h, sid, "DROP TABLE IF EXISTS public."+parent)
+	})
+
+	code, body := callGET(t, h.MockMeta, withSID(sid, "/api/mock-data/meta?schema=public&table="+child))
+	requireStatus(t, body, code, 200)
+	fks := decodeObj(t, body)["foreign_keys"].([]any)
+	if len(fks) != 2 {
+		t.Fatalf("want 2 composite FK members, got %s", body)
+	}
+	for _, raw := range fks {
+		fk := raw.(map[string]any)
+		requireDeep(t, body, "fk.match_type", fk["match_type"], "f")
+	}
+
+	request := fmt.Sprintf(`"schema":"public","table":%q,"mode":"advanced","count":1000,"seed":17,
+		"fields":[
+			{"column":"a","generator":"foreign_key","null_probability":0.5},
+			{"column":"b","generator":"foreign_key","null_probability":0.5}
+		]`, child)
+	code, body = callPOST(t, h.MockGenerate, "/api/mock-data/generate", postBody(sid, request))
+	requireStatus(t, body, code, 200)
+	partial := queryRows(t, h, sid, fmt.Sprintf(
+		"SELECT count(*) FROM public.%s WHERE (a IS NULL) <> (b IS NULL)", child))[0][0]
+	if fmt.Sprint(partial) != "0" {
+		t.Fatalf("MATCH FULL generated partial NULL tuples: %v", partial)
+	}
+	count := queryRows(t, h, sid, "SELECT count(*) FROM public."+child)[0][0]
+	if fmt.Sprint(count) != "1000" {
+		t.Fatalf("want 1000 generated rows, got %v", count)
+	}
 }
 
 func TestMockMetaEdges(t *testing.T) {

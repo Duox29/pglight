@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -73,11 +75,23 @@ func sessionFromBody(id string, r *http.Request) string {
 	return sessionID(r)
 }
 
+// maxBodyBytes caps JSON request bodies (all endpoints share decodeBody):
+// 64MB comfortably fits a 20k-row import while bounding memory/CPU from
+// hostile payloads. Larger bodies get a clean 400, not an OOM.
+const maxBodyBytes = 64 << 20
+
 // decodeBody decodes a JSON request body preserving numeric fidelity:
 // json.Number keeps arbitrary precision instead of collapsing to float64.
 // Callers convert numbers via numVal before passing them to PostgreSQL.
 func decodeBody(r *http.Request, v any) error {
-	dec := json.NewDecoder(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(body) > maxBodyBytes {
+		return fmt.Errorf("request body too large (max %d bytes)", maxBodyBytes)
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
 	return dec.Decode(v)
 }
@@ -390,9 +404,12 @@ func rowsToMaps(cols []string, data [][]any) []map[string]any {
 
 // insertRowsBatched is the shared bulk-INSERT path for CSV import
 // (/api/import) and mock-data generation (/api/mock-data/generate):
-// 500-row parameterized batches, pgx-sanitized identifiers, atomic only
-// when the caller wraps it in a transaction (both callers do — either the
-// session's explicit txn or a private one they commit/rollback themselves).
+// pgx-sanitized identifiers, atomic only when the caller wraps it in a
+// transaction (both callers do — either the session's explicit txn or a
+// private one they commit/rollback themselves). Batches are sized so one
+// statement never exceeds PostgreSQL's 65535 bind-parameter limit
+// (500 rows × N columns); a zero-column call inserts DEFAULT VALUES rows
+// (default-only tables).
 func insertRowsBatched(ctx context.Context, q db.Querier, schema, table string, columns []string, rows [][]any, suffix string) (int64, error) {
 	cols := make([]string, len(columns))
 	for i, c := range columns {
@@ -402,7 +419,51 @@ func insertRowsBatched(ctx context.Context, q db.Querier, schema, table string, 
 		cols[i] = pgx.Identifier{c}.Sanitize()
 	}
 	qt := pgx.Identifier{schema, table}.Sanitize()
-	const batchSize = 500
+	if len(cols) == 0 {
+		// Default-only tables have no column list. One INSERT per row would
+		// need 20k round-trips for a full request, so batch many
+		// single-row DEFAULT VALUES statements into one Exec per batch
+		// (same transaction/lease as the caller holds — still atomic).
+		const defBatch = 500
+		var total int64
+		for s := 0; s < len(rows); s += defBatch {
+			e := s + defBatch
+			if e > len(rows) {
+				e = len(rows)
+			}
+			for _, row := range rows[s:e] {
+				if len(row) != 0 {
+					return 0, fmt.Errorf("row width %d != columns 0", len(row))
+				}
+			}
+			n := e - s
+			var sb strings.Builder
+			for i := 0; i < n; i++ {
+				sb.WriteString(fmt.Sprintf("INSERT INTO %s DEFAULT VALUES%s; ", qt, suffix))
+			}
+			tag, err := q.Exec(ctx, sb.String())
+			if err != nil {
+				return 0, err
+			}
+			// Multi-statement Exec reports only the last tag; each
+			// statement inserts exactly one row, so count batches exactly.
+			if tag.RowsAffected() == int64(n) {
+				total += tag.RowsAffected()
+			} else {
+				total += int64(n)
+			}
+		}
+		return total, nil
+	}
+	// maxPGParams is PostgreSQL's extended-protocol bind-parameter ceiling.
+	const maxPGParams = 65535
+	batchSize := 500
+	if n := maxPGParams / len(cols); n < batchSize {
+		batchSize = n
+	}
+	if batchSize < 1 {
+		return 0, fmt.Errorf("too many columns (%d): one row exceeds 65535 parameters", len(cols))
+	}
 	var total int64
 	for s := 0; s < len(rows); s += batchSize {
 		e := s + batchSize

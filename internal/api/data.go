@@ -133,7 +133,16 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 	if schema == "" {
 		schema = "public"
 	}
-	pool, hasPool, inTxn := h.Mgr.Snapshot(id)
+	// One operation lease: when an explicit txn is open the raw pgx.Tx under
+	// e.mu serves metadata reads AND all INSERT batches, and Commit blocks
+	// until release — so a concurrent Commit can't commit batch 1 and fail
+	// batch 2 (partial commit with an error to the user).
+	qqRaw, release, inTxn, pool, ok := h.Mgr.AcquireLease(id)
+	if !ok {
+		writeJSON(w, 401, map[string]string{"error": "not connected"})
+		return
+	}
+	defer release()
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
 
@@ -145,11 +154,7 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 	// digit-strings against the real column types so exact int8/numeric
 	// values — including ones the UI round-tripped as strings — keep their
 	// PostgreSQL types.
-	qqMeta, ok := h.Mgr.Q(id)
-	if !ok {
-		writeJSON(w, 401, map[string]string{"error": "not connected"})
-		return
-	}
+	qqMeta := qqRaw
 	udts, err := colUDTs(ctx, logging.Wrap(qqMeta, h.Log, id), schema, req.Table)
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
@@ -165,7 +170,6 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if inTxn {
-		qqRaw, _ := h.Mgr.Q(id)
 		qq := logging.Wrap(qqRaw, h.Log, id)
 		total, err := insertRowsBatched(ctx, qq, schema, req.Table, req.Columns, coerced, suffix)
 		if err != nil {
@@ -175,7 +179,7 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"rows_affected": total, "in_txn": true})
 		return
 	}
-	if !hasPool {
+	if pool == nil {
 		writeJSON(w, 401, map[string]string{"error": "not connected"})
 		return
 	}

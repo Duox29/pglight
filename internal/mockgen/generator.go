@@ -3,6 +3,7 @@ package mockgen
 import (
 	"fmt"
 	"math/rand"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -36,6 +37,10 @@ type Plan struct {
 	HintRanges  map[string][2]any
 	HintIN      map[string][]any
 	Warnings    []string
+	// FKTuples holds one referenced tuple pool per composite FK group name,
+	// loaded by the API layer after planning (fetchFKValues). GenerateRows
+	// picks one tuple per row so members stay coherent.
+	FKTuples map[string][][]any
 	// Seeded pins the generation clock to a deterministic anchor so the
 	// same seed always yields the same output. Unseeded runs use now.
 	Seeded  bool
@@ -83,6 +88,9 @@ func BuildPlan(meta TableMeta, req Request) (*Plan, error) {
 			return nil, fmt.Errorf("unsupported operator %q (want one of = != < <= > >=)", c.Operator)
 		}
 	}
+	if len(req.Constraints) > MaxConstraintsPerRequest {
+		return nil, fmt.Errorf("too many constraints (max %d)", MaxConstraintsPerRequest)
+	}
 
 	p := &Plan{Meta: meta, Mode: mode, Seeded: req.HasSeed, SeedVal: req.Seed}
 	if mode == "simple" {
@@ -93,13 +101,15 @@ func BuildPlan(meta TableMeta, req Request) (*Plan, error) {
 			}
 			p.Fields = append(p.Fields, FieldSpec{Column: c.Name, Generator: "simple"})
 		}
-		if len(p.Fields) == 0 {
-			return nil, fmt.Errorf("no writable columns (all are identity/generated/default)")
-		}
 		for _, c := range meta.Columns {
 			if !contains(p.Omitted, c.Name) {
 				p.InsertCols = append(p.InsertCols, c.Name)
 			}
+		}
+		if len(p.Fields) == 0 {
+			// Legitimate table (e.g. id BIGSERIAL + created_at DEFAULT
+			// now()): generate DEFAULT-only rows, filled by PostgreSQL.
+			p.Warnings = append(p.Warnings, "All columns are database defaults — inserting DEFAULT rows.")
 		}
 		return p, nil
 	}
@@ -139,11 +149,17 @@ func BuildPlan(meta TableMeta, req Request) (*Plan, error) {
 		}
 	}
 	// CHECK hints: fold supported checks into implicit ranges/choices and
-	// warn on the rest (PostgreSQL stays the final validator).
+	// warn on the rest (PostgreSQL stays the final validator). Column names
+	// are passed so partially-parseable multi-column CHECKs are rejected
+	// instead of silently dropping clauses.
+	colNames := make([]string, len(meta.Columns))
+	for i, c := range meta.Columns {
+		colNames[i] = c.Name
+	}
 	hintRanges := map[string][2]any{}
 	hintIN := map[string][]any{}
 	for _, ch := range meta.Checks {
-		h, kind, ok := ParseCheckHint(ch.Definition)
+		h, kind, ok := ParseCheckHintForColumns(ch.Definition, colNames)
 		if !ok {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("Unsupported CHECK %s: %s — validated by PostgreSQL during insertion.", ch.Name, ch.Definition))
 			continue
@@ -156,26 +172,70 @@ func BuildPlan(meta TableMeta, req Request) (*Plan, error) {
 				lo, hi = cur[0], cur[1]
 			}
 			if h.Min != nil {
-				if lo == nil || *h.Min > toFloat(lo) {
-					lo = *h.Min
+				candidate := any(*h.Min)
+				if h.MinRaw != nil && isIntegerColumn(*meta.ColumnByName(h.Column)) {
+					if v, err := strconv.ParseInt(*h.MinRaw, 10, 64); err == nil {
+						candidate = v
+					}
+				}
+				if lo == nil || compareAnyNumeric(candidate, lo) > 0 {
+					lo = candidate
 				}
 			}
 			if h.Max != nil {
-				if hi == nil || *h.Max < toFloat(hi) {
-					hi = *h.Max
+				candidate := any(*h.Max)
+				if h.MaxRaw != nil && isIntegerColumn(*meta.ColumnByName(h.Column)) {
+					if v, err := strconv.ParseInt(*h.MaxRaw, 10, 64); err == nil {
+						candidate = v
+					}
 				}
-			}
-			if lo == nil {
-				lo = float64(-1000000)
-			}
-			if hi == nil {
-				hi = float64(1000000)
+				if hi == nil || compareAnyNumeric(candidate, hi) < 0 {
+					hi = candidate
+				}
 			}
 			hintRanges[h.Column] = [2]any{lo, hi}
 		case "in":
 			hintIN[h.Column] = h.Values
 		}
 		_ = kind
+	}
+	// Materialize open bounds only after all CHECKs for a column have been
+	// merged. Integer columns use their PostgreSQL width; this prevents a
+	// one-sided CHECK such as id >= 2000000 from becoming an inverted range
+	// against the old generic default max of 1000000.
+	for col, r := range hintRanges {
+		c := meta.ColumnByName(col)
+		if c == nil {
+			continue
+		}
+		lo, hi := r[0], r[1]
+		if isIntegerColumn(*c) {
+			minType, maxType := intTypeBounds(*c)
+			if lo == nil {
+				lo = minType
+			}
+			if hi == nil {
+				hi = maxType
+			}
+		} else {
+			if lo == nil {
+				lo = float64(-1000000)
+			}
+			if hi == nil {
+				hi = float64(1000000)
+			}
+			if compareAnyNumeric(lo, hi) > 0 {
+				if r[0] != nil {
+					hi = lo
+				} else {
+					lo = hi
+				}
+			}
+		}
+		if compareAnyNumeric(lo, hi) > 0 {
+			return nil, fmt.Errorf("inconsistent CHECK range for column %q", col)
+		}
+		hintRanges[col] = [2]any{lo, hi}
 	}
 	_ = hintRanges
 	_ = hintIN
@@ -227,6 +287,42 @@ func BuildPlan(meta TableMeta, req Request) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Composite FK coherence as one unit: tuple generation is only safe
+	// when EVERY member takes automatic FK values. If any member pins an
+	// explicit ref_* source, uses Constant/another non-FK generator, or is
+	// omitted/nulled, the remaining members would mix a random tuple with
+	// the custom value and recreate the invalid-tuple problem — reject
+	// with a clear message (group-level sources are future work).
+	for _, g := range meta.FKGroups() {
+		if len(g.Local) < 2 {
+			continue
+		}
+		if g.MatchType == "f" || g.MatchType == "full" {
+			var prob *float64
+			for _, lc := range g.Local {
+				f := byCol[lc]
+				if prob == nil {
+					v := f.NullProb
+					prob = &v
+				} else if *prob != f.NullProb {
+					return nil, fmt.Errorf("composite MATCH FULL foreign key %q requires identical null_probability for all members", g.Name)
+				}
+			}
+		}
+		for _, lc := range g.Local {
+			f, ok := byCol[lc]
+			if !ok {
+				continue
+			}
+			gen := strings.ToLower(strings.TrimSpace(f.Generator))
+			if hasExplicitRefParams(f.Params) || hasAnyRefParam(f.Params) {
+				return nil, fmt.Errorf("composite foreign key %q requires all members to use automatic FK generation: column %q pins an explicit source (configure group-level sources instead)", g.Name, lc)
+			}
+			if gen != "auto" && gen != "foreign_key" {
+				return nil, fmt.Errorf("composite foreign key %q requires all members to use automatic FK generation: column %q uses %q", g.Name, lc, f.Generator)
+			}
+		}
+	}
 	// Validate constraint fields exist.
 	for _, cc := range req.Constraints {
 		for _, s := range []ConstraintSide{cc.Left, cc.Right} {
@@ -235,13 +331,73 @@ func BuildPlan(meta TableMeta, req Request) (*Plan, error) {
 			}
 		}
 	}
+	// Server-side param validation: fail fast before any row is generated.
+	// Weights are normalized once here (parsed + capped) so generation
+	// never re-allocates a huge array per row.
+	for _, name := range ordered {
+		f := byCol[name]
+		c := meta.ColumnByName(name)
+		if c == nil {
+			return nil, fmt.Errorf("unknown column %q", name)
+		}
+		if err := validateFieldParams(*c, f); err != nil {
+			return nil, err
+		}
+		if f.Generator == "sequence" && isIntegerColumn(*c) {
+			start, _ := fieldExactInt(f.Params, "start", 1)
+			step, _ := fieldExactInt(f.Params, "step", 1)
+			if step == 0 {
+				step = 1
+			}
+			delta, ok := checkedMul(int64(req.Count-1), step)
+			last, ok2 := checkedAdd(start, delta)
+			if !ok || !ok2 {
+				return nil, fmt.Errorf("sequence overflow for column %q", c.Name)
+			}
+			lo, hi := intTypeBounds(*c)
+			minV, maxV := start, last
+			if minV > maxV {
+				minV, maxV = maxV, minV
+			}
+			if minV < lo || maxV > hi {
+				return nil, fmt.Errorf("sequence range [%d,%d] exceeds %s range [%d,%d]", minV, maxV, colIntType(*c), lo, hi)
+			}
+		}
+		f.NormWeights = normalizeWeights(f.Params)
+		f.WeightsProcessed = true
+		if vals, ok := f.Params["values"].([]any); ok {
+			if len(f.NormWeights) != len(vals) {
+				f.NormWeights = nil
+			}
+		}
+		byCol[name] = f
+	}
+	// Uniqueness is batch-scoped: warn whenever per-column uniqueness is
+	// requested so users know pre-existing table values are not consulted.
+	for _, name := range ordered {
+		if byCol[name].Unique {
+			p.Warnings = append(p.Warnings, "Uniqueness is enforced within the generated batch only; values already in the table are not checked.")
+			break
+		}
+	}
+	// Composite/partial UNIQUEs are insert-validated, not pre-satisfied.
+	for _, members := range meta.CompositeUniques {
+		if len(members) > 1 {
+			p.Warnings = append(p.Warnings, "Composite UNIQUE ("+strings.Join(members, ", ")+") is not pre-satisfied in Advanced mode — validated by PostgreSQL during insertion.")
+		}
+	}
+	if meta.HasPartialUnique {
+		p.Warnings = append(p.Warnings, "Partial/expression unique index present — uniqueness holds only within its predicate and is validated by PostgreSQL during insertion.")
+	}
 	p.Constraints = req.Constraints
 	for _, name := range ordered {
 		p.Fields = append(p.Fields, byCol[name])
 	}
 	p.InsertCols = ordered
 	if len(p.Fields) == 0 {
-		return nil, fmt.Errorf("no writable columns (all are database defaults)")
+		// All columns are database defaults — same DEFAULT-rows support as
+		// Simple mode (the INSERT path emits DEFAULT VALUES per row).
+		p.Warnings = append(p.Warnings, "All columns are database defaults — inserting DEFAULT rows.")
 	}
 	return p, nil
 }
@@ -258,6 +414,27 @@ func contains(xs []string, s string) bool {
 func toFloat(v any) float64 {
 	f, _ := toFloatLoose(v)
 	return f
+}
+
+func isIntegerColumn(c ColumnMeta) bool {
+	switch strings.ToLower(c.Udt) {
+	case "int2", "int4", "int8":
+		return true
+	}
+	switch strings.ToLower(c.DataType) {
+	case "smallint", "integer", "bigint":
+		return true
+	}
+	return false
+}
+
+func compareAnyNumeric(a, b any) int {
+	ar, aok := numericRat(a)
+	br, bok := numericRat(b)
+	if !aok || !bok {
+		return 0
+	}
+	return ar.Cmp(br)
 }
 
 func isFKColumn(meta TableMeta, col string) bool {
@@ -290,6 +467,7 @@ func fkRef(fk ForeignKeyMeta) string {
 
 // GenerateRows materializes count rows. Returned rows are column-ordered
 // slices aligned with Plan.InsertCols; omitted columns are NOT included.
+// A default-only plan yields one empty slice per row (DEFAULT VALUES).
 func (p *Plan) GenerateRows(seed int64, count int, fkValues map[string][]any) ([][]any, error) {
 	r := rand.New(rand.NewSource(seed))
 	if fkValues == nil {
@@ -305,11 +483,26 @@ func (p *Plan) GenerateRows(seed int64, count int, fkValues map[string][]any) ([
 			seen[f.Column] = map[string]bool{}
 		}
 	}
+	// Column → composite-group index (read-only, shared across attempts).
+	fkGroups := p.Meta.FKGroups()
+	fkColGroup := map[string]int{}
+	for gi, g := range fkGroups {
+		for _, lc := range g.Local {
+			if _, dup := fkColGroup[lc]; !dup {
+				fkColGroup[lc] = gi
+			}
+		}
+	}
+	byCol := map[string]FieldSpec{}
+	for _, f := range p.Fields {
+		byCol[f.Column] = f
+	}
 	seq := map[string]int64{}
 	fkRR := map[string]int{}
+	fkGRR := map[string]int{}
 	out := make([][]any, 0, count)
 	for i := 0; i < count; i++ {
-		row, err := p.genRow(r, now, seq, fkRR, fkValues, seen, i)
+		row, err := p.genRow(r, now, seq, fkRR, fkGRR, fkValues, seen, fkGroups, fkColGroup, byCol, i)
 		if err != nil {
 			return nil, err
 		}
@@ -318,11 +511,83 @@ func (p *Plan) GenerateRows(seed int64, count int, fkValues map[string][]any) ([
 	return out, nil
 }
 
-func (p *Plan) genRow(r *rand.Rand, now time.Time, seq map[string]int64, fkRR map[string]int, fkValues map[string][]any, seen map[string]map[string]bool, rowIdx int) ([]any, error) {
-	// Snapshot uniqueness state so a failed row attempt rolls back claims.
+func cloneInt64Map(m map[string]int64) map[string]int64 {
+	out := make(map[string]int64, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneIntMap(m map[string]int) map[string]int {
+	out := make(map[string]int, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+func (p *Plan) genRow(r *rand.Rand, now time.Time, seq map[string]int64, fkRR, fkGRR map[string]int, fkValues map[string][]any, seen map[string]map[string]bool, fkGroups []FKGroup, fkColGroup map[string]int, byCol map[string]FieldSpec, rowIdx int) ([]any, error) {
+	// Snapshot uniqueness AND counter state so a failed row attempt rolls
+	// back every claim: uniqueness sets commit on success, while sequence
+	// and FK round-robin counters (per-column and per-group) commit only
+	// when the row passes all constraints — no gaps from retries.
 	for attempt := 0; attempt < MaxAttemptsPerRow; attempt++ {
+		seqTrial := cloneInt64Map(seq)
+		fkTrial := cloneIntMap(fkRR)
+		fkGTrial := cloneIntMap(fkGRR)
+		// Pick one referenced tuple per composite group for this attempt
+		// (sequential when any member asks for it, else uniform).
+		tuplePick := map[string][]any{}
+		fullNull := map[string]bool{}
+		for _, g := range fkGroups {
+			if len(g.Local) < 2 {
+				continue
+			}
+			pool := p.FKTuples[g.Name]
+			if len(pool) == 0 {
+				continue
+			}
+			// Members with an explicit source override or a non-FK
+			// generator don't participate, but the remaining members
+			// still share one tuple.
+			participates := false
+			sequential := false
+			for _, lc := range g.Local {
+				f, ok := byCol[lc]
+				if !ok || hasExplicitRefParams(f.Params) {
+					continue
+				}
+				gen := strings.ToLower(strings.TrimSpace(f.Generator))
+				if gen == "" || gen == "auto" || gen == "foreign_key" {
+					participates = true
+				}
+				if paramString(f.Params, "mode", "random") == "sequential" {
+					sequential = true
+				}
+			}
+			if !participates {
+				continue
+			}
+			if g.MatchType == "f" || g.MatchType == "full" {
+				prob := 0.0
+				if f, ok := byCol[g.Local[0]]; ok {
+					prob = f.NullProb
+				}
+				fullNull[g.Name] = r.Float64() < prob
+			}
+			idx := 0
+			if sequential {
+				idx = fkGTrial[g.Name] % len(pool)
+				fkGTrial[g.Name]++
+			} else {
+				idx = r.Intn(len(pool))
+			}
+			tuplePick[g.Name] = pool[idx]
+		}
 		rowMap := map[string]any{}
-		ctx := &RowContext{Row: rowMap, Seq: seq, FK: fkValues, FKRR: fkRR, Rand: r, Now: now}
+		ctx := &RowContext{Row: rowMap, Seq: seqTrial, FK: fkValues, FKRR: fkTrial, Rand: r, Now: now,
+			FKGroups: fkGroups, FKColGroup: fkColGroup, FKTuples: p.FKTuples, FKTuplePick: tuplePick, FKGroupRR: fkGTrial}
 		for k, v := range p.HintRanges {
 			ctx.FK["__hint:"+k] = []any{v[0], v[1]}
 		}
@@ -352,7 +617,19 @@ func (p *Plan) genRow(r *rand.Rand, now time.Time, seq map[string]int64, fkRR ma
 				return nil, fmt.Errorf("column %s: %v", f.Column, err)
 			}
 			// NULL probability for nullable columns (advanced explicit).
-			if p.Mode == "advanced" && c.Nullable && f.NullProb > 0 && v != nil {
+			fullGroup, inComposite := fkColGroup[f.Column]
+			fullNil := false
+			isMatchFull := false
+			if inComposite {
+				isMatchFull = fkGroups[fullGroup].MatchType == "f" || fkGroups[fullGroup].MatchType == "full"
+			}
+			if isMatchFull {
+				fullNil = fullNull[fkGroups[fullGroup].Name]
+			}
+			if fullNil {
+				v = nil
+			}
+			if p.Mode == "advanced" && !isMatchFull && c.Nullable && f.NullProb > 0 && v != nil {
 				if r.Float64() < f.NullProb {
 					v = nil
 				}
@@ -384,13 +661,23 @@ func (p *Plan) genRow(r *rand.Rand, now time.Time, seq map[string]int64, fkRR ma
 			}
 			continue
 		}
-		// Commit uniqueness claims.
+		// Commit uniqueness claims AND counter state (sequences, FK
+		// round-robins) only after the row passes every constraint.
 		for _, f := range p.Fields {
 			if uniq := seen[f.Column]; uniq != nil {
 				if v, ok := rowMap[f.Column]; ok && v != nil {
 					uniq[fmt.Sprintf("%v", v)] = true
 				}
 			}
+		}
+		for k, v := range seqTrial {
+			seq[k] = v
+		}
+		for k, v := range fkTrial {
+			fkRR[k] = v
+		}
+		for k, v := range fkGTrial {
+			fkGRR[k] = v
 		}
 		row := make([]any, len(p.InsertCols))
 		for i, col := range p.InsertCols {

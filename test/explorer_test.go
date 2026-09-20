@@ -41,6 +41,9 @@ func TestExplorerBasics(t *testing.T) {
 	tbl := tempTable(t)
 	execSQL(t, h, sid, fmt.Sprintf(`CREATE TABLE %s (id int PRIMARY KEY, v text)`, tbl))
 	defer execSQL(t, h, sid, fmt.Sprintf(`DROP TABLE %s`, tbl))
+	// reltuples is a planner estimate and is -1 on a fresh, unanalyzed table.
+	// Make the statistic required by this assertion explicit for seeded data.
+	execSQL(t, h, sid, "ANALYZE public.authors")
 	code, body = callGET(t, h.Tables, withSID(sid, "/api/tables?schema=public"))
 	requireStatus(t, body, code, 200)
 	mine := findObj(t, body, "name", tbl, arrObjs(t, body))

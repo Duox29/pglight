@@ -177,10 +177,13 @@ func TestMockgenAdvancedInteger(t *testing.T) {
 			t.Fatalf("min==max should pin 5, got %v", r[0])
 		}
 	}
-	for _, r := range mk(map[string]any{"min": 10, "max": 5}) {
-		if v := r[0].(int64); v < 5 || v > 10 {
-			t.Fatalf("swapped bounds not normalized: %d", v)
-		}
+	// Inverted bounds are rejected (min <= max is validated server-side)
+	// instead of silently swapping.
+	if _, err := mockgen.BuildPlan(meta, mockgen.Request{
+		Mode: "advanced", Count: 5,
+		Fields: []mockgen.FieldSpec{{Column: "n", Generator: "integer", Params: map[string]any{"min": 10, "max": 5}}},
+	}); err == nil {
+		t.Fatal("swapped integer bounds should fail validation")
 	}
 	for _, r := range mk(nil) {
 		if v := r[0].(int64); v < 0 || v > 10000 {
@@ -913,13 +916,22 @@ func TestMockgenRequestValidation(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "NOT NULL") {
 		t.Fatalf("want NOT NULL rejection, got %v", err)
 	}
-	// Nothing writable: explicit error instead of an empty INSERT.
+	// Default-only tables generate DEFAULT rows instead of erroring
+	// (e.g. id BIGSERIAL + created_at DEFAULT now()).
 	dd := mockgen.TableMeta{Columns: []mockgen.ColumnMeta{{Name: "v", DataType: "text", Udt: "text", Default: strp("now()")}}}
-	if _, err := mockgen.BuildPlan(dd, mockgen.Request{Mode: "simple", Count: 3}); err == nil {
-		t.Fatal("simple with no writable columns should fail")
+	ddPlan, err := mockgen.BuildPlan(dd, mockgen.Request{Mode: "simple", Count: 3})
+	if err != nil {
+		t.Fatalf("simple default-only should plan: %v", err)
 	}
-	if _, err := mockgen.BuildPlan(dd, mockgen.Request{Mode: "advanced", Count: 3}); err == nil {
-		t.Fatal("advanced with no writable columns should fail")
+	if len(ddPlan.InsertCols) != 0 || len(ddPlan.Fields) != 0 {
+		t.Fatalf("default-only plan should be empty: %+v", ddPlan)
+	}
+	ddRows, err := ddPlan.GenerateRows(1, 3, nil)
+	if err != nil || len(ddRows) != 3 || len(ddRows[0]) != 0 {
+		t.Fatalf("default-only rows: %v %v", ddRows, err)
+	}
+	if _, err := mockgen.BuildPlan(dd, mockgen.Request{Mode: "advanced", Count: 3}); err != nil {
+		t.Fatalf("advanced default-only should plan: %v", err)
 	}
 	// Constraint referencing a ghost column is rejected at plan time.
 	_, err = mockgen.BuildPlan(meta, mockgen.Request{Mode: "advanced", Count: 3,

@@ -88,6 +88,7 @@ func loadMockMeta(ctx context.Context, q db.Querier, schema, table string) (mock
 		JOIN LATERAL unnest(con.conkey) AS k(attnum) ON true
 		JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
 		WHERE con.contype='u' AND con.conrelid=to_regclass(format('%I.%I', $1::text, $2::text))
+		AND cardinality(con.conkey) = 1
 		GROUP BY a.attname HAVING count(*)>=1`, schema, table)
 	if err != nil {
 		return meta, err
@@ -95,20 +96,65 @@ func loadMockMeta(ctx context.Context, q db.Querier, schema, table string) (mock
 	for _, r := range urows {
 		uniqCols[fmt.Sprint(r[0])] = true
 	}
+	// Composite UNIQUE constraints (cardinality > 1): not treated as
+	// per-column unique, but recorded so the planner can warn that
+	// Advanced mode does not pre-satisfy them.
+	_, curows, err := queryJSON(q, ctx, `
+		SELECT con.conname, a.attname FROM pg_constraint con
+		JOIN LATERAL unnest(con.conkey) AS k(attnum) ON true
+		JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
+		WHERE con.contype='u' AND con.conrelid=to_regclass(format('%I.%I', $1::text, $2::text))
+		AND cardinality(con.conkey) > 1
+		ORDER BY con.conname, k.attnum`, schema, table)
+	if err != nil {
+		return meta, err
+	}
+	byCon := map[string][]string{}
+	conOrder := []string{}
+	for _, r := range curows {
+		if len(r) < 2 {
+			continue
+		}
+		name := fmt.Sprint(r[0])
+		if _, ok := byCon[name]; !ok {
+			conOrder = append(conOrder, name)
+		}
+		byCon[name] = append(byCon[name], fmt.Sprint(r[1]))
+	}
+	for _, name := range conOrder {
+		meta.CompositeUniques = append(meta.CompositeUniques, byCon[name])
+	}
 	// Unique indexes also enforce uniqueness (e.g. UNIQUE(email) via CREATE
-	// UNIQUE INDEX): treat single-column unique-index members as unique.
+	// UNIQUE INDEX): treat single-key unique-index members as unique.
+	// indnkeyatts (not array_length(indkey)) counts key columns excluding
+	// INCLUDE payloads; partial (indpred) and expression (indexprs)
+	// indexes only hold within their predicate, never globally.
 	_, irows, err := queryJSON(q, ctx, `
 		SELECT a.attname FROM pg_index ix
 		JOIN pg_class t ON t.oid=ix.indrelid
 		JOIN pg_namespace n ON n.oid=t.relnamespace
 		JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=ix.indkey[0]
-		WHERE n.nspname=$1 AND t.relname=$2 AND ix.indisunique AND array_length(ix.indkey,1)=1`, schema, table)
+		WHERE n.nspname=$1 AND t.relname=$2 AND ix.indisunique AND ix.indisvalid
+		AND ix.indnkeyatts=1 AND ix.indpred IS NULL AND ix.indexprs IS NULL`, schema, table)
 	if err != nil {
 		return meta, err
 	}
 	for _, r := range irows {
 		uniqCols[fmt.Sprint(r[0])] = true
 	}
+	// Partial/expression unique indexes hold only within their predicate —
+	// record the presence so the planner can warn instead of claiming
+	// global uniqueness.
+	_, prow, err := queryJSON(q, ctx, `
+		SELECT 1 FROM pg_index ix
+		JOIN pg_class t ON t.oid=ix.indrelid
+		JOIN pg_namespace n ON n.oid=t.relnamespace
+		WHERE n.nspname=$1 AND t.relname=$2 AND ix.indisunique AND ix.indisvalid
+		AND (ix.indpred IS NOT NULL OR ix.indexprs IS NOT NULL) LIMIT 1`, schema, table)
+	if err != nil {
+		return meta, err
+	}
+	meta.HasPartialUnique = len(prow) > 0
 	// Enum labels per column.
 	enumVals := map[string][]string{}
 	_, erows, err := queryJSON(q, ctx, `
@@ -159,7 +205,7 @@ func loadMockMeta(ctx context.Context, q db.Querier, schema, table string) (mock
 	}
 	// Foreign keys (OID joins — constraint names repeat across tables).
 	_, frows, err := queryJSON(q, ctx, `
-		SELECT con.conname, src_att.attname, dst_ns.nspname, dst.relname, dst_att.attname
+		SELECT con.conname, src_att.attname, dst_ns.nspname, dst.relname, dst_att.attname, con.confmatchtype::text
 		FROM pg_constraint con
 		JOIN pg_class src ON src.oid=con.conrelid
 		JOIN pg_namespace src_ns ON src_ns.oid=src.relnamespace
@@ -175,7 +221,7 @@ func loadMockMeta(ctx context.Context, q db.Querier, schema, table string) (mock
 		return meta, err
 	}
 	for _, r := range frows {
-		if len(r) < 5 {
+		if len(r) < 6 {
 			continue
 		}
 		meta.ForeignKeys = append(meta.ForeignKeys, mockgen.ForeignKeyMeta{
@@ -185,6 +231,7 @@ func loadMockMeta(ctx context.Context, q db.Querier, schema, table string) (mock
 			RefTable:  fmt.Sprint(r[3]),
 			RefColumn: fmt.Sprint(r[4]),
 		})
+		meta.ForeignKeys[len(meta.ForeignKeys)-1].MatchType = strings.ToLower(fmt.Sprint(r[5]))
 	}
 	if meta.ForeignKeys == nil {
 		meta.ForeignKeys = []mockgen.ForeignKeyMeta{}
@@ -201,7 +248,14 @@ func loadMockMeta(ctx context.Context, q db.Querier, schema, table string) (mock
 			continue
 		}
 		name, def := fmt.Sprint(r[0]), fmt.Sprint(r[1])
-		_, kind, ok := mockgen.ParseCheckHint(def)
+		// Column names are known here, so partially-parseable
+		// multi-column CHECKs are labeled unsupported (with a warning)
+		// instead of silently dropping clauses.
+		colNames := make([]string, len(meta.Columns))
+		for i, c := range meta.Columns {
+			colNames[i] = c.Name
+		}
+		_, kind, ok := mockgen.ParseCheckHintForColumns(def, colNames)
 		if !ok {
 			kind = "unsupported"
 		}
@@ -293,25 +347,31 @@ func toMockgenRequest(req mockReq) mockgen.Request {
 	}
 }
 
-// fetchFKValues loads referenced-column value pools for FK generation
+// fetchFKPools loads referenced value pools for FK generation
 // (uniform-source for both random and sequential modes). A field may pin an
 // explicit source via params ref_schema/ref_table/ref_column (the dialog's
 // FK source picker); otherwise the column's own FK default is used.
-func fetchFKValues(ctx context.Context, q db.Querier, meta mockgen.TableMeta, plan *mockgen.Plan) (map[string][]any, error) {
-	out := map[string][]any{}
+// Composite FOREIGN KEYs additionally get one tuple pool per constraint:
+// members share a single referenced tuple per generated row, so the engine
+// can never mix values into combinations absent from the parent.
+func fetchFKPools(ctx context.Context, q db.Querier, meta mockgen.TableMeta, plan *mockgen.Plan) (singles map[string][]any, tuples map[string][][]any, err error) {
+	singles = map[string][]any{}
+	tuples = map[string][][]any{}
 	for _, f := range plan.Fields {
 		if f.Generator != "foreign_key" {
 			continue
 		}
 		rs, rt, rc, err := fkSourceFor(meta, f)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		qt := pgx.Identifier{rs, rt}.Sanitize()
 		qc := pgx.Identifier{rc}.Sanitize()
-		_, data, err := queryJSON(q, ctx, fmt.Sprintf("SELECT %s FROM %s WHERE %s IS NOT NULL LIMIT 5000", qc, qt, qc))
+		// ORDER BY makes the pool deterministic for a fixed seed (same
+		// rows feed the same RNG sequence across runs).
+		_, data, err := queryJSON(q, ctx, fmt.Sprintf("SELECT %s FROM %s WHERE %s IS NOT NULL ORDER BY %s LIMIT 5000", qc, qt, qc, qc))
 		if err != nil {
-			return nil, fmt.Errorf("foreign key %s (source %s.%s.%s): %v", f.Column, rs, rt, rc, err)
+			return nil, nil, fmt.Errorf("foreign key %s (source %s.%s.%s): %v", f.Column, rs, rt, rc, err)
 		}
 		vals := make([]any, 0, len(data))
 		for _, row := range data {
@@ -319,9 +379,75 @@ func fetchFKValues(ctx context.Context, q db.Querier, meta mockgen.TableMeta, pl
 				vals = append(vals, row[0])
 			}
 		}
-		out[f.Column] = vals
+		singles[f.Column] = vals
 	}
-	return out, nil
+	for _, g := range meta.FKGroups() {
+		if len(g.Local) < 2 {
+			continue
+		}
+		cols := make([]string, len(g.Remote))
+		for i, rc := range g.Remote {
+			cols[i] = pgx.Identifier{rc}.Sanitize()
+		}
+		qt := pgx.Identifier{g.RefSchema, g.RefTable}.Sanitize()
+		conds := make([]string, len(cols))
+		for i, c := range cols {
+			conds[i] = c + " IS NOT NULL"
+		}
+		sel := strings.Join(cols, ", ")
+		_, data, err := queryJSON(q, ctx, fmt.Sprintf("SELECT %s FROM %s WHERE %s ORDER BY %s LIMIT 5000",
+			sel, qt, strings.Join(conds, " AND "), sel))
+		if err != nil {
+			return nil, nil, fmt.Errorf("foreign key %s (source %s.%s): %v", g.Name, g.RefSchema, g.RefTable, err)
+		}
+		pool := make([][]any, 0, len(data))
+		for _, row := range data {
+			if len(row) != len(cols) {
+				continue
+			}
+			tup := make([]any, len(row))
+			copy(tup, row)
+			pool = append(pool, tup)
+		}
+		tuples[g.Name] = pool
+	}
+	return singles, tuples, nil
+}
+
+// fkPoolEmpty reports whether a foreign_key field has no usable values: a
+// composite member consults its group tuple pool (unless it pins an
+// explicit source), every other field its single-column pool.
+func fkPoolEmpty(meta mockgen.TableMeta, f mockgen.FieldSpec, singles map[string][]any, tuples map[string][][]any) bool {
+	if f.Generator != "foreign_key" {
+		return false
+	}
+	if hasRefParams(f.Params) {
+		return len(singles[f.Column]) == 0
+	}
+	for _, g := range meta.FKGroups() {
+		if len(g.Local) < 2 {
+			continue
+		}
+		for _, lc := range g.Local {
+			if lc == f.Column {
+				return len(tuples[g.Name]) == 0
+			}
+		}
+	}
+	return len(singles[f.Column]) == 0
+}
+
+func hasRefParams(p map[string]any) bool {
+	if p == nil {
+		return false
+	}
+	for _, k := range []string{"ref_schema", "ref_table", "ref_column"} {
+		s, _ := p[k].(string)
+		if strings.TrimSpace(s) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // fkSourceFor resolves the value pool for one FK field: explicit
@@ -367,12 +493,17 @@ func (h *Handler) MockPreview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "preview supports at most 100 rows"})
 		return
 	}
-	qq, ok := h.Mgr.Q(id)
-	if id == "" || !ok {
+	qqRaw, release, inTxn, _, ok := h.Mgr.AcquireLease(id)
+	if !ok {
 		writeJSON(w, 401, map[string]string{"error": "not connected"})
 		return
 	}
-	qq = logging.Wrap(qq, h.Log, id)
+	defer release()
+	// One operation lease for the whole preview: the same txn (raw pgx.Tx
+	// under e.mu) serves metadata, FK pools and generation, and Commit
+	// blocks until release — so a concurrent Commit can't wed metadata
+	// reads to a different backend than the write path observes.
+	qq := logging.Wrap(qqRaw, h.Log, id)
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	meta, err := loadMockMeta(ctx, qq, req.Schema, req.Table)
@@ -386,17 +517,18 @@ func (h *Handler) MockPreview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
-	fkVals, err := fetchFKValues(ctx, qq, meta, plan)
+	fkVals, fkTuples, err := fetchFKPools(ctx, qq, meta, plan)
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
 	mr.FKValues = fkVals
+	plan.FKTuples = fkTuples
 	// Re-plan is unnecessary: FK pools only feed generation, not planning,
 	// except empty-pool NULL fallback already handled with a warning pass.
 	// Re-resolve generators that flipped to null for empty pools.
 	for i, f := range plan.Fields {
-		if f.Generator == "foreign_key" && len(fkVals[f.Column]) == 0 {
+		if f.Generator == "foreign_key" && fkPoolEmpty(meta, f, fkVals, fkTuples) {
 			if col := meta.ColumnByName(f.Column); col != nil && col.Nullable {
 				plan.Fields[i].Generator = "null"
 				plan.Warnings = append(plan.Warnings, fmt.Sprintf("Referenced table for %s is empty — generating NULL (column is nullable).", f.Column))
@@ -425,7 +557,7 @@ func (h *Handler) MockPreview(w http.ResponseWriter, r *http.Request) {
 		"rows":     preview,
 		"warnings": warns,
 		"seed":     seed,
-		"in_txn":   h.Mgr.InTxn(id),
+		"in_txn":   inTxn,
 	})
 }
 
@@ -454,12 +586,17 @@ func (h *Handler) MockGenerate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": fmt.Sprintf("too many rows (max %d per request)", mockgen.MaxRowsPerRequest)})
 		return
 	}
-	qq, ok := h.Mgr.Q(id)
-	if id == "" || !ok {
+	qqRaw, release, inTxn, pool, ok := h.Mgr.AcquireLease(id)
+	if !ok {
 		writeJSON(w, 401, map[string]string{"error": "not connected"})
 		return
 	}
-	qq = logging.Wrap(qq, h.Log, id)
+	defer release()
+	// One operation lease (see MockPreview): the raw pgx.Tx under e.mu
+	// serves metadata, FK pools, generation AND all INSERT batches, so a
+	// concurrent Commit blocks until release instead of committing batch 1
+	// and failing batch 2 (partial commit with an error to the user).
+	qq := logging.Wrap(qqRaw, h.Log, id)
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
 	meta, err := loadMockMeta(ctx, qq, req.Schema, req.Table)
@@ -473,13 +610,13 @@ func (h *Handler) MockGenerate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
-	fkVals, err := fetchFKValues(ctx, qq, meta, plan)
+	fkVals, fkTuples, err := fetchFKPools(ctx, qq, meta, plan)
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
 	for i, f := range plan.Fields {
-		if f.Generator == "foreign_key" && len(fkVals[f.Column]) == 0 {
+		if f.Generator == "foreign_key" && fkPoolEmpty(meta, f, fkVals, fkTuples) {
 			if col := meta.ColumnByName(f.Column); col != nil && col.Nullable {
 				plan.Fields[i].Generator = "null"
 			} else {
@@ -490,14 +627,15 @@ func (h *Handler) MockGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 	seed := mockgen.EffectiveSeed(mr.HasSeed, mr.Seed)
 	start := time.Now()
+	plan.FKTuples = fkTuples
+	mr.FKValues = fkVals
 	rows, err := plan.GenerateRows(seed, req.Count, fkVals)
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": previewErr(req.Mode, err)})
 		return
 	}
 	var inserted int64
-	if h.Mgr.InTxn(id) {
-		qqRaw, _ := h.Mgr.Q(id)
+	if inTxn {
 		n, ierr := insertRowsBatched(ctx, logging.Wrap(qqRaw, h.Log, id), req.Schema, req.Table, plan.InsertCols, rows, "")
 		if ierr != nil {
 			writeJSON(w, 400, map[string]string{"error": generateErr(req.Mode, ierr)})
@@ -508,11 +646,6 @@ func (h *Handler) MockGenerate(w http.ResponseWriter, r *http.Request) {
 			"generated": int64(len(rows)), "inserted": inserted,
 			"seed": seed, "duration_ms": time.Since(start).Milliseconds(), "in_txn": true,
 		})
-		return
-	}
-	pool, hasPool := h.Mgr.Get(id)
-	if !hasPool {
-		writeJSON(w, 401, map[string]string{"error": "not connected"})
 		return
 	}
 	tx, err := pool.Begin(ctx)

@@ -83,8 +83,44 @@ const NUM_KEYS = new Set([
   'min_items', 'max_items', 'min_offset_days', 'max_offset_days', 'true_probability',
 ])
 
-function buildParams(params: Record<string, string>): Record<string, unknown> {
+// Integral params must be exact integers: floats and beyond-safe-range
+// values are dropped so the server default applies (the server validates
+// strictly and rejects garbage with a 400).
+const INT_KEYS = new Set([
+  'min', 'max', 'scale', 'min_length', 'max_length', 'start', 'step',
+  'min_items', 'max_items',
+])
+
+// Generator-aware numeric keys: the shared "min"/"max" input means an exact
+// integer for Integer, a finite float for Decimal, and a date string for
+// Date/DateTime — a global Number()/isSafeInteger() pass mangles the latter
+// two (decimal 1.25 dropped, "2025-01-01" → NaN dropped).
+const GEN_INT_KEYS: Record<string, Set<string>> = {
+  integer: new Set(['min', 'max']),
+  string: new Set(['min_length', 'max_length']),
+  array: new Set(['min_items', 'max_items']),
+  sequence: new Set(['start', 'step']),
+  decimal: new Set(['scale']),
+}
+const GEN_FLOAT_KEYS: Record<string, Set<string>> = {
+  decimal: new Set(['min', 'max']),
+  boolean: new Set(['true_probability']),
+  relative_datetime: new Set(['min_offset_days', 'max_offset_days']),
+}
+const GEN_STRING_KEYS: Record<string, Set<string>> = {
+  date: new Set(['min', 'max']),
+  datetime: new Set(['min', 'max']),
+}
+
+export function buildParams(
+  generator: string,
+  params: Record<string, string>,
+): { params: Record<string, unknown>; errors: string[] } {
   const out: Record<string, unknown> = {}
+  const errors: string[] = []
+  const intKeys = GEN_INT_KEYS[generator] ?? new Set<string>()
+  const floatKeys = GEN_FLOAT_KEYS[generator] ?? new Set<string>()
+  const strKeys = GEN_STRING_KEYS[generator] ?? new Set<string>()
   for (const [k, v] of Object.entries(params)) {
     const t = v.trim()
     if (t === '') continue
@@ -94,18 +130,54 @@ function buildParams(params: Record<string, string>): Record<string, unknown> {
       continue
     }
     if (k === 'weights') {
-      const nums = t.split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n))
+      const nums = t.split(',').map((s) => Number(s.trim()))
+      if (nums.some((n) => !Number.isFinite(n))) {
+        errors.push(`weights must be finite numbers`)
+        continue
+      }
       if (nums.length) out[k] = nums
       continue
     }
+    if (strKeys.has(k)) {
+      out[k] = t
+      continue
+    }
+    if (intKeys.has(k)) {
+      const n = Number(t)
+      if (!Number.isSafeInteger(n)) {
+        errors.push(`${k} must be an integer`)
+        continue
+      }
+      out[k] = n
+      continue
+    }
+    if (floatKeys.has(k)) {
+      const n = Number(t)
+      if (!Number.isFinite(n)) {
+        errors.push(`${k} must be a number`)
+        continue
+      }
+      out[k] = n
+      continue
+    }
+    // Non-generator-aware fallback (mode, source, ref_*, value, ...):
+    // keep the legacy global behavior for keys no generator claims.
     if (NUM_KEYS.has(k)) {
       const n = Number(t)
-      if (Number.isFinite(n)) out[k] = n
+      if (!Number.isFinite(n)) {
+        errors.push(`${k} must be a number`)
+        continue
+      }
+      if (INT_KEYS.has(k) && !Number.isSafeInteger(n)) {
+        errors.push(`${k} must be an integer`)
+        continue
+      }
+      out[k] = n
       continue
     }
     out[k] = t
   }
-  return out
+  return { params: out, errors }
 }
 
 function ParamInput(p: {
@@ -126,6 +198,7 @@ export function MockDataDialog(p: Props) {
   const [meta, setMeta] = useState<MockDataMeta | null>(null)
   const [loadedKey, setLoadedKey] = useState('')
   const [metaErr, setMetaErr] = useState<string | undefined>()
+  const [metaErrKey, setMetaErrKey] = useState('')
   const [mode, setMode] = useState<'simple' | 'advanced'>('simple')
   const [count, setCount] = useState('1000')
   const [seed, setSeed] = useState('')
@@ -137,15 +210,23 @@ export function MockDataDialog(p: Props) {
   const metaKey = `${p.sessionId}.${p.schema}.${p.table}`
   // Metadata loads once per table while the dialog is open; all setState
   // happens in async callbacks or event handlers (never sync in an effect).
+  // The live flag drops stale responses (table switched mid-flight). Errors
+  // are keyed by table so a previous table's failure never lingers after a
+  // switch or a successful retry.
   useEffect(() => {
     if (!p.open || loadedKey === metaKey) return
+    let live = true
     apiClient
       .getMockDataMeta(p.sessionId, p.schema, p.table)
       .then((j) => {
+        if (!live) return
         if (j.error) {
           setMetaErr(j.error)
+          setMetaErrKey(metaKey)
           return
         }
+        setMetaErr(undefined)
+        setMetaErrKey(metaKey)
         setMeta(j)
         const init: Record<string, FieldState> = {}
         for (const c of j.columns) init[c.name] = defaultField(c)
@@ -155,20 +236,32 @@ export function MockDataDialog(p: Props) {
         setMode('simple')
         setLoadedKey(metaKey)
       })
-      .catch((e) => setMetaErr(e instanceof Error ? e.message : String(e)))
+      .catch((e) => {
+        if (!live) return
+        setMetaErr(e instanceof Error ? e.message : String(e))
+        setMetaErrKey(metaKey)
+      })
+    return () => {
+      live = false
+    }
   }, [p.open, metaKey, loadedKey, p.sessionId, p.schema, p.table])
 
   const shown = loadedKey === metaKey ? meta : null
 
+  // Counts and seeds must be exact integers: Math.floor silently rewrites
+  // 12.9 → 12 and values beyond 2^53 lose precision, so both yield
+  // undefined (invalid) and the actions below surface a toast.
   const countNum = useMemo(() => {
-    const n = Math.floor(Number(count))
-    return Number.isFinite(n) ? n : 0
+    const t = count.trim()
+    if (t === '') return 0
+    const n = Number(t)
+    return Number.isSafeInteger(n) ? n : undefined
   }, [count])
   const seedNum = useMemo(() => {
     const t = seed.trim()
     if (t === '') return undefined
-    const n = Math.floor(Number(t))
-    return Number.isFinite(n) ? n : undefined
+    const n = Number(t)
+    return Number.isSafeInteger(n) ? n : undefined
   }, [seed])
 
   const setField = (col: string, patch: Partial<FieldState>) =>
@@ -180,17 +273,24 @@ export function MockDataDialog(p: Props) {
 
   const buildFieldConfigs = (): MockFieldConfig[] | undefined => {
     if (mode !== 'advanced' || !shown) return undefined
-    return shown.columns.map((c) => {
+    const errs: string[] = []
+    const configs = shown.columns.map((c) => {
       const f = fields[c.name] ?? defaultField(c)
       const cfg: MockFieldConfig = { column: c.name, generator: f.generator }
-      const params = buildParams(f.params)
-      if (Object.keys(params).length) cfg.params = params
+      const built = buildParams(f.generator, f.params)
+      for (const e of built.errors) errs.push(`${c.name}: ${e}`)
+      if (Object.keys(built.params).length) cfg.params = built.params
       if (f.unique) cfg.unique = true
       const np = Number(f.nullProb)
       if (c.nullable && f.nullProb.trim() !== '' && Number.isFinite(np) && np > 0)
         cfg.null_probability = Math.min(100, Math.max(0, np)) / 100
       return cfg
     })
+    if (errs.length) {
+      toast.error(errs[0])
+      return undefined
+    }
+    return configs
   }
 
   const runPreview = async () => {
@@ -198,8 +298,16 @@ export function MockDataDialog(p: Props) {
       toast.error('Records must be >= 1')
       return
     }
+    // Same seed contract as Generate: a non-empty invalid seed is rejected,
+    // never silently replaced with a random one.
+    if (seed.trim() !== '' && seedNum === undefined) {
+      toast.error('Seed must be an integer')
+      return
+    }
     setBusy('preview')
     try {
+      const fieldConfigs = mode === 'advanced' ? buildFieldConfigs() : undefined
+      if (mode === 'advanced' && fieldConfigs === undefined) return
       const j = await apiClient.previewMockData({
         session_id: p.sessionId,
         schema: p.schema,
@@ -208,7 +316,7 @@ export function MockDataDialog(p: Props) {
         count: Math.min(countNum, 20),
         ...(seedNum !== undefined ? { seed: seedNum } : {}),
         ...(mode === 'advanced'
-          ? { fields: buildFieldConfigs(), constraints: constraints.length ? constraints : undefined }
+          ? { fields: fieldConfigs, constraints: constraints.length ? constraints : undefined }
           : {}),
       })
       if (j.error) toast.error(j.error)
@@ -238,6 +346,8 @@ export function MockDataDialog(p: Props) {
     }
     setBusy('generate')
     try {
+      const fieldConfigs = mode === 'advanced' ? buildFieldConfigs() : undefined
+      if (mode === 'advanced' && fieldConfigs === undefined) return
       const j = await apiClient.generateMockData({
         session_id: p.sessionId,
         schema: p.schema,
@@ -246,7 +356,7 @@ export function MockDataDialog(p: Props) {
         count: countNum,
         ...(seedNum !== undefined ? { seed: seedNum } : {}),
         ...(mode === 'advanced'
-          ? { fields: buildFieldConfigs(), constraints: constraints.length ? constraints : undefined }
+          ? { fields: fieldConfigs, constraints: constraints.length ? constraints : undefined }
           : {}),
       })
       if (j.error) toast.error(j.error, { duration: 6000 })
@@ -307,7 +417,7 @@ export function MockDataDialog(p: Props) {
           </Button>
           <Button size="sm" onClick={runGenerate} disabled={busy != null || shown == null} className="shrink-0 whitespace-nowrap">
             {busy === 'generate' ? <Loader2 className="animate-spin" /> : null}
-            Generate {countNum > 0 ? countNum.toLocaleString() : ''} Rows
+            Generate {countNum != null && countNum > 0 ? countNum.toLocaleString() : ''} Rows
           </Button>
         </div>
         {mode === 'simple' && (
@@ -315,8 +425,8 @@ export function MockDataDialog(p: Props) {
             Datatype-only generation — CHECK, UNIQUE, foreign keys and defaults are validated by PostgreSQL on insert.
           </div>
         )}
-        <ErrorText message={metaErr} />
-        {!shown && !metaErr && <EmptyNote text="Loading table metadata…" />}
+        <ErrorText message={metaErrKey === metaKey ? metaErr : undefined} />
+        {!shown && !(metaErrKey === metaKey && metaErr) && <EmptyNote text="Loading table metadata…" />}
         {mode === 'advanced' && shown && (
           <ScrollArea className="max-h-[30vh] rounded-md border">
             <Table>

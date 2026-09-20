@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -41,18 +42,22 @@ type Manager struct {
 
 // txEntry is one open explicit transaction: the pinned connection, the pgx
 // transaction, and a mutex serializing all use of that transaction. done is
-// set once the txn is committed/rolled back so late arrivals fail cleanly
-// instead of touching a closed transaction. lastUse backs the
-// abandoned-transaction sweeper.
+// an atomic flag set once the txn is committed/rolled back so late arrivals
+// fail cleanly instead of touching a closed transaction (all readers use
+// Load — never read it under m.mu — so there is no data race). lastUse backs
+// the abandoned-transaction sweeper and is guarded by mu.
 type txEntry struct {
 	mu      sync.Mutex
 	tx      pgx.Tx
 	conn    *pgxpool.Conn
-	done    bool
+	done    atomic.Bool
 	lastUse time.Time
 }
 
 func (e *txEntry) touch() { e.lastUse = time.Now() }
+
+// isDone reports lifecycle state without taking e.mu (atomic, race-free).
+func (e *txEntry) isDone() bool { return e.done.Load() }
 
 // ConnMeta is display-only connection info for a session (no password).
 type ConnMeta struct {
@@ -213,9 +218,9 @@ func (m *Manager) Add(id, connStr string) error {
 
 	if oldEntry != nil {
 		oldEntry.mu.Lock()
-		if !oldEntry.done {
+		if !oldEntry.done.Load() {
 			_ = oldEntry.tx.Rollback(context.Background())
-			oldEntry.done = true
+			oldEntry.done.Store(true)
 		}
 		oldEntry.mu.Unlock()
 		oldEntry.conn.Release()
@@ -272,9 +277,9 @@ func (m *Manager) Close(id string) {
 	if entry != nil {
 		// Wait for any in-flight txn operation before tearing down.
 		entry.mu.Lock()
-		if !entry.done {
+		if !entry.done.Load() {
 			_ = entry.tx.Rollback(context.Background())
-			entry.done = true
+			entry.done.Store(true)
 		}
 		entry.mu.Unlock()
 		entry.conn.Release()
@@ -343,21 +348,26 @@ func (m *Manager) List() []SessionInfo {
 	return out
 }
 
-// InTxn reports whether the session has an open explicit transaction.
+// InTxn reports whether the session has an open explicit transaction
+// (atomic done flag — race-free, no e.mu needed).
 func (m *Manager) InTxn(id string) bool {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	e, ok := m.txs[id]
-	return ok && e != nil && !e.done
+	m.mu.RUnlock()
+	if !ok || e == nil {
+		return false
+	}
+	return !e.done.Load()
 }
 
 // Snapshot returns the pool and txn state for a session atomically, so
 // callers never observe Get() and InTxn() from different points in time.
+// The txn flag uses the atomic done flag (no e.mu, no data race).
 func (m *Manager) Snapshot(id string) (pool *pgxpool.Pool, hasPool, inTxn bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	pool, hasPool = m.pools[id]
-	if e, ok := m.txs[id]; ok && e != nil && !e.done {
+	if e, ok := m.txs[id]; ok && e != nil && !e.done.Load() {
 		inTxn = true
 	}
 	return pool, hasPool, inTxn
@@ -371,7 +381,10 @@ func (m *Manager) Begin(ctx context.Context, id string) error {
 
 	m.mu.RLock()
 	pool, ok := m.pools[id]
-	_, inTxn := m.txs[id]
+	e, inTxn := m.txs[id]
+	if inTxn && e != nil && e.done.Load() {
+		inTxn = false
+	}
 	m.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("not connected")
@@ -400,8 +413,10 @@ func (m *Manager) Begin(ctx context.Context, id string) error {
 }
 
 // Commit commits the session transaction and releases the pinned connection.
-// It waits for any in-flight txn query to finish first, so Query+Commit from
-// two tabs cannot race on the underlying connection.
+// It waits for any in-flight txn query (or a held operation lease) to finish
+// first, so Query+Commit from two tabs cannot race on the underlying
+// connection. Lock order is always txnLock → e.mu → m.mu (never m.mu → e.mu
+// while holding m.mu), so the sweeper cannot deadlock against it.
 func (m *Manager) Commit(ctx context.Context, id string) error {
 	lock := m.txnLock(id)
 	lock.Lock()
@@ -416,11 +431,11 @@ func (m *Manager) Commit(ctx context.Context, id string) error {
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.done {
+	if e.done.Load() {
 		return fmt.Errorf("no open transaction")
 	}
 	err := e.tx.Commit(ctx)
-	e.done = true
+	e.done.Store(true)
 	e.conn.Release()
 	m.mu.Lock()
 	delete(m.txs, id)
@@ -430,7 +445,8 @@ func (m *Manager) Commit(ctx context.Context, id string) error {
 }
 
 // Rollback aborts the session transaction and releases the pinned connection.
-// Like Commit, it waits for in-flight txn work before rolling back.
+// Like Commit, it waits for in-flight txn work (or a held lease) before
+// rolling back. Same lock order as Commit.
 func (m *Manager) Rollback(ctx context.Context, id string) error {
 	lock := m.txnLock(id)
 	lock.Lock()
@@ -445,11 +461,11 @@ func (m *Manager) Rollback(ctx context.Context, id string) error {
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.done {
+	if e.done.Load() {
 		return fmt.Errorf("no open transaction")
 	}
 	err := e.tx.Rollback(ctx)
-	e.done = true
+	e.done.Store(true)
 	e.conn.Release()
 	m.mu.Lock()
 	delete(m.txs, id)
@@ -467,7 +483,7 @@ type serialQuerier struct {
 
 func (s serialQuerier) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	s.e.mu.Lock()
-	if s.e.done {
+	if s.e.done.Load() {
 		s.e.mu.Unlock()
 		return nil, fmt.Errorf("transaction already closed")
 	}
@@ -483,7 +499,7 @@ func (s serialQuerier) Query(ctx context.Context, sql string, args ...any) (pgx.
 func (s serialQuerier) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	s.e.mu.Lock()
 	defer s.e.mu.Unlock()
-	if s.e.done {
+	if s.e.done.Load() {
 		return pgconn.CommandTag{}, fmt.Errorf("transaction already closed")
 	}
 	s.e.touch()
@@ -492,7 +508,7 @@ func (s serialQuerier) Exec(ctx context.Context, sql string, args ...any) (pgcon
 
 func (s serialQuerier) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	s.e.mu.Lock()
-	if s.e.done {
+	if s.e.done.Load() {
 		s.e.mu.Unlock()
 		return closedRow{err: fmt.Errorf("transaction already closed")}
 	}
@@ -540,7 +556,7 @@ func (m *Manager) Q(id string) (Querier, bool) {
 	e, hasTx := m.txs[id]
 	p, hasPool := m.pools[id]
 	m.mu.RUnlock()
-	if hasTx && e != nil {
+	if hasTx && e != nil && !e.done.Load() {
 		m.touch(id)
 		return serialQuerier{e}, true
 	}
@@ -558,7 +574,7 @@ func (m *Manager) PoolOrTxn(id string) (Querier, *pgxpool.Pool, bool) {
 	e, hasTx := m.txs[id]
 	p, hasPool := m.pools[id]
 	m.mu.RUnlock()
-	if hasTx && e != nil {
+	if hasTx && e != nil && !e.done.Load() {
 		m.touch(id)
 		return serialQuerier{e}, nil, true
 	}
@@ -566,6 +582,60 @@ func (m *Manager) PoolOrTxn(id string) (Querier, *pgxpool.Pool, bool) {
 		m.touch(id)
 	}
 	return p, p, hasPool
+}
+
+// leaseQuerier is the raw pgx.Tx held under a Manager operation lease: the
+// caller already owns e.mu for the whole multi-statement operation, so no
+// per-statement locking happens here. Commit/Rollback block on e.mu until
+// Release is called, which gives end-to-end atomicity (no partial commit
+// between batches).
+type leaseQuerier struct {
+	tx pgx.Tx
+}
+
+func (l leaseQuerier) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return l.tx.Query(ctx, sql, args...)
+}
+
+func (l leaseQuerier) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return l.tx.Exec(ctx, sql, args...)
+}
+
+func (l leaseQuerier) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return l.tx.QueryRow(ctx, sql, args...)
+}
+
+// AcquireLease locks the session's explicit transaction (when open) for one
+// entire multi-statement operation — metadata reads, generation, and ALL
+// INSERT batches — and returns the raw pgx.Tx without per-statement
+// unlocking. The caller MUST call release (prefer defer) to unblock
+// Commit/Rollback. When no txn is open it returns the pool with a no-op
+// release. ok=false means not connected. A txn that closed before the lease
+// is acquired falls back to the pool when one exists, else not-ok.
+func (m *Manager) AcquireLease(id string) (q Querier, release func(), inTxn bool, pool *pgxpool.Pool, ok bool) {
+	m.mu.RLock()
+	e, hasTx := m.txs[id]
+	p, hasPool := m.pools[id]
+	m.mu.RUnlock()
+	if hasTx && e != nil && !e.done.Load() {
+		e.mu.Lock()
+		if e.done.Load() {
+			e.mu.Unlock()
+			if !hasPool {
+				return nil, func() {}, false, nil, false
+			}
+			m.touch(id)
+			return p, func() {}, false, p, true
+		}
+		e.touch()
+		m.touch(id)
+		return leaseQuerier{e.tx}, sync.OnceFunc(e.mu.Unlock), true, nil, true
+	}
+	if !hasPool {
+		return nil, func() {}, false, nil, false
+	}
+	m.touch(id)
+	return p, func() {}, false, p, true
 }
 
 // Sweep tuning: idle sessions (no query/txn/connect activity) are closed to
@@ -603,22 +673,35 @@ func (m *Manager) SweepIdle(ttl time.Duration) []string {
 // and returns the affected session ids. The UI learns about it on its next
 // txn-status poll (in_txn flips to false), so abandoned work is surfaced
 // instead of silently holding locks.
+//
+// Lock discipline: m.mu is held only to copy (id, *txEntry) references and
+// is always released BEFORE touching any e.mu. Commit/Rollback take
+// e.mu and then m.mu, so holding both in the opposite order here would
+// deadlock (sweeper: m.mu → e.mu vs commit: e.mu → m.mu).
 func (m *Manager) SweepAbandonedTxns(ttl time.Duration) []string {
 	cutoff := time.Now().Add(-ttl)
 	m.mu.RLock()
-	var stale []string
+	type ref struct {
+		id string
+		e  *txEntry
+	}
+	refs := make([]ref, 0, len(m.txs))
 	for id, e := range m.txs {
 		if e == nil {
 			continue
 		}
-		e.mu.Lock()
-		idle := e.lastUse.Before(cutoff) && !e.done
-		e.mu.Unlock()
-		if idle {
-			stale = append(stale, id)
-		}
+		refs = append(refs, ref{id, e})
 	}
 	m.mu.RUnlock()
+	var stale []string
+	for _, r := range refs {
+		r.e.mu.Lock()
+		idle := r.e.lastUse.Before(cutoff) && !r.e.done.Load()
+		r.e.mu.Unlock()
+		if idle {
+			stale = append(stale, r.id)
+		}
+	}
 	var rolled []string
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

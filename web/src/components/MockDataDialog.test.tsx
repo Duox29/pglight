@@ -119,6 +119,11 @@ describe('MockDataDialog', () => {
   it.each([
     { records: '0', seed: '' },
     { records: '1000', seed: 'abc' },
+    // Fractional seeds must not silently floor (12.9 → 12).
+    { records: '1000', seed: '12.9' },
+    // Beyond 2^53 the seed loses precision — reject instead of sending.
+    { records: '1000', seed: '9007199254740993' },
+    { records: '3.5', seed: '' },
     { records: '20001', seed: '' },
   ])('refuses to send invalid input (records=$records seed=$seed)', async ({ records, seed }) => {
     const user = userEvent.setup()
@@ -215,5 +220,20 @@ describe('MockDataDialog', () => {
     expect(req.mode).toBe('simple')
     expect(req.fields).toBeUndefined()
     expect(req.constraints).toBeUndefined()
+  })
+
+  it('clears a metadata error after switching tables and succeeding', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ error: 'boom' })) })),
+    )
+    const ui = renderUi(<MockDataDialog {...props({ table: 'users' })} />)
+    await waitFor(() => expect(screen.getByText('boom')).toBeInTheDocument())
+    // Same mounted dialog, new table: the next fetch succeeds and the old
+    // error must disappear instead of lingering.
+    vi.stubGlobal('fetch', mockFetch())
+    ui.rerender(<MockDataDialog {...props({ table: 'orders' })} />)
+    await waitFor(() => expect(screen.queryByText('boom')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Generate 1,000 Rows/)).toBeEnabled())
   })
 })

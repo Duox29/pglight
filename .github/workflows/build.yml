@@ -43,6 +43,10 @@ jobs:
       - name: Install frontend deps
         run: npm ci
         working-directory: web
+      - name: Load PostgreSQL test fixtures
+        run: psql -h localhost -U postgres -d postgres -f docker/init.sql
+        env:
+          PGPASSWORD: postgres
       # main.go embeds web/dist, so the bundle must exist before go vet/build.
       - name: Build frontend
         run: npm run build
@@ -70,6 +74,9 @@ jobs:
         working-directory: web
       - name: eslint
         run: npx eslint src
+        working-directory: web
+      - name: Frontend tests
+        run: npm test
         working-directory: web
 
   build:
