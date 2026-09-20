@@ -52,7 +52,7 @@ jobs:
         run: npm run build
         working-directory: web
       - name: gofmt
-        run: test -z "$(gofmt -l main.go internal/)"
+        run: test -z "$(gofmt -l *.go internal/)"
       - name: go vet
         run: go vet ./...
       - name: go test

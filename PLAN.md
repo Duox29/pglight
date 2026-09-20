@@ -296,6 +296,18 @@ npm run build           # emits web/dist (git-ignored; main.go embeds it, so alw
 `index.html`. Rebuild the bundle (`npm run build` in `web/`) after any
 frontend change before `go build`.
 
+## Application startup
+
+The production binary accepts `--p`, `--port`, or `-p` for an explicit HTTP
+port, plus `--no-browser` to suppress automatic browser opening. Configuration
+priority is CLI flag, then `PORT`, then the default `8080`. Explicitly selected
+ports are strict: a bind failure exits. With no explicit port, startup tries
+`8080` and then successive ports for up to 100 attempts. On success the binary
+opens `http://127.0.0.1:<actual-port>` through the platform default browser
+(Windows `rundll32`, macOS `open`, Linux `xdg-open`); a browser-open failure is
+only logged and does not stop the server. Vite development remains fixed at
+the Go backend's `8080` proxy.
+
 ## CI & releases (`.github/workflows/build.yml`)
 
 Every push to `master`, PR, and manual dispatch runs the gate (`gofmt`, `go
@@ -326,7 +338,7 @@ with all archives attached:
 Each archive ships a single self-contained binary (frontend already embedded —
 no Node, no separate `dist/` needed at runtime) plus a `.sha256` checksum file;
 the release also carries a combined `SHA256SUMS.txt`. Just download, extract,
-and run (`./pglight`, `PORT=8080` to change the port).
+and run (`./pglight`, `./pglight --p 8081`, or `./pglight --no-browser`).
 
 Design notes: one Ubuntu runner cross-compiles everything (`CGO_ENABLED=0` —
 the backend is pure Go, no cgo), the frontend builds once per job from `npm

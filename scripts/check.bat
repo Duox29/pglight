@@ -4,7 +4,7 @@ setlocal
 cd /d "%~dp0\.."
 
 echo == gofmt ==
-gofmt -l main.go internal/ > "%TEMP%\pglight-gofmt.txt" 2>&1
+gofmt -l main.go startup.go startup_test.go internal/ > "%TEMP%\pglight-gofmt.txt" 2>&1
 for %%S in ("%TEMP%\pglight-gofmt.txt") do if not %%~zS==0 (
   echo gofmt dirty:
   type "%TEMP%\pglight-gofmt.txt"

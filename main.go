@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"pglight/internal/api"
@@ -90,12 +91,25 @@ func main() {
 	sub, _ := fs.Sub(webFS, "web/dist")
 	mux.Handle("/", spaHandler(sub, http.FileServer(http.FS(sub))))
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+	options, err := parseStartupOptions(os.Args[1:], os.Getenv)
+	if err != nil {
+		log.Fatal(err)
 	}
-	log.Println("pglight listening on :" + port)
-	log.Fatal(http.ListenAndServe(":"+port, logging.Middleware(appLog, mux)))
+	listener, port, err := listenHTTP(options)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	appURL := "http://127.0.0.1:" + strconv.Itoa(port)
+	log.Println("pglight listening on " + appURL)
+	if !options.noBrowser {
+		if err := openBrowser(appURL); err != nil {
+			log.Printf("warning: could not open browser: %v", err)
+		}
+	}
+
+	server := &http.Server{Handler: logging.Middleware(appLog, mux)}
+	log.Fatal(server.Serve(listener))
 }
 
 // spaHandler serves the embedded Vite build (web/dist). Unknown non-API paths

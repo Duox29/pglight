@@ -19,7 +19,7 @@ pushd web
 call npm run build || (popd & exit /b 1)
 popd
 
-echo == backend: go run main.go (from source, no binary) ==
+echo == backend: go run . (from source, no binary) ==
 echo == restart :%PORT% ==
 set PID=
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%PORT% " ^| findstr LISTENING') do if not defined PID set PID=%%a
@@ -32,6 +32,6 @@ if defined PID (
   echo Nothing listening on :%PORT%.
 )
 
-echo Starting pglight (go run main.go) on :%PORT% ...
-start "pglight" /MIN cmd /c "go run main.go > "%TEMP%\pglight.log" 2>&1"
-echo pglight (go run main.go) on :%PORT%. Log: %TEMP%\pglight.log
+echo Starting pglight (go run .) on :%PORT% ...
+start "pglight" /MIN cmd /c "go run . > "%TEMP%\pglight.log" 2>&1"
+echo pglight (go run .) on :%PORT%. Log: %TEMP%\pglight.log

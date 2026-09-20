@@ -38,7 +38,7 @@ if [ ! -d web/node_modules ]; then
 fi
 (cd web && "$NPM" run build)
 
-echo "== backend: go run main.go (from source, no binary) =="
+echo "== backend: go run . (from source, no binary) =="
 echo "== restart :$PORT =="
 PID=""
 if command -v ss >/dev/null 2>&1; then
@@ -61,5 +61,5 @@ else
   echo "Nothing listening on :$PORT."
 fi
 
-PORT="$PORT" nohup "$GO" run main.go >/tmp/pglight.log 2>&1 &
-echo "pglight (go run main.go) on :$PORT (pid $!). Log: /tmp/pglight.log"
+PORT="$PORT" nohup "$GO" run . >/tmp/pglight.log 2>&1 &
+echo "pglight (go run .) on :$PORT (pid $!). Log: /tmp/pglight.log"

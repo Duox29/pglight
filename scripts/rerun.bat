@@ -18,7 +18,7 @@ if defined PID (
   echo Nothing listening on :%PORT%.
 )
 
-go run main.go || exit /b 1
+go run . || exit /b 1
 
 echo Starting pglight on :%PORT% ...
 start "pglight" /MIN cmd /c ""%TEMP%\pglight.exe" > "%TEMP%\pglight.log" 2>&1"

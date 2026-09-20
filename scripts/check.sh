@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "== gofmt =="
-OUT="$(gofmt -l main.go internal/)"
+OUT="$(gofmt -l *.go internal/)"
 if [ -n "$OUT" ]; then echo "gofmt dirty:"; echo "$OUT"; exit 1; fi
 
 echo "== go vet =="
