@@ -5,6 +5,7 @@ import { ErdView } from './ErdView'
 import { ObjectView } from './ObjectView'
 import { QueryConsole } from './QueryConsole'
 import { TableWorkspace } from './TableWorkspace'
+import { SidePanel } from './SidePanel'
 import type { DialogsApi } from './dialogs'
 import type { UseExplorer } from '../hooks/useExplorer'
 import type { UseObjectOps } from '../hooks/useObjectOps'
@@ -15,7 +16,7 @@ import type { UseTabs } from '../hooks/useTabs'
 import { api, apiClient, q } from '../lib/api'
 import { download, resultToCSV, resultToInserts, resultToJSON } from '../lib/format'
 import { erdConnectionIdFor, pkOf, qi } from '../lib/tabs'
-import type { Tab } from '../types'
+import type { HistoryEntry, SideView, Snippet, Tab } from '../types'
 
 export interface TabContentProps {
   tab: Tab | null
@@ -34,6 +35,13 @@ export interface TabContentProps {
   sessions: UseSessions['sessions']
   savedConnections: UseSessions['saved']
   dialogs: DialogsApi
+  session: string
+  history: HistoryEntry[]
+  snippets: Snippet[]
+  onOpenSql: (sql: string) => void
+  onDeleteSnippet: (i: number) => void
+  quickAccess: SideView[]
+  onQuickAccessChange: (view: SideView, enabled: boolean) => void
 }
 
 /* Tab-kind composition root (succeeds the former inline switch in App.tsx):
@@ -44,6 +52,22 @@ export function TabContent(p: TabContentProps) {
   const { tab } = p
   if (tab == null) {
     return <div className="text-muted-foreground">{p.connected ? 'Open a table or run a query.' : 'Connect to a database to begin.'}</div>
+  }
+  if (tab.kind === 'workspace') {
+    return (
+      <SidePanel
+        view={tab.view}
+        onView={(view) => p.updateTab(tab.id, (x) => x.kind === 'workspace' ? { ...x, view } : x)}
+        session={p.session}
+        history={p.history}
+        snippets={p.snippets}
+        onOpenSql={p.onOpenSql}
+        onDeleteSnippet={p.onDeleteSnippet}
+        dialogs={p.dialogs}
+        quickAccess={p.quickAccess}
+        onQuickAccessChange={p.onQuickAccessChange}
+      />
+    )
   }
   if (tab.kind === 'query') {
     return (

@@ -134,7 +134,7 @@ export function TabStrip(p: TabStripProps) {
                     </span>
                   </Tip>
                 )}
-                {t.kind !== 'docs' && db && (
+                {t.kind !== 'docs' && t.kind !== 'workspace' && db && (
                   <Tip content={`Session database: ${db}`}>
                     <span className="max-w-[80px] truncate rounded bg-muted px-1 text-[10px] font-normal text-muted-foreground">
                       {db}

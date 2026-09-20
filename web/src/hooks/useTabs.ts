@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { api, q } from '../lib/api'
-import { BROWSER_DEFS, DEFAULT_SQL, readStoredTabs, shortSid, slimTab } from '../lib/tabs'
-import type { ObjectKind, StoredTab, Tab } from '../types'
+import { BROWSER_DEFS, DEFAULT_SQL, isWorkspaceView, readStoredTabs, shortSid, slimTab } from '../lib/tabs'
+import type { ObjectKind, SideView, StoredTab, Tab } from '../types'
 
 export interface TabLoaders {
   loadTablePage: (sid: string, id: string, schema: string, table: string, limit: number, offset: number, filter: string, order: string) => Promise<void>
@@ -45,6 +45,14 @@ export function useTabs() {
   const openDocsTab = useCallback(() => {
     setTabs((prev) => (prev.find((t) => t.id === 'docs') ? prev : [...prev, { id: 'docs', kind: 'docs', title: 'Docs' }]))
     setActiveTab('docs')
+  }, [])
+
+  const openWorkspace = useCallback((view: SideView = 'history') => {
+    setTabs((prev) => {
+      if (prev.some((t) => t.kind === 'workspace')) return prev.map((t) => (t.kind === 'workspace' ? { ...t, view } : t))
+      return [...prev, { id: 'workspace', kind: 'workspace', title: 'Workspace', view }]
+    })
+    setActiveTab('workspace')
   }, [])
 
   const openBrowser = useCallback((key: 'extensions' | 'roles', title: string, sid?: string) => {
@@ -134,6 +142,18 @@ export function useTabs() {
       const seenIds = new Set<string>()
       let maxQ = 0
       for (const s of stored) {
+        if (s.kind === 'workspace') {
+          if (seenIds.has('workspace')) continue
+          seenIds.add('workspace')
+          rebuilt.push({ id: 'workspace', kind: 'workspace', title: 'Workspace', view: isWorkspaceView(s.view) ? s.view : 'history' })
+          continue
+        }
+        if (s.kind === 'docs') {
+          if (seenIds.has('docs')) continue
+          seenIds.add('docs')
+          rebuilt.push({ id: 'docs', kind: 'docs', title: 'Docs' })
+          continue
+        }
         // Tabs follow their own session 1:1 (remapped after reconnect).
         // Dead sessions are KEPT (badged, reconnectable) — only tabs whose
         // session is unknown entirely fall back, never silently to another DB.
@@ -175,10 +195,6 @@ export function useTabs() {
           if (seenIds.has(id)) continue
           seenIds.add(id)
           rebuilt.push({ id, kind: 'object', title: s.name, sessionId: sid, objectKind: s.objectKind, schema: s.schema, name: s.name, def: null, details: null })
-        } else if (s.kind === 'docs') {
-          if (seenIds.has('docs')) continue
-          seenIds.add('docs')
-          rebuilt.push({ id: 'docs', kind: 'docs', title: 'Docs' })
         }
       }
       if (!rebuilt.length) {
@@ -197,7 +213,7 @@ export function useTabs() {
       setActiveTab(wantActive && rebuilt.some((t) => t.id === wantActive) ? wantActive : rebuilt[0].id)
       const token = ++loadSeq.current
       for (const t of rebuilt) {
-        if (t.kind === 'docs' || t.kind === 'query') continue
+        if (t.kind === 'docs' || t.kind === 'workspace' || t.kind === 'query') continue
         const sid = t.sessionId
         if (t.kind === 'table') {
           void loaders.loadTablePage(sid, t.id, t.schema, t.table, t.limit, t.offset, t.filter, t.order)
@@ -313,7 +329,7 @@ export function useTabs() {
 
   return {
     tabs, setTabs, activeTab, setActiveTab, cur, updateTab,
-    newQueryTab, openDocsTab, openBrowser, openErd,
+    newQueryTab, openDocsTab, openWorkspace, openBrowser, openErd,
     closeTab, closeOthers, closeRight, closeLeft, closeAllTabs,
     activateTabAt, activateNextTab, activatePreviousTab,
     remapTabsSession, restoreStoredTabs, readStoredTabs,

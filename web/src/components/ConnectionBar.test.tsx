@@ -3,12 +3,14 @@ import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderUi } from '../test/utils'
 import { ConnectionBar } from './ConnectionBar'
+import type { SideView } from '@/types'
 
 function props(over: Partial<React.ComponentProps<typeof ConnectionBar>> = {}) {
   return {
     connected: true,
     onSearch: vi.fn(),
-    onPanel: vi.fn(),
+    quickAccess: ['history', 'server'] as SideView[],
+    onWorkspace: vi.fn(),
     onDocs: vi.fn(),
     onShutdown: vi.fn(),
     ...over,
@@ -25,9 +27,9 @@ describe('ConnectionBar', () => {
     await user.click(screen.getByRole('button', { name: /Search objects/ }))
     expect(p.onSearch).toHaveBeenCalledTimes(1)
     await user.click(screen.getByRole('button', { name: 'History' }))
-    expect(p.onPanel).toHaveBeenCalledWith('history')
+    expect(p.onWorkspace).toHaveBeenCalledWith('history')
     await user.click(screen.getByRole('button', { name: 'Dashboard' }))
-    expect(p.onPanel).toHaveBeenCalledWith('server')
+    expect(p.onWorkspace).toHaveBeenCalledWith('server')
   })
 
   // NOTE: the overflow DropdownMenu itself is Radix behavior (covered for

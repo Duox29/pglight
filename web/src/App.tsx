@@ -7,7 +7,6 @@ import { CredentialManager } from './components/CredentialManager'
 import { DialogHost, createDialogs, type PendingDialog } from './components/dialogs'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './components/ui/resizable'
 import { Explorer } from './components/Explorer'
-import { SidePanel } from './components/SidePanel'
 import { SearchPalette } from './components/SearchPalette'
 import { SplitWorkspace } from './components/SplitWorkspace'
 import { TabContent } from './components/TabContent'
@@ -23,6 +22,8 @@ import { useObjectOps } from './hooks/useObjectOps'
 import { useSplit } from './hooks/useSplit'
 import type { SideView } from './types'
 import { formatSqlText } from './lib/format'
+import { DEFAULT_QUICK_ACCESS, QUICK_ACCESS_VIEWS } from './lib/workspace'
+import { useAppPreference } from './lib/storage'
 import { useCommand, useCommandRegistration } from './shortcuts/ShortcutProvider'
 
 /* Thin shell: hook composition + layout. All domain logic lives in hooks/*
@@ -34,8 +35,7 @@ import { useCommand, useCommandRegistration } from './shortcuts/ShortcutProvider
 export default function App() {
   const [dlg, setDlg] = useState<PendingDialog | null>(null)
   const dialogs = useMemo(() => createDialogs(setDlg), [])
-  const [sideOpen, setSideOpen] = useState(false)
-  const [sideView, setSideView] = useState<SideView>('history')
+  const [quickAccess, setQuickAccess] = useAppPreference<SideView[]>('workspace.quickAccess', DEFAULT_QUICK_ACCESS)
   const commands = useCommand()
   const { paletteOpen, setPaletteOpen } = commands
 
@@ -174,11 +174,11 @@ export default function App() {
   useCommandRegistration('tab.activate.7', () => tabsApi.activateTabAt(6), { enabled: tabs.length > 6 })
   useCommandRegistration('tab.activate.8', () => tabsApi.activateTabAt(7), { enabled: tabs.length > 7 })
   useCommandRegistration('tab.activate.9', () => tabsApi.activateTabAt(8), { enabled: tabs.length > 8 })
-  useCommandRegistration('workspace.history', () => { setSideView('history'); setSideOpen(true) })
-  useCommandRegistration('workspace.snippets', () => { setSideView('snippets'); setSideOpen(true) })
-  useCommandRegistration('workspace.dashboard', () => { setSideView('server'); setSideOpen(true) })
-  useCommandRegistration('workspace.settings', () => { setSideView('settings'); setSideOpen(true) })
-  useCommandRegistration('workspace.shortcuts', () => { setSideView('shortcuts'); setSideOpen(true) })
+  useCommandRegistration('workspace.history', () => tabsApi.openWorkspace('history'))
+  useCommandRegistration('workspace.snippets', () => tabsApi.openWorkspace('snippets'))
+  useCommandRegistration('workspace.dashboard', () => tabsApi.openWorkspace('server'))
+  useCommandRegistration('workspace.settings', () => tabsApi.openWorkspace('settings'))
+  useCommandRegistration('workspace.shortcuts', () => tabsApi.openWorkspace('shortcuts'))
   useCommandRegistration('workspace.docs', tabsApi.openDocsTab)
   useCommandRegistration('split.right', () => { if (activeTab) split.openSplit(activeTab, 'horizontal') }, { enabled: tabs.length > 1 })
   useCommandRegistration('split.down', () => { if (activeTab) split.openSplit(activeTab, 'vertical') }, { enabled: tabs.length > 1 })
@@ -246,10 +246,8 @@ export default function App() {
         connected={connected}
         onSearch={() => setPaletteOpen(true)}
         searchShortcut={commands.formatBinding('palette.open')[0]}
-        onPanel={(v) => {
-          setSideView(v)
-          setSideOpen(true)
-        }}
+        quickAccess={quickAccess}
+        onWorkspace={(view) => tabsApi.openWorkspace(view)}
         onDocs={() => tabsApi.openDocsTab()}
         onShutdown={() => {
           void (async () => {
@@ -342,7 +340,7 @@ export default function App() {
         </aside>
         </ResizablePanel>
         <ResizableHandle withHandle />
-        <ResizablePanel defaultSize={55} minSize={30} className="min-h-0">
+        <ResizablePanel defaultSize={80} minSize={30} className="min-h-0">
         <main className="flex h-full min-h-0 min-w-0 flex-col">
           <TabStrip
             tabs={tabs}
@@ -387,38 +385,28 @@ export default function App() {
                 sessions={sessions}
                 savedConnections={sessionsApi.saved}
                 dialogs={dialogs}
+                session={session}
+                history={history}
+                snippets={snippets}
+                onOpenSql={(sql) => newQueryTab(sql, activeId)}
+                onDeleteSnippet={(i) => {
+                  const item = snippets[i]
+                  if (!item) return
+                  void apiClient.deleteSnippet(item.name).then((j) => {
+                    if (j.error) toast.error(j.error)
+                    else setSnippets((s) => s.filter((_, x) => x !== i))
+                  }).catch((e) => toast.error(e instanceof Error ? e.message : String(e)))
+                }}
+                quickAccess={quickAccess}
+                onQuickAccessChange={(view, enabled) => setQuickAccess((current) => {
+                  const selected = new Set(enabled ? [...current, view] : current.filter((item) => item !== view))
+                  return QUICK_ACCESS_VIEWS.filter((item) => selected.has(item))
+                })}
               />
             )}
           />
         </main>
         </ResizablePanel>
-        {sideOpen && (
-          <>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={25} minSize={15} maxSize={50} className="min-h-0">
-          <aside className="flex h-full min-h-0 flex-col border-l bg-card">
-            <SidePanel
-              view={sideView}
-              onView={setSideView}
-              onClose={() => setSideOpen(false)}
-              session={session}
-              history={history}
-              snippets={snippets}
-              onOpenSql={(sql) => newQueryTab(sql, activeId)}
-              onDeleteSnippet={(i) => {
-                const item = snippets[i]
-                if (!item) return
-                void apiClient.deleteSnippet(item.name).then((j) => {
-                  if (j.error) toast.error(j.error)
-                  else setSnippets((s) => s.filter((_, x) => x !== i))
-                }).catch((e) => toast.error(e instanceof Error ? e.message : String(e)))
-              }}
-              dialogs={dialogs}
-            />
-          </aside>
-          </ResizablePanel>
-          </>
-        )}
       </ResizablePanelGroup>
       <SearchPalette key={paletteOpen ? 'open' : 'closed'} open={paletteOpen} onOpenChange={setPaletteOpen} session={session} onOpenTable={openTableForSession} />
     </div>

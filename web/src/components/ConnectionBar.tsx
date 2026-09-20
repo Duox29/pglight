@@ -1,7 +1,9 @@
-import { BookOpen, Database, History, Keyboard, LayoutDashboard, MoreHorizontal, Power, Search, Settings, Star, Zap } from 'lucide-react'
+import { BookOpen, Database, MoreHorizontal, Power, Search } from 'lucide-react'
 import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
+import type { SideView } from '@/types'
+import { WORKSPACE_VIEW_META } from '@/lib/workspace'
 
 export interface ConnFields {
   host: string
@@ -16,7 +18,8 @@ export function ConnectionBar(props: {
   connected: boolean
   onSearch: () => void
   searchShortcut?: string
-  onPanel: (v: 'history' | 'snippets' | 'aliases' | 'server' | 'settings' | 'shortcuts') => void
+  quickAccess: SideView[]
+  onWorkspace: (v: SideView) => void
   onDocs: () => void
   onShutdown: () => void
 }) {
@@ -31,14 +34,13 @@ export function ConnectionBar(props: {
           <Search /> Search objects / Command Palette <kbd className="ml-auto font-mono text-[10px] text-muted-foreground/70">{props.searchShortcut ?? 'Mod+K'}</kbd>
         </Button>
       </div>
-      {/* Secondary: workspace tools stay visible */}
-      <Button size="sm" variant="ghost" onClick={() => props.onPanel('history')}>
-        <History /> History
-      </Button>
-      <Button size="sm" variant="ghost" onClick={() => props.onPanel('server')}>
-        <LayoutDashboard /> Dashboard
-      </Button>
-      {/* Utility: one overflow menu instead of three peer buttons */}
+      {/* These two buttons are configured in Workspace → Quick Access. */}
+      {props.quickAccess.map((view, index) => {
+        const meta = WORKSPACE_VIEW_META[view]
+        const Icon = meta.icon
+        return <Button key={`${view}-${index}`} size="sm" variant="ghost" onClick={() => props.onWorkspace(view)}><Icon /> {view === 'server' ? 'Dashboard' : meta.label}</Button>
+      })}
+      {/* Utility: workspace navigation and docs stay in one overflow menu. */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button size="sm" variant="ghost" aria-label="More tools">
@@ -46,17 +48,8 @@ export function ConnectionBar(props: {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => props.onPanel('snippets')}>
-            <Star /> Snippets
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => props.onPanel('aliases')}>
-            <Zap /> Aliases
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => props.onPanel('settings')}>
-            <Settings /> Settings
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => props.onPanel('shortcuts')}>
-            <Keyboard /> Keyboard Shortcuts
+          <DropdownMenuItem onSelect={() => props.onWorkspace('quick-access')}>
+            <MoreHorizontal /> Workspace
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={props.onDocs}>
             <BookOpen /> Docs

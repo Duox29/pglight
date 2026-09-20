@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Ban, Skull, Trash2, X } from 'lucide-react'
+import { Ban, Skull, Trash2 } from 'lucide-react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Card } from './ui/card'
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs'
+import { Switch } from './ui/switch'
 import { DataGrid } from './ui/data-grid'
 import { EmptyNote, ErrorText } from './ui/feedback'
 import type { HistoryEntry, SideView, Snippet } from '@/types'
@@ -13,31 +14,28 @@ import { KeyboardShortcutsPanel } from './KeyboardShortcutsPanel'
 import { AliasesPanel } from './AliasesPanel'
 import { LogsPanel } from './LogsPanel'
 import { api, q } from '@/lib/api'
+import { QUICK_ACCESS_VIEWS, WORKSPACE_VIEW_META, WORKSPACE_VIEWS } from '@/lib/workspace'
 
 interface Props {
   view: SideView
   onView: (v: SideView) => void
-  onClose: () => void
   session: string
   history: HistoryEntry[]
   snippets: Snippet[]
   onOpenSql: (sql: string) => void
   onDeleteSnippet: (i: number) => void
   dialogs: DialogsApi
+  quickAccess: SideView[]
+  onQuickAccessChange: (view: SideView, enabled: boolean) => void
 }
 
-const viewGroups: { label: string; views: SideView[] }[] = [
-  { label: 'Workspace', views: ['history', 'snippets', 'aliases'] },
-  { label: 'Database', views: ['server', 'activity', 'locks', 'stats'] },
-  { label: 'System', views: ['settings', 'shortcuts', 'logs'] },
-]
 export function SidePanel(p: Props) {
   const [filter, setFilter] = useState('')
   const [payload, setPayload] = useState<unknown>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    if (p.view === 'history' || p.view === 'snippets' || p.view === 'aliases' || p.view === 'settings' || p.view === 'shortcuts' || p.view === 'logs') return
+    if (p.view === 'history' || p.view === 'snippets' || p.view === 'aliases' || p.view === 'settings' || p.view === 'shortcuts' || p.view === 'logs' || p.view === 'quick-access') return
     // Drop the previous view's payload: without this a slow fetch briefly
     // renders stale data (e.g. an array) under the new view and crashes it.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -74,26 +72,18 @@ export function SidePanel(p: Props) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-between px-2.5 pt-2">
-        <span className="text-sm font-semibold capitalize">{p.view}</span>
-        <Button size="sm" variant="ghost" onClick={p.onClose} aria-label="Close panel">
-          <X className="h-3.5 w-3.5" />
-        </Button>
+      <div className="px-3 pt-3">
+        <div className="text-sm font-semibold">Workspace</div>
+        <div className="mt-0.5 text-[11px] text-muted-foreground">History, database monitoring, settings, and tools</div>
       </div>
-      <div className="flex flex-col gap-1 px-2.5 pb-1">
+      <div className="px-2.5 py-2">
         <Tabs value={p.view} onValueChange={(v) => p.onView(v as SideView)}>
-          {viewGroups.map((g) => (
-            <div key={g.label}>
-              <div className="px-1 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{g.label}</div>
-              <TabsList className="w-full justify-start">
-                {g.views.map((v) => (
-                  <TabsTrigger key={v} value={v} className="capitalize">
-                    {v}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </div>
-          ))}
+          <TabsList className="w-full flex-nowrap justify-start overflow-x-auto">
+            {WORKSPACE_VIEWS.map((v) => {
+              const Icon = WORKSPACE_VIEW_META[v].icon
+              return <TabsTrigger key={v} value={v} className="gap-1.5"><Icon className="h-3.5 w-3.5" />{WORKSPACE_VIEW_META[v].label}</TabsTrigger>
+            })}
+          </TabsList>
         </Tabs>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-2.5">
@@ -138,6 +128,7 @@ export function SidePanel(p: Props) {
           </div>
         )}
         {p.view === 'aliases' && <AliasesPanel dialogs={p.dialogs} />}
+        {p.view === 'quick-access' && <QuickAccessView quickAccess={p.quickAccess} onChange={p.onQuickAccessChange} />}
         {(p.view === 'server' || p.view === 'activity' || p.view === 'locks' || p.view === 'stats' || p.view === 'settings' || p.view === 'shortcuts' || p.view === 'logs') && (
           <div className="flex flex-col gap-2">
             <ErrorText message={error} />
@@ -155,6 +146,31 @@ export function SidePanel(p: Props) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function QuickAccessView({ quickAccess, onChange }: { quickAccess: SideView[]; onChange: (view: SideView, enabled: boolean) => void }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Card className="p-3">
+        <div className="mb-1 text-[12px] font-semibold">Connection Bar shortcuts</div>
+        <p className="mb-3 text-[11px] text-muted-foreground">Toggle the workspace sections that should appear beside the search button.</p>
+        <div className="flex flex-col divide-y">
+          {QUICK_ACCESS_VIEWS.map((view) => {
+            const Icon = WORKSPACE_VIEW_META[view].icon
+            return (
+              <label key={view} className="flex items-center justify-between gap-3 py-2 text-[12px] first:pt-0 last:pb-0">
+                <span className="flex items-center gap-2"><Icon className="h-3.5 w-3.5 text-muted-foreground" />{WORKSPACE_VIEW_META[view].label}</span>
+                <Switch checked={quickAccess.includes(view)} onCheckedChange={(enabled) => onChange(view, enabled)} aria-label={`Show ${WORKSPACE_VIEW_META[view].label} in Connection Bar`} />
+              </label>
+            )
+          })}
+        </div>
+      </Card>
+      <Card className="p-3 text-[11px] text-muted-foreground">
+        The shortcut buttons open the Workspace tab directly on the selected section. Your choices are saved with the app preferences.
+      </Card>
     </div>
   )
 }

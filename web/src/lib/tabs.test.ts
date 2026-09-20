@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { erdConnectionIdFor, pkOf, splitOptions } from './tabs'
+import { erdConnectionIdFor, isWorkspaceView, pkOf, slimTab, splitOptions } from './tabs'
 import type { SavedConnection, SessionInfo, Tab, TableTabT } from '../types'
 
 const q = (id: string): Tab => ({
@@ -24,6 +24,15 @@ describe('splitOptions', () => {
 
   it('handles empty tabs', () => {
     expect(splitOptions([], 'a')).toEqual([])
+  })
+})
+
+describe('workspace tabs', () => {
+  it('accepts workspace views and persists the selected view', () => {
+    const workspace: Tab = { id: 'workspace', kind: 'workspace', title: 'Workspace', view: 'quick-access' }
+    expect(isWorkspaceView('quick-access')).toBe(true)
+    expect(isWorkspaceView('not-a-view')).toBe(false)
+    expect(slimTab(workspace)).toEqual({ id: 'workspace', kind: 'workspace', title: 'Workspace', view: 'quick-access' })
   })
 })
 

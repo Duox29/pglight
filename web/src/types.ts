@@ -123,6 +123,13 @@ export interface DocsTabT {
   title: string
 }
 
+export interface WorkspaceTabT {
+  id: string
+  kind: 'workspace'
+  title: string
+  view: SideView
+}
+
 export interface ErdTabT {
   id: string
   kind: 'erd'
@@ -151,9 +158,9 @@ export interface ObjectTabT {
   error?: string
 }
 
-export type Tab = QueryTabT | TableTabT | BrowserTabT | ErdTabT | DocsTabT | ObjectTabT
+export type Tab = QueryTabT | TableTabT | BrowserTabT | ErdTabT | DocsTabT | WorkspaceTabT | ObjectTabT
 
-export type SideView = 'history' | 'snippets' | 'aliases' | 'server' | 'activity' | 'locks' | 'stats' | 'settings' | 'shortcuts' | 'logs'
+export type SideView = 'history' | 'snippets' | 'aliases' | 'server' | 'activity' | 'locks' | 'stats' | 'settings' | 'shortcuts' | 'logs' | 'quick-access'
 
 /** Capped result snapshot kept for query tabs (never auto re-run). */
 export interface QuerySnapshot {
@@ -181,4 +188,5 @@ export interface StoredTab {
   snapshot?: QuerySnapshot
   objectKind?: ObjectKind
   name?: string
+  view?: SideView
 }

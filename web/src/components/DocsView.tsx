@@ -193,7 +193,7 @@ const SECTIONS: Section[] = [
     body: {
       en: (
         <>
-          <P>The workspace has three resizable columns: explorer, main area, and side panel. Column sizes persist. Tab kinds are <K>Query, Table, Object, Browser, ERD,</K> and <K>Docs</K>.</P>
+          <P>The workspace has a resizable explorer column and a main tab area. Tab kinds include <K>Query, Table, Object, Browser, ERD, Docs,</K> and <K>Workspace</K>. Workspace contains History, database monitoring, settings, logs, and Quick Access in one navigation bar.</P>
           <Ul>
             <Li>The dot marks tab state: blue for the active tab, amber for an edited query that has not run. The DB badge shows the tab session database.</Li>
             <Li>To close a tab, use the <K>X</K> button or middle-click. Right-click a tab for <K>Close, Close Others, Close to the Right, Close to the Left,</K> and <K>Close All</K>.</Li>
@@ -203,7 +203,7 @@ const SECTIONS: Section[] = [
       ),
       vi: (
         <>
-          <P>Workspace gồm ba cột co giãn: explorer, vùng chính và side panel. Kích thước cột được lưu. Các loại tab gồm <K>Query, Table, Object, Browser, ERD</K> và <K>Docs</K>.</P>
+          <P>Workspace gồm cột explorer co giãn và vùng tab chính. Các loại tab gồm <K>Query, Table, Object, Browser, ERD, Docs</K> và <K>Workspace</K>. Workspace chứa History, giám sát database, settings, logs và Quick Access trong một thanh điều hướng.</P>
           <Ul>
             <Li>Chấm tròn báo trạng thái tab: xanh cho tab đang mở, hổ phách cho query đã sửa nhưng chưa chạy. Badge DB cho biết database của session gắn với tab.</Li>
             <Li>Để đóng tab, dùng nút <K>X</K> hoặc middle-click. Chuột phải lên tab để dùng <K>Close, Close Others, Close to the Right, Close to the Left</K> và <K>Close All</K>.</Li>
@@ -234,7 +234,7 @@ const SECTIONS: Section[] = [
           </Ul>
           <H>Toolbar</H>
           <Ul>
-            <Li><K>Run</K> starts execution. The square button cancels the running query of that tab. With several concurrent runs, use the Dashboard Activity view to cancel a specific backend.</Li>
+            <Li><K>Run</K> starts execution. The square button cancels the running query of that tab. With several concurrent runs, use the Workspace Activity view to cancel a specific backend.</Li>
             <Li>The transaction cluster of that tab session, plus the <K>open transaction</K> or <K>no transaction</K> badge. See Transactions.</Li>
             <Li>The <K>Explain</K> menu offers <K>Explain</K> and <K>Explain Analyze</K>. The text plan includes timing and buffer data.</Li>
             <Li>The limit picker offers <K>200 rows, 1000 rows,</K> and <K>no limit</K>. The <K>Export</K> menu of the first result offers <K>CSV, JSON,</K> and <K>INSERTs</K>.</Li>
@@ -264,7 +264,7 @@ const SECTIONS: Section[] = [
           </Ul>
           <H>Toolbar</H>
           <Ul>
-            <Li><K>Run</K> bắt đầu chạy. Nút vuông hủy query đang chạy của tab đó. Với nhiều query chạy đồng thời, dùng view Activity trong Dashboard để hủy một backend cụ thể.</Li>
+            <Li><K>Run</K> bắt đầu chạy. Nút vuông hủy query đang chạy của tab đó. Với nhiều query chạy đồng thời, dùng view Activity trong Workspace để hủy một backend cụ thể.</Li>
             <Li>Cụm transaction của session gắn với tab, kèm badge <K>open transaction</K> hoặc <K>no transaction</K>. Xem mục Transactions.</Li>
             <Li>Menu <K>Explain</K> gồm <K>Explain</K> và <K>Explain Analyze</K>. Text plan gồm timing và buffer.</Li>
             <Li>Ô limit gồm <K>200 rows, 1000 rows</K> và <K>no limit</K>. Menu <K>Export</K> của result đầu gồm <K>CSV, JSON</K> và <K>INSERTs</K>.</Li>

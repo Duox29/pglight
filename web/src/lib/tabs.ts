@@ -1,4 +1,5 @@
-import type { SavedConnection, SessionInfo, StoredTab, Tab, TableTabT } from '../types'
+import type { SavedConnection, SessionInfo, SideView, StoredTab, Tab, TableTabT } from '../types'
+import { WORKSPACE_VIEWS } from './workspace'
 
 export const DEFAULT_SQL = 'SELECT * FROM information_schema.tables LIMIT 20;'
 
@@ -56,7 +57,13 @@ export function slimTab(t: Tab): StoredTab | null {
       return { id: t.id, kind: t.kind, title: t.title, sessionId, schema: t.schema, name: t.name, objectKind: t.objectKind }
     case 'docs':
       return { id: 'docs', kind: 'docs', title: 'Docs' }
+    case 'workspace':
+      return { id: 'workspace', kind: 'workspace', title: 'Workspace', view: t.view }
   }
+}
+
+export function isWorkspaceView(value: unknown): value is SideView {
+  return typeof value === 'string' && WORKSPACE_VIEWS.includes(value as SideView)
 }
 
 export function readJSON<T>(key: string, fallback: T): T {
