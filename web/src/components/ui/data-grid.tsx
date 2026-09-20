@@ -103,9 +103,9 @@ export function DataGrid({
 }) {
   const pageRows = data?.rows ?? []
   // Always called (cheap) so hook order stays stable; only wired when selectable.
-  const gridSel = useGridSelection(pageRows, (r) => JSON.stringify(r))
+  const gridSel = useGridSelection(pageRows, (r, i) => JSON.stringify([i, r]))
   if (!data || !data.columns) return <EmptyNote text="No data" />
-  const selRows = selectable ? pageRows.filter((r) => gridSel.sel.has(JSON.stringify(r))) : []
+  const selRows = selectable ? pageRows.filter((r, i) => gridSel.sel.has(JSON.stringify([i, r]))) : []
 
   const copySelectedCSV = () => {
     if (!selRows.length) return
@@ -151,7 +151,7 @@ export function DataGrid({
       </TableHeader>
       <TableBody>
         {(data.rows ?? []).map((r, ri) => {
-          const selected = selectable && gridSel.sel.has(JSON.stringify(r))
+          const selected = selectable && gridSel.sel.has(JSON.stringify([ri, r]))
           return (
             <TableRow
               key={ri}

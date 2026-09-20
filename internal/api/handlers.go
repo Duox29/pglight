@@ -344,7 +344,7 @@ func (h *Handler) execQuery(w http.ResponseWriter, r *http.Request, qq db.Querie
 	for rows.Next() {
 		vals, err := rows.Values()
 		if err != nil {
-			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			writeJSON(w, 500, queryErrBody(h, sid, loc, sql, err))
 			return
 		}
 		for i, v := range vals {
@@ -358,7 +358,7 @@ func (h *Handler) execQuery(w http.ResponseWriter, r *http.Request, qq db.Querie
 		}
 	}
 	if err := rows.Err(); err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		writeJSON(w, 500, queryErrBody(h, sid, loc, sql, err))
 		return
 	}
 	cmd := rows.CommandTag()

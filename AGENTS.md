@@ -5,7 +5,7 @@
 
 ## 0. Stack map
 
-- **Backend**: Go 1.25, `github.com/jackc/pgx/v5`. API in `internal/api/`
+- **Backend**: Go 1.26.8, `github.com/jackc/pgx/v5`. API in `internal/api/`
   (domain files: `session|explorer|query|data|admin|alter|complete|settings|aliases.go`,
   shared core in `handlers.go`), connection pool + explicit-txn state in
   `internal/db/manager.go`, routes in `main.go` (grouped by domain).
@@ -18,14 +18,15 @@
 ## 1. Golden commands
 
 ```sh
-go run ./scripts/rerun              # kill :8080, rebuild, rerun (PORT=… to change)
+./scripts/rerun.sh                  # kill :8080, rebuild, rerun (PORT=… to change)
 docker compose -f docker/docker-compose.yml up -d   # test DB
 cd web && npm run dev              # Vite :5173, proxies /api → :8080
 ```
 
-Gate before finishing any change: `go run ./scripts/check` (gofmt, vet, build,
-  tsc, eslint). Frontend change ⇒ `cd web && npm run build` so the local `dist/`
-  stays fresh (`dist/` is git-ignored: rebuild it, never commit it).
+Gate before finishing any change: `./scripts/check.sh` (gofmt, vet, test, build,
+  tsc, eslint). Frontend tests use Node 22+ (`jsdom` requires it). Frontend
+change ⇒ `cd web && npm run build` so the local `dist/` stays fresh (`dist/`
+is git-ignored: rebuild it, never commit it).
 
 ## 2. Backend rules (Go)
 
@@ -115,11 +116,32 @@ Gate before finishing any change: `go run ./scripts/check` (gofmt, vet, build,
   import testing. Never commit real credentials — the `postgres/postgres`
   test-only login lives in the compose file, nowhere else.
 
-## 5. Docs & commits
+## 5. Completed functionality (v0.2)
+
+The following non-auth functionality is implemented and covered by the current
+backend/frontend surface:
+
+- PostgreSQL sessions: saved connection profiles, multiple live sessions,
+  reconnect-after-restart, per-session transactions, and transaction-aware
+  query/data paths.
+- Explorer and schema work: databases, schemas, tables, views, materialized
+  views, foreign tables, functions, sequences, types, indexes, triggers,
+  constraints, table statistics, DDL, ERD, global search, and autocomplete.
+- Query and data tools: single- and multi-statement queries, EXPLAIN, history,
+  snippets, cancellation, paging/filtering/ordering, guarded row edits,
+  CSV import, CSV/JSON/INSERT export, maintenance, and mock-data generation.
+- React workspace: shadcn-style UI components, table/query grids, split panes,
+  dashboard panels, object editors, session-aware tab restore, and Sonner/
+  promise-based dialogs.
+- Observability and local app data: HTTP/query/transaction logging with the
+  Settings panel, aliases, preferences, privacy controls, and persisted ERD
+  layouts.
+
+## 6. Docs & commits
 
 - New endpoint/component/behavior ⇒ update `PLAN.md` (API list / stack section).
 - Never commit `web/dist` (git-ignored build output), `web/node_modules`, `*.tsbuildinfo`, `data/`, binaries, or `.env` files.
-- **One feature = one commit.** Finish order: implement → `go run ./scripts/check`
+- **One feature = one commit.** Finish order: implement → `./scripts/check.sh`
   → rebuild `dist` → smoke-test (API + UI) → commit immediately. Message in
   conventional style: `feat|fix|docs|chore|refactor(scope): subject`, e.g.
   `feat(observability): AOP request/query logging with web settings`.

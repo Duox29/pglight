@@ -2,31 +2,31 @@
 
 Source features surveyed: JetBrains DataGrip (explorer, consoles, diff, Explain, data editor, import/export, diagrams, search) and pgAdmin 4 (browser tree, dashboard, Query Tool, Properties panels, maintenance, backup, roles).
 
-## Where pglight is now (v0.1)
+## Where pglight is now (v0.2)
 
 | Area | Status |
 |---|---|
 | Connect + saved servers (localStorage) | ✅ |
-| Explorer: schemas → tables + est.rows, filter | ✅ basic |
+| Explorer: schemas → tables + est.rows, filter | ✅ |
 | Table browse: WHERE filter, ORDER, paging | ✅ |
-| Cell edit (prompt), insert (prompt), delete | ✅ basic |
-| Query console: run, Ctrl+Enter, limit, history | ✅ basic |
-| EXPLAIN (JSON) + text plan | ✅ basic |
-| DDL (reconstructed) + indexes + FKs | ✅ basic |
+| Cell edit, insert, guarded delete | ✅ |
+| Query console: run, Ctrl+Enter, limit, history | ✅ |
+| EXPLAIN (JSON) + text plan | ✅ |
+| DDL + indexes + FKs | ✅ |
 | CSV/JSON export of result | ✅ |
 | Activity (pg_stat_activity) + cancel/kill | ✅ |
 | Autocomplete (tables/columns/keywords) | ✅ smart (context-aware, cached) |
-| Multi-statement / multi-result | ❌ |
-| Transactions (BEGIN/COMMIT/ROLLBACK) | ❌ |
-| Full tree (views/matviews/foreign/functions/seq/types/triggers/extensions/roles) | ❌ partial |
-| Properties (constraints/triggers/stats/sizes/comments) | ❌ partial |
-| Dashboard (locks, db stats, server info) | ❌ partial (activity only) |
-| Global object search (Ctrl+K) | ❌ |
-| SQL format + highlight + snippets | ❌ |
-| Import CSV / export as INSERTs | ❌ (export CSV/JSON only) |
-| ER diagram (FK graph) | ❌ |
-| Maintenance (VACUUM/ANALYZE/REINDEX) | ❌ |
-| Roles / privileges viewer | ❌ |
+| Multi-statement / multi-result | ✅ |
+| Transactions (BEGIN/COMMIT/ROLLBACK) | ✅ |
+| Full tree (views/matviews/foreign/functions/seq/types/triggers/extensions/roles) | ✅ |
+| Properties (constraints/triggers/stats/sizes/comments) | ✅ |
+| Dashboard (locks, db stats, server info) | ✅ |
+| Global object search (Ctrl+K) | ✅ |
+| SQL format + CodeMirror editor + snippets | ✅ |
+| Import CSV / export as INSERTs | ✅ |
+| ER diagram (FK graph) | ✅ |
+| Maintenance (VACUUM/ANALYZE/REINDEX) | ✅ |
+| Roles / privileges viewer | ✅ basic |
 | Diff / schema compare, backup/restore | ❌ (later) |
 | Debugger, SSH tunnel | ❌ (out of scope) |
 
@@ -56,7 +56,7 @@ Backend (`internal/db`, `internal/api`):
 Frontend (`web/`):
 - [x] UX hierarchy pass: header reduces visual competition (search-first + History/Dashboard + utility menu for Snippets/Settings/Docs); query toolbar grouped Primary/Query/Result/Utility with Run dominant and Explain in a dropdown; connection panel is a floating Radix Popover over the explorer (never pushes the tree down); Explorer tiers schema > muted-uppercase group > object, Tables open by default, Lucide-only icons with subtle type colors, filter match counts; tabs show active dot/dirty state, middle-click close, DB badges; DataGrid is type-aware (OID-based numeric right-align, bool, JSON, type tooltips, zebra rows, Lucide sort icons); table workspace has a real identity header with Data | Structure (Columns/Constraints/Triggers) | SQL | Indexes | Stats; side panel grouped …
 - [x] Table workspace with sections **Data | Structure (Columns/Constraints/Triggers) | SQL (DDL) | Indexes | Stats**. DDL uses server definition + reconstructed fallback. Columns tab edits via `POST /api/alter-table`: add/drop/rename column, change type (smart-suggest input, custom enums accepted), toggle nullable, set/drop default, rename table; Constraints tab adds/drops CHECK|UNIQUE|PK|FK|EXCLUDE; Indexes tab creates (unique, btree|hash|gin|gist|spgist|brin, multi-key ASC/DESC, expression keys, INCLUDE, partial WHERE, live SQL preview)/renames/drops; Triggers tab creates (BEFORE|AFTER|INSTEAD OF, INSERT|UPDATE|DELETE|TRUNCATE, ROW|STATEMENT, function, UPDATE OF cols, WHEN)/enables/disables/drops with status badge (`GET /api/triggers` now also returns `enabled` O|D|R|A).
-- [x] Query console upgrades: txn controls live inside each tab's own toolbar (per-tab session: `user@host/dbname` label, autocommit toggle, Begin/Commit/Rollback, open/no-transaction badge) — no separate global bar, so switching tabs can never act on the wrong session; Format button, Save-snippet, multi-result rendering (one grid per statement), per-result CSV/INSERT export. Statement timeout 1000s (`queryTimeout` in `internal/api/handlers.go`, console paths only). Cancel button (■): matches the tab's pool via `application_name=pglight:<session>` (`Manager.Add`) against active backends, SQL text only disambiguates concurrent runs; unique hit → `GET /api/cancel`, else toast pointing to Dashboard.
+- [x] Query console upgrades: txn controls live inside each tab's own toolbar (per-tab session: `user@host/dbname` label, autocommit toggle, Begin/Commit/Rollback, open/no-transaction badge) — no separate global bar, so switching tabs can never act on the wrong session; Format button, Save-snippet, multi-result rendering (one grid per statement), per-result CSV/INSERT export. Statement timeout 120s (`queryTimeout` in `internal/api/handlers.go`, console paths only). Cancel button (■): matches the tab's pool via `application_name=pglight:<session>` (`Manager.Add`) against active backends, SQL text only disambiguates concurrent runs; unique hit → `GET /api/cancel`, else toast pointing to Dashboard.
 - [x] Global search palette (Ctrl+K / button): jump to table/column, open data.
 - [x] Session survive-restart: per-session credentials (`session-conns`), boot 1:1 reconnect so tabs keep their own DB (dead sessions badged, never collapsed onto another DB), global 401 hook + 30s/focus heartbeat with one-shot auto-retry, per-session Reconnect / Reconnect-all in Connections, tab ids remapped on reconnect.
 - [x] Dashboard panel: Server | Activity | Locks | Stats tabs (auto-refresh activity/locks).
@@ -64,7 +64,7 @@ Frontend (`web/`):
 - [x] Import CSV into open table (file picker, `.tsv` forced to tab delimiter + header detection + ragged-width reject, batch POST), Export as INSERT statements (identifier-quoted, typed literals: NULL/TRUE/FALSE/numbers/JSON/arrays), right-click opens the row menu (Copy cell value / Export / Copy / Delete — never `preventDefault` on the cell, or Radix skips open). CSV export quotes headers, NULL as empty, objects as JSON.
 - [x] Grid selection flow (shared `useGridSelection`, Open Data + query `DataGrid[selectable]`): plain left-click selects exactly one row, ctrl/meta toggles, shift ranges from anchor, right-click keeps multi-selection when inside it; query grids offer Copy cell value / Copy rows / Export selected CSV|JSON.
 - [x] Async safety: `api()` throws `ApiError` on transport/invalid-JSON (backend `{error}` JSON still resolved per contract); `runQuery` uses try/finally so the running flag always clears; txn/explorer/table/row/alter/cancel/maintenance/import paths surface transport errors via toast or tab error; reconnect-all is per-session guarded; browser/ERD/restore loads carry a token so late responses cannot overwrite newer tabs; search palette drops stale responses by sequence.
-- [x] Row identity: cell edit uses the table's primary key from `/api/columns` and refuses when there is none (or a PK value is NULL); bulk selection keys by PK values when known, falling back to serialized rows; pagination disables Prev at offset 0 and Next at `total`; query result sort is derived state with asc/desc instead of mutating tab results.
+- [x] Row identity: cell edit uses the table's primary key from `/api/columns` and refuses when there is none (or a PK value is NULL); bulk selection keys by PK values when known, falling back to row-index-plus-content keys; pagination disables Prev at offset 0 and honors the backend `has_more` signal; query result sort is derived state with asc/desc instead of mutating tab results.
 
 ### Phase 2 — next (not in this change)
 - Visual EXPLAIN (flame/graph, buffers/timing bars), plan compare.
@@ -308,14 +308,60 @@ ci`, and binaries are `-trimpath -ldflags "-s -w"` stripped. The top-level
 `dist/` output dir is git-ignored.
 
 Conventions for contributors live in `AGENTS.md` (backend + frontend rules,
-checklists); run `go run ./scripts/check` before finishing any change.
+checklists); run `./scripts/check.sh` before finishing any change.
 
 Restart the backend (kills `:8080`, rebuilds, reruns in background):
 
 ```sh
-go run ./scripts/rerun          # PORT=8080 default
-PORT=18080 go run ./scripts/rerun
+./scripts/rerun.sh             # PORT=8080 default
+PORT=18080 ./scripts/rerun.sh
 ```
+
+## Codebase review — 2026-09-20 (auth excluded)
+
+Verification completed against the Docker PostgreSQL 14 fixture:
+
+- `./scripts/check.sh`, `go test -race ./...`, and a live HTTP smoke journey
+  (connect → schemas → `SELECT 1` → disconnect) passed.
+- `cd web && npm run build` passed. Vite reports a 1.23 MB minified JavaScript
+  chunk; code-splitting is a performance follow-up, not a correctness failure.
+- Full frontend tests passed under Node 22: 14 Vitest files and 82 tests;
+  project-scoped ESLint also passed under the same runtime.
+- `cd web && npm test` does not currently run successfully on Node 18.19:
+  installed `jsdom@30` requires Node 22+, and Vitest exits with 11
+  `ERR_REQUIRE_ESM` setup errors before collecting tests. CI already uses Node 22.
+
+Resolved findings:
+
+- **[P1] Table pagination ignored `has_more`.** `TableWorkspace` now honors the
+  backend signal, with regression coverage in
+  `web/src/components/TableWorkspace.pagination.test.tsx`.
+- **[P1] Table loads had a stale-response race.** Per-tab page and metadata
+  request sequences now discard late responses, covered by
+  `web/src/hooks/useTableOps.race.test.ts`.
+- **[P1] Duplicate result rows shared a selection key.** Grid selection now
+  includes the row index when no primary key is available, covered by
+  `web/src/hooks/useGridSelection.test.ts`.
+- **[P2] Some query-stream failures broke the response contract.** `rows.Values()`
+  and `rows.Err()` failures now include `in_txn`, covered by
+  `internal/api/query_contract_test.go`.
+- **[P2] Selection could survive a query-grid data refresh.** Selection and
+  context-cell state now clear when displayed rows change; this is covered by
+  the same hook regression test.
+
+Remaining follow-ups:
+- **[P2] `/api/table-data` accepts the filter expression verbatim.** This is
+  useful for advanced PostgreSQL predicates but is not safe for an untrusted
+  caller; keep this endpoint scoped to trusted users or replace the free-form
+  predicate with a validated filter AST (`internal/api/data.go`).
+- **[P2] Frontend rule drift remains.** Feature components still contain raw
+  buttons/input elements and `schemaCache.ts` performs a direct `fetch`, despite
+  the shadcn/data-access rules in `AGENTS.md`.
+
+The resolved findings were handled test-first: each regression test was made to
+fail against the old behavior, the implementation was then changed, and the
+test was rerun successfully. The remaining items need a product/security
+decision about trusted callers and a broader frontend component migration.
 
 ## Tests (`test/` — canonical, black-box)
 

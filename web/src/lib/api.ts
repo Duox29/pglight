@@ -19,6 +19,7 @@ export interface QueryResult {
   rows_affected?: number
   duration_ms?: number
   total?: number
+  has_more?: boolean
   statement?: string
   in_txn?: boolean
   /** True when restored from last session's snapshot — Run to refresh. */

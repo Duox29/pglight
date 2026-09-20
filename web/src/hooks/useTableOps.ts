@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { toast } from 'sonner'
 import type { DialogsApi } from '../components/dialogs'
@@ -47,19 +47,25 @@ export interface TableOpsDeps {
    a primary key (see pkOf); without one the UI refuses instead of guessing. */
 export function useTableOps(deps: TableOpsDeps) {
   const { tabs, setTabs, setActiveTab, markTxn, autocommit, dialogs, loadExplorer } = deps
+  const pageRequestSeq = useRef<Record<string, number>>({})
+  const metaRequestSeq = useRef<Record<string, number>>({})
 
   const loadTablePage = useCallback(
     async (sid: string, id: string, schema: string, table: string, limit: number, offset: number, filter: string, order: string) => {
       if (!sid) return
+      const seq = (pageRequestSeq.current[id] ?? 0) + 1
+      pageRequestSeq.current[id] = seq
       let j: QueryResult & { total?: number; in_txn?: boolean; error?: string }
       try {
         j = await api<QueryResult & { total?: number; in_txn?: boolean; error?: string }>(
           q(sid, `/api/table-data?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}&limit=${limit}&offset=${offset}&filter=${encodeURIComponent(filter)}&order=${encodeURIComponent(order)}`),
         )
       } catch (e) {
+        if (pageRequestSeq.current[id] !== seq) return
         setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'table' ? { ...t, error: e instanceof Error ? e.message : String(e) } : t)))
         return
       }
+      if (pageRequestSeq.current[id] !== seq) return
       if (j.error) {
         setTabs((prev) => prev.map((t) => (t.id === id && t.kind === 'table' ? { ...t, error: j.error } : t)))
         return
@@ -75,6 +81,8 @@ export function useTableOps(deps: TableOpsDeps) {
   const loadTableMeta = useCallback(
     async (sid: string, id: string, schema: string, table: string) => {
       if (!sid) return
+      const seq = (metaRequestSeq.current[id] ?? 0) + 1
+      metaRequestSeq.current[id] = seq
       const [cols, ddl, cons, trg, stats] = await Promise.all([
         api<unknown>(q(sid, `/api/columns?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)).catch(() => null),
         api<unknown>(q(sid, `/api/ddl?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)).catch(() => null),
@@ -82,6 +90,7 @@ export function useTableOps(deps: TableOpsDeps) {
         api<unknown>(q(sid, `/api/triggers?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)).catch(() => null),
         api<unknown>(q(sid, `/api/table-stats?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)).catch(() => null),
       ])
+      if (metaRequestSeq.current[id] !== seq) return
       setTabs((prev) =>
         prev.map((t) => {
           if (t.id !== id || t.kind !== 'table') return t

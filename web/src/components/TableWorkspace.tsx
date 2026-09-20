@@ -80,12 +80,12 @@ export function TableWorkspace(p: Props) {
   const pkIdx = pkCols.map((c) => (t.result?.columns ?? []).indexOf(c)).filter((i) => i >= 0)
   const hasIdentity = pkIdx.length > 0
   // Bulk row selection. Keyed by primary-key values when the table exposes
-  // them; falls back to serialized row content (duplicate rows share a key).
+  // them; falls back to row index plus serialized content.
   // Flow: plain click = select single (drops the rest), ctrl/meta = toggle,
   // shift = range, right-click keeps multi-selection when inside it.
   const pageRows = t.result?.rows ?? []
   const pageCols = t.result?.columns ?? []
-  const rowKey = (r: unknown[]) => (hasIdentity ? JSON.stringify(pkIdx.map((i) => r[i])) : JSON.stringify(r))
+  const rowKey = (r: unknown[], index: number) => (hasIdentity ? JSON.stringify(pkIdx.map((i) => r[i])) : JSON.stringify([index, r]))
   const gridSel = useGridSelection(pageRows, rowKey)
   const { sel, setSel } = gridSel
   // New page / new data → drop the old selection (keys belong to other rows).
@@ -93,7 +93,7 @@ export function TableWorkspace(p: Props) {
     gridSel.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t.id, t.offset, t.result])
-  const selRecs = pageRows.filter((r) => sel.has(rowKey(r))).map((r) => Object.fromEntries(pageCols.map((c, i) => [c, r[i]])))
+  const selRecs = pageRows.filter((r, i) => sel.has(rowKey(r, i))).map((r) => Object.fromEntries(pageCols.map((c, i) => [c, r[i]])))
 
   const startImport = () => fileRef.current?.click()
 
@@ -235,7 +235,11 @@ export function TableWorkspace(p: Props) {
               size="sm"
               variant="ghost"
               onClick={() => p.onPage(1)}
-              disabled={t.result?.total != null ? t.offset + t.limit >= t.result.total : (t.result?.rows.length ?? t.limit) < t.limit}
+              disabled={
+                t.result?.has_more === false ||
+                (t.result?.has_more == null &&
+                  (t.result?.total != null ? t.offset + t.limit >= t.result.total : (t.result?.rows.length ?? t.limit) < t.limit))
+              }
               aria-label="Next page"
             >
               <ArrowRight />
@@ -275,7 +279,7 @@ export function TableWorkspace(p: Props) {
                   <TableBody>
                     {t.result.rows.map((r, ri) => {
                       const orig = Object.fromEntries(t.result!.columns.map((c, i) => [c, r[i]]))
-                      const k = rowKey(r)
+                      const k = rowKey(r, ri)
                       return (
                         <TableRow
                           key={ri}
@@ -284,6 +288,7 @@ export function TableWorkspace(p: Props) {
                         >
                           {r.map((c, ci) => (
                               <TableCell
+                                key={ci}
                                 className="cursor-text bg-sky-950/30"
                                 onDoubleClick={() => p.onEditCell(t.result!.columns[ci], orig)}
                                 onClick={(e) => {
