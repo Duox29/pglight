@@ -62,6 +62,28 @@ func TestQueryHappyLimitWrapper(t *testing.T) {
 	requireRows(t, body, [][]any{{1}, {2}})
 }
 
+func TestQueryLargeResultLimits(t *testing.T) {
+	h, sid := newHandler(t)
+	for _, tc := range []struct {
+		name  string
+		limit int
+		want  int
+	}{
+		{name: "five thousand", limit: 5000, want: 1205},
+		{name: "ten thousand", limit: 10000, want: 1205},
+		{name: "no limit", limit: 0, want: 1205},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, body := callPOST(t, h.Query, "/api/query", qBody(sid, "SELECT generate_series(1,1205) AS n", tc.limit))
+			requireStatus(t, body, code, 200)
+			rows := decodeObj(t, body)["rows"].([]any)
+			if len(rows) != tc.want {
+				t.Fatalf("got %d rows, want %d: %s", len(rows), tc.want, body[:min(len(body), 200)])
+			}
+		})
+	}
+}
+
 func TestQueryFail(t *testing.T) {
 	h, sid := newHandler(t)
 	// empty sql

@@ -128,16 +128,22 @@ export function QueryConsole(p: Props) {
         </Button>
         <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
         {/* RESULT: size + export the output */}
-        <Select value={String(t.limit)} onValueChange={(v) => p.onLimit(Number(v))}>
-          <SelectTrigger className="w-[100px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="200">200 rows</SelectItem>
-            <SelectItem value="1000">1000 rows</SelectItem>
-            <SelectItem value="0">no limit</SelectItem>
-          </SelectContent>
-        </Select>
+        <Tip content={t.limit === 0 ? 'Return all rows up to the 64 MiB safety budget' : 'Maximum rows returned for each SELECT'}>
+          <span className="inline-flex">
+            <Select value={String(t.limit)} onValueChange={(v) => p.onLimit(Number(v))}>
+              <SelectTrigger className="w-[112px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="200">200 rows</SelectItem>
+                <SelectItem value="1000">1,000 rows</SelectItem>
+                <SelectItem value="5000">5,000 rows</SelectItem>
+                <SelectItem value="10000">10,000 rows</SelectItem>
+                <SelectItem value="0">No limit</SelectItem>
+              </SelectContent>
+            </Select>
+          </span>
+        </Tip>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button size="sm" variant="ghost" disabled={!t.results?.[0]?.columns?.length}>

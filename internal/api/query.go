@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +16,20 @@ type queryReq struct {
 	Session string `json:"session_id"`
 	SQL     string `json:"sql"`
 	Limit   int    `json:"limit"`
+}
+
+// Query results are returned as one JSON document, so an actually unlimited
+// query still needs a memory guard. Results below this budget are unlimited;
+// larger results fail clearly instead of allowing the server and browser to
+// exhaust memory while building/decoding the response.
+const maxQueryResultBytes = 64 << 20
+
+type queryResultTooLargeError struct {
+	maxBytes int
+}
+
+func (e *queryResultTooLargeError) Error() string {
+	return fmt.Sprintf("query result is too large for the UI (over %d MiB); add a LIMIT/filter or choose a smaller result size", e.maxBytes/(1<<20))
 }
 
 // splitStmt is one trimmed statement plus the byte offset of its first byte
@@ -257,13 +270,13 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 			// so line-map against the text Postgres actually parsed while
 			// reporting the original text in results.
 			execText := wrapSelect(st.text, req.Limit)
-			res, qerr := h.runSingle(r, qq, execText, 0)
+			res, qerr := h.runSingle(r, qq, st.text, req.Limit)
 			if qerr != nil {
 				body := map[string]any{"error": qerr.Error(), "statement": st.text, "results": results, "statements": len(stmts), "duration_ms": time.Since(start).Milliseconds(), "in_txn": h.Mgr.InTxn(id)}
 				for k, v := range errLocation(raw, idx, st.offset, st.text, execText, qerr) {
 					body[k] = v
 				}
-				writeJSON(w, 400, body)
+				writeJSON(w, queryErrorStatus(qerr, http.StatusBadRequest), body)
 				return
 			}
 			if res != nil {
@@ -287,7 +300,7 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 	if wantInvalidate {
 		defer globalComplete.Invalidate(id)
 	}
-	h.execQuery(w, r, qq, id, sql, loc, -1)
+	h.execQuery(w, r, qq, id, sql, loc, -1, req.Limit)
 }
 
 // stmtLoc maps an executed statement back to the user's script.
@@ -305,19 +318,17 @@ func isSingleSelect(sql string) bool {
 	return strings.HasPrefix(strings.ToUpper(s), "SELECT") && strings.Count(s, ";") == 0
 }
 
-// wrapSelect caps ad-hoc SELECTs so the console never floods the UI.
-// Non-SELECTs and out-of-range limits pass through untouched.
+// wrapSelect applies the selected result limit to one ad-hoc SELECT.
+// Non-SELECTs and no-limit (0) pass through untouched.
 func wrapSelect(sql string, limit int) string {
-	if limit > 0 && limit < 5000 && isSingleSelect(sql) {
+	if limit > 0 && isSingleSelect(sql) {
 		return fmt.Sprintf("SELECT * FROM (%s) AS _q LIMIT %d", strings.TrimSuffix(sql, ";"), limit)
 	}
 	return sql
 }
 
 func (h *Handler) runSingle(r *http.Request, qq db.Querier, sql string, limit int) (map[string]any, error) {
-	if limit > 0 && limit < 5000 && isSingleSelect(sql) {
-		sql = fmt.Sprintf("SELECT * FROM (%s) AS _q LIMIT %d", strings.TrimSuffix(sql, ";"), limit)
-	}
+	sql = wrapSelect(sql, limit)
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
@@ -326,39 +337,25 @@ func (h *Handler) runSingle(r *http.Request, qq db.Querier, sql string, limit in
 		return nil, err
 	}
 	defer rows.Close()
-	fields := rows.FieldDescriptions()
-	cols := make([]string, len(fields))
-	types := make([]string, len(fields))
-	for i, f := range fields {
-		cols[i] = f.Name
-		types[i] = strconv.Itoa(int(f.DataTypeOID))
+	collectLimit := 0
+	if limit > 0 {
+		collectLimit = limit + 1
 	}
-	data := [][]any{}
-	for rows.Next() {
-		vals, err := rows.Values()
-		if err != nil {
-			return nil, err
-		}
-		for i, v := range vals {
-			if b, ok := v.([]byte); ok {
-				vals[i] = string(b)
-			}
-		}
-		data = append(data, jsonSafeCells(vals, fields))
-		if len(data) >= 1000 {
-			break
-		}
-	}
-	if err := rows.Err(); err != nil {
+	cols, types, data, cmd, err := collectQueryRows(rows, collectLimit)
+	if err != nil {
 		return nil, err
 	}
-	cmd := rows.CommandTag()
-	return map[string]any{
+	out := map[string]any{
 		"columns": cols, "types": types, "rows": data,
 		"rows_affected": cmd.RowsAffected(),
 		"duration_ms":   time.Since(start).Milliseconds(),
 		"statement":     sql,
-	}, nil
+	}
+	if limit > 0 && len(data) > limit {
+		out["has_more"] = true
+		out["rows"] = data[:limit]
+	}
+	return out, nil
 }
 
 func (h *Handler) Explain(w http.ResponseWriter, r *http.Request) {

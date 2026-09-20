@@ -1,4 +1,4 @@
-import { Fragment } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './table'
 import { EmptyNote } from './feedback'
@@ -101,11 +101,50 @@ export function DataGrid({
       Off by default so read-only panels (logs, stats, browser) stay plain. */
   selectable?: boolean
 }) {
-  const pageRows = data?.rows ?? []
+  const resultRows = data?.rows
+  const pageRows = resultRows ?? []
   // Always called (cheap) so hook order stays stable; only wired when selectable.
-  const gridSel = useGridSelection(pageRows, (r, i) => JSON.stringify([i, r]))
+  // Indexes are unique within a rendered result and avoid serializing every
+  // cell of every row during scroll/re-render.
+  const gridSel = useGridSelection(pageRows, (_, i) => String(i))
+  const selRows = selectable ? pageRows.filter((_, i) => gridSel.sel.has(String(i))) : []
+
+  // Keep the full result in memory for export, but only mount a small window
+  // of rows. This prevents 5k/10k results from creating a huge DOM tree.
+  const virtualized = pageRows.length > 200
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(640)
+  const rowHeight = 29
+  const overscan = 10
+  useEffect(() => {
+    if (!virtualized) return
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const onScroll = () => setScrollTop(viewport.scrollTop)
+    const updateHeight = () => setViewportHeight(viewport.clientHeight || 640)
+    updateHeight()
+    viewport.addEventListener('scroll', onScroll, { passive: true })
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateHeight)
+    observer?.observe(viewport)
+    return () => {
+      viewport.removeEventListener('scroll', onScroll)
+      observer?.disconnect()
+    }
+  }, [virtualized])
+  useEffect(() => {
+    // Result identity changes represent a new query/page; reset the viewport.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronize scroll state with a replaced result
+    setScrollTop(0)
+    if (viewportRef.current) viewportRef.current.scrollTop = 0
+  }, [resultRows])
+  const windowRange = useMemo(() => {
+    if (!virtualized) return { start: 0, end: pageRows.length }
+    const start = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)
+    const end = Math.min(pageRows.length, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan)
+    return { start, end }
+  }, [pageRows.length, rowHeight, overscan, scrollTop, viewportHeight, virtualized])
   if (!data || !data.columns) return <EmptyNote text="No data" />
-  const selRows = selectable ? pageRows.filter((r, i) => gridSel.sel.has(JSON.stringify([i, r]))) : []
 
   const copySelectedCSV = () => {
     if (!selRows.length) return
@@ -118,8 +157,8 @@ export function DataGrid({
   }
 
   const grid = (
-    <Table>
-      <TableHeader>
+    <Table containerRef={virtualized ? viewportRef : undefined} containerClassName={virtualized ? 'max-h-[min(60vh,640px)]' : undefined}>
+      <TableHeader className="sticky top-0 z-10 bg-card">
         <TableRow
           className="hover:bg-transparent"
           onContextMenu={selectable ? () => gridSel.setCtxCell(null) : undefined}
@@ -150,8 +189,14 @@ export function DataGrid({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {(data.rows ?? []).map((r, ri) => {
-          const selected = selectable && gridSel.sel.has(JSON.stringify([ri, r]))
+        {virtualized && windowRange.start > 0 && (
+          <TableRow aria-hidden className="pointer-events-none hover:bg-transparent">
+            <TableCell colSpan={data.columns.length} className="border-0 p-0" style={{ height: windowRange.start * rowHeight }} />
+          </TableRow>
+        )}
+        {(data.rows ?? []).slice(windowRange.start, windowRange.end).map((r, localRi) => {
+          const ri = windowRange.start + localRi
+          const selected = selectable && gridSel.sel.has(String(ri))
           return (
             <TableRow
               key={ri}
@@ -198,6 +243,11 @@ export function DataGrid({
             </TableRow>
           )
         })}
+        {virtualized && windowRange.end < pageRows.length && (
+          <TableRow aria-hidden className="pointer-events-none hover:bg-transparent">
+            <TableCell colSpan={data.columns.length} className="border-0 p-0" style={{ height: (pageRows.length - windowRange.end) * rowHeight }} />
+          </TableRow>
+        )}
       </TableBody>
     </Table>
   )

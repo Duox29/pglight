@@ -323,16 +323,20 @@ func queryErrBody(h *Handler, sid string, loc *stmtLoc, execText string, qerr er
 	return body
 }
 
-func (h *Handler) execQuery(w http.ResponseWriter, r *http.Request, qq db.Querier, sid string, sql string, loc *stmtLoc, total int64, visibleLimit ...int) {
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
-	defer cancel()
-	rows, err := qq.Query(ctx, sql)
-	if err != nil {
-		writeJSON(w, 400, queryErrBody(h, sid, loc, sql, err))
-		return
+// queryErrorStatus preserves the existing client error contract while making
+// oversized unlimited results actionable instead of returning a generic 500.
+func queryErrorStatus(err error, fallback int) int {
+	var tooLarge *queryResultTooLargeError
+	if errors.As(err, &tooLarge) {
+		return http.StatusRequestEntityTooLarge
 	}
-	defer rows.Close()
+	return fallback
+}
+
+// collectQueryRows materializes a bounded JSON result. maxRows is zero for
+// no row-count limit; the byte budget still applies to every result so a
+// large cell/result cannot exhaust server or browser memory.
+func collectQueryRows(rows pgx.Rows, maxRows int) ([]string, []string, [][]any, pgconn.CommandTag, error) {
 	fields := rows.FieldDescriptions()
 	cols := make([]string, len(fields))
 	types := make([]string, len(fields))
@@ -341,27 +345,59 @@ func (h *Handler) execQuery(w http.ResponseWriter, r *http.Request, qq db.Querie
 		types[i] = strconv.Itoa(int(f.DataTypeOID))
 	}
 	data := [][]any{}
+	resultBytes := 0
 	for rows.Next() {
+		if maxRows > 0 && len(data) >= maxRows {
+			break
+		}
 		vals, err := rows.Values()
 		if err != nil {
-			writeJSON(w, 500, queryErrBody(h, sid, loc, sql, err))
-			return
+			return nil, nil, nil, pgconn.CommandTag{}, err
 		}
 		for i, v := range vals {
 			if b, ok := v.([]byte); ok {
 				vals[i] = string(b)
 			}
 		}
-		data = append(data, jsonSafeCells(vals, fields))
-		if len(data) >= 1001 {
-			break
+		row := jsonSafeCells(vals, fields)
+		encoded, err := json.Marshal(row)
+		if err != nil {
+			return nil, nil, nil, pgconn.CommandTag{}, err
 		}
+		resultBytes += len(encoded) + 1
+		if resultBytes > maxQueryResultBytes {
+			return nil, nil, nil, pgconn.CommandTag{}, &queryResultTooLargeError{maxBytes: maxQueryResultBytes}
+		}
+		data = append(data, row)
 	}
 	if err := rows.Err(); err != nil {
-		writeJSON(w, 500, queryErrBody(h, sid, loc, sql, err))
+		return nil, nil, nil, pgconn.CommandTag{}, err
+	}
+	return cols, types, data, rows.CommandTag(), nil
+}
+
+func (h *Handler) execQuery(w http.ResponseWriter, r *http.Request, qq db.Querier, sid string, sql string, loc *stmtLoc, total int64, visibleLimit ...int) {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
+	defer cancel()
+	rows, err := qq.Query(ctx, sql)
+	if err != nil {
+		writeJSON(w, queryErrorStatus(err, http.StatusBadRequest), queryErrBody(h, sid, loc, sql, err))
 		return
 	}
-	cmd := rows.CommandTag()
+	defer rows.Close()
+	collectLimit := 0
+	if len(visibleLimit) > 0 && visibleLimit[0] > 0 {
+		// Table-data needs one extra row for has_more. Query results use the
+		// same path, while wrapSelect prevents a single SELECT from exceeding
+		// the chosen limit.
+		collectLimit = visibleLimit[0] + 1
+	}
+	cols, types, data, cmd, err := collectQueryRows(rows, collectLimit)
+	if err != nil {
+		writeJSON(w, queryErrorStatus(err, http.StatusInternalServerError), queryErrBody(h, sid, loc, sql, err))
+		return
+	}
 	hasMore := false
 	if len(visibleLimit) > 0 && visibleLimit[0] > 0 && len(data) > visibleLimit[0] {
 		hasMore = true
