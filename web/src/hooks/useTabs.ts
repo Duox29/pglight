@@ -277,6 +277,23 @@ export function useTabs() {
     setActiveTab(null)
   }, [])
 
+  const activateTabAt = useCallback((index: number) => {
+    const tab = tabs[index]
+    if (tab) setActiveTab(tab.id)
+  }, [tabs])
+
+  const activateNextTab = useCallback(() => {
+    if (tabs.length < 1) return
+    const index = tabs.findIndex((tab) => tab.id === activeTab)
+    setActiveTab(tabs[(index + 1 + tabs.length) % tabs.length].id)
+  }, [tabs, activeTab])
+
+  const activatePreviousTab = useCallback(() => {
+    if (tabs.length < 1) return
+    const index = tabs.findIndex((tab) => tab.id === activeTab)
+    setActiveTab(tabs[(index - 1 + tabs.length) % tabs.length].id)
+  }, [tabs, activeTab])
+
   // Persist open tabs so a fresh start can reopen the last session. Skipped
   // while empty pre-hydration so boot never wipes the stored session away.
   const hydrated = useRef(false)
@@ -298,6 +315,7 @@ export function useTabs() {
     tabs, setTabs, activeTab, setActiveTab, cur, updateTab,
     newQueryTab, openDocsTab, openBrowser, openErd,
     closeTab, closeOthers, closeRight, closeLeft, closeAllTabs,
+    activateTabAt, activateNextTab, activatePreviousTab,
     remapTabsSession, restoreStoredTabs, readStoredTabs,
   }
 }

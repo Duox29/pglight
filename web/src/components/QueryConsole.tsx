@@ -15,6 +15,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import type { QueryTabT } from '@/types'
 import type { DialogsApi } from './dialogs'
 import { download, formatSqlText, quoteQualified, resultToCSV, resultToInserts, resultToJSON, fmtPlanText } from '@/lib/format'
+import { useCommand } from '@/shortcuts/ShortcutProvider'
+import { shortcutForDisplay } from '@/shortcuts/normalize'
 
 interface Props {
   tab: QueryTabT
@@ -37,6 +39,7 @@ interface Props {
 
 export function QueryConsole(p: Props) {
   const { tab: t } = p
+  const commands = useCommand()
   const [sort, setSort] = useState<{ column: number; direction: 'asc' | 'desc' } | null>(null)
   const editorHandle = useRef<SqlEditorHandle | null>(null)
   // Error line: jump caret + blink 3×, then keep a steady tint until the
@@ -82,12 +85,15 @@ export function QueryConsole(p: Props) {
         value={t.sql}
         session={t.sessionId}
         onChange={p.onSqlChange}
-        onCtrlEnter={runSelected}
+        onCommand={(id) => {
+          if (id === 'query.run') runSelected()
+          if (id === 'query.complete') editorHandle.current?.startCompletion()
+        }}
         handleRef={editorHandle}
       />
       <div className="flex flex-wrap items-center gap-1.5">
         {/* PRIMARY: the one action that matters */}
-        <Tip content="Run selection if any, else whole script (Ctrl+Enter)">
+        <Tip content={`Run selection if any, else whole script (${shortcutForDisplay(commands.formatBinding('query.run')[0] ?? 'Mod+Enter')})`}>
           <span className="inline-flex">
             <Button size="sm" onClick={runSelected} disabled={p.running}>
               <Play /> Run

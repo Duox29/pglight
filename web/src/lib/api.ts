@@ -1,4 +1,5 @@
 import { api } from './storage'
+import type { CommandId } from '@/commands/types'
 
 export { api }
 
@@ -48,6 +49,11 @@ export interface LoggingConfig {
   log_query: boolean
   slow_ms: number
   max_entries: number
+}
+
+export interface ShortcutSettings {
+  version: 1
+  overrides: Partial<Record<CommandId, string[]>>
 }
 
 export interface LogEntry {
@@ -202,6 +208,13 @@ export const apiClient = {
     return api<{ entries: LogEntry[]; error?: string }>(`/api/logs${qs ? '?' + qs : ''}`)
   },
   clearLogs: () => api<{ ok?: boolean; error?: string }>(`/api/logs`, { method: 'DELETE' }),
+  getShortcutSettings: () => api<ShortcutSettings>(`/api/preferences/shortcuts`),
+  saveShortcutSettings: (overrides: Partial<Record<CommandId, string[]>>) =>
+    api<ShortcutSettings & { error?: string }>(`/api/preferences/shortcuts`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version: 1, overrides }),
+    }),
   listAliases: () => api<{ aliases?: CompletionAlias[]; error?: string }>(`/api/aliases`),
   saveAlias: (trigger: string, expansion: string) =>
     api<{ alias?: CompletionAlias; error?: string }>(`/api/aliases`, {

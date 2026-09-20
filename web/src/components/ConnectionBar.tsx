@@ -15,6 +15,7 @@ export interface ConnFields {
 export function ConnectionBar(props: {
   connected: boolean
   onSearch: () => void
+  searchShortcut?: string
   onPanel: (v: 'history' | 'snippets' | 'aliases' | 'server' | 'settings') => void
   onDocs: () => void
   onShutdown: () => void
@@ -27,7 +28,7 @@ export function ConnectionBar(props: {
       {/* Center slot: takes remaining width so the search box sits mid-header */}
       <div className="flex min-w-0 flex-1 justify-center px-2">
         <Button size="sm" variant="outline" onClick={props.onSearch} className="w-full max-w-[420px] justify-start font-normal text-muted-foreground">
-          <Search /> Search objects… <kbd className="ml-auto font-mono text-[10px] text-muted-foreground/70">Ctrl K</kbd>
+          <Search /> Search objects / Command Palette <kbd className="ml-auto font-mono text-[10px] text-muted-foreground/70">{props.searchShortcut ?? 'Mod+K'}</kbd>
         </Button>
       </div>
       {/* Secondary: workspace tools stay visible */}

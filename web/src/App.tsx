@@ -22,6 +22,8 @@ import { useTableOps } from './hooks/useTableOps'
 import { useObjectOps } from './hooks/useObjectOps'
 import { useSplit } from './hooks/useSplit'
 import type { SideView } from './types'
+import { formatSqlText } from './lib/format'
+import { useCommand, useCommandRegistration } from './shortcuts/ShortcutProvider'
 
 /* Thin shell: hook composition + layout. All domain logic lives in hooks/*
    (sessions, tabs, explorer, query-run, table-ops, object-ops, useSplit for
@@ -34,7 +36,8 @@ export default function App() {
   const dialogs = useMemo(() => createDialogs(setDlg), [])
   const [sideOpen, setSideOpen] = useState(false)
   const [sideView, setSideView] = useState<SideView>('history')
-  const [paletteOpen, setPaletteOpen] = useState(false)
+  const commands = useCommand()
+  const { paletteOpen, setPaletteOpen } = commands
 
   // One-time migration from the legacy browser-only stores. Upload first,
   // verify through successful API responses, then remove only the migrated
@@ -82,7 +85,7 @@ export default function App() {
   const openTableTabRef = useRef<(schema: string, table: string, sid?: string) => void>(() => {})
 
   const tabsApi = useTabs()
-  const { tabs, setTabs, activeTab, setActiveTab, cur, updateTab } = tabsApi
+  const { tabs, setTabs, activeTab, setActiveTab, cur, updateTab, newQueryTab } = tabsApi
   const sessionsApi = useSessions({ onRemap: tabsApi.remapTabsSession })
   const { active, activeId, session, connected, sessions, bootDone, remapRef, deadRef } = sessionsApi
   const tableApi = useTableOps({
@@ -118,17 +121,71 @@ export default function App() {
 
   const split = useSplit({ tabs, activeTab, onActivate: setActiveTab })
 
-  /* ---------- global keys ---------- */
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        setPaletteOpen(true)
-      }
-    }
-    document.addEventListener('keydown', h)
-    return () => document.removeEventListener('keydown', h)
-  }, [])
+  /* ---------- command registrations ---------- */
+  const activeQuery = cur?.kind === 'query' ? cur : null
+  const activeTable = cur?.kind === 'table' ? cur : null
+  const activeRunning = activeTab ? !!running[activeTab] : false
+  useCommandRegistration('palette.open', () => setPaletteOpen(true))
+  useCommandRegistration('query.new', () => newQueryTab(undefined, activeId), { enabled: !!activeId })
+  useCommandRegistration('query.run', () => { if (activeQuery) void queryApi.runQuery(activeQuery.id) }, { enabled: !!activeQuery && !activeRunning })
+  useCommandRegistration('query.cancel', () => { if (activeQuery) void queryApi.cancelQuery(activeQuery.id) }, { enabled: !!activeQuery && activeRunning })
+  useCommandRegistration('query.format', () => { if (activeQuery) updateTab(activeQuery.id, (tab) => tab.kind === 'query' ? { ...tab, sql: formatSqlText(tab.sql) } : tab) }, { enabled: !!activeQuery })
+  useCommandRegistration('query.explain', () => { if (activeQuery) void queryApi.explainQuery(activeQuery.id, false) }, { enabled: !!activeQuery })
+  useCommandRegistration('query.explainAnalyze', () => { if (activeQuery) void queryApi.explainQuery(activeQuery.id, true) }, { enabled: !!activeQuery })
+  useCommandRegistration('query.clearResults', () => { if (activeQuery) updateTab(activeQuery.id, (tab) => tab.kind === 'query' ? { ...tab, results: null, error: undefined, plan: undefined } : tab) }, { enabled: !!activeQuery })
+  useCommandRegistration('query.saveSnippet', async () => {
+    if (!activeQuery) return
+    const name = await dialogs.prompt({ title: 'Save query as snippet', defaultValue: activeQuery.title })
+    if (!name?.trim()) return
+    const result = await apiClient.saveSnippet(name.trim(), activeQuery.sql)
+    if (result.error || !result.snippet) toast.error(result.error ?? 'Failed to save snippet')
+    else { setSnippets((items) => [{ name: result.snippet!.name, sql: result.snippet!.sql }, ...items.filter((item) => item.name !== result.snippet!.name)]) ; toast.success('Snippet saved') }
+  }, { enabled: !!activeQuery })
+  useCommandRegistration('table.refresh', () => {
+    if (!activeTable) return
+    void tableApi.loadTablePage(activeTable.sessionId, activeTable.id, activeTable.schema, activeTable.table, activeTable.limit, activeTable.offset, activeTable.filter, activeTable.order)
+    void tableApi.loadTableMeta(activeTable.sessionId, activeTable.id, activeTable.schema, activeTable.table)
+  }, { enabled: !!activeTable })
+  useCommandRegistration('table.nextPage', () => {
+    if (!activeTable || !activeTable.result?.has_more) return
+    const offset = activeTable.offset + activeTable.limit
+    updateTab(activeTable.id, (tab) => tab.kind === 'table' ? { ...tab, offset } : tab)
+    void tableApi.loadTablePage(activeTable.sessionId, activeTable.id, activeTable.schema, activeTable.table, activeTable.limit, offset, activeTable.filter, activeTable.order)
+  }, { enabled: !!activeTable && !!activeTable.result?.has_more })
+  useCommandRegistration('table.previousPage', () => {
+    if (!activeTable || activeTable.offset <= 0) return
+    const offset = Math.max(0, activeTable.offset - activeTable.limit)
+    updateTab(activeTable.id, (tab) => tab.kind === 'table' ? { ...tab, offset } : tab)
+    void tableApi.loadTablePage(activeTable.sessionId, activeTable.id, activeTable.schema, activeTable.table, activeTable.limit, offset, activeTable.filter, activeTable.order)
+  }, { enabled: !!activeTable && activeTable.offset > 0 })
+  useCommandRegistration('tab.close', () => { if (activeTab) tabsApi.closeTab(activeTab) }, { enabled: !!activeTab })
+  useCommandRegistration('tab.closeOthers', () => { if (activeTab) tabsApi.closeOthers(activeTab) }, { enabled: !!activeTab })
+  useCommandRegistration('tab.closeLeft', () => { if (activeTab) tabsApi.closeLeft(activeTab) }, { enabled: !!activeTab })
+  useCommandRegistration('tab.closeRight', () => { if (activeTab) tabsApi.closeRight(activeTab) }, { enabled: !!activeTab })
+  useCommandRegistration('tab.closeAll', tabsApi.closeAllTabs, { enabled: tabs.length > 0 })
+  useCommandRegistration('tab.next', tabsApi.activateNextTab, { enabled: tabs.length > 1 })
+  useCommandRegistration('tab.previous', tabsApi.activatePreviousTab, { enabled: tabs.length > 1 })
+  useCommandRegistration('tab.activate.1', () => tabsApi.activateTabAt(0), { enabled: tabs.length > 0 })
+  useCommandRegistration('tab.activate.2', () => tabsApi.activateTabAt(1), { enabled: tabs.length > 1 })
+  useCommandRegistration('tab.activate.3', () => tabsApi.activateTabAt(2), { enabled: tabs.length > 2 })
+  useCommandRegistration('tab.activate.4', () => tabsApi.activateTabAt(3), { enabled: tabs.length > 3 })
+  useCommandRegistration('tab.activate.5', () => tabsApi.activateTabAt(4), { enabled: tabs.length > 4 })
+  useCommandRegistration('tab.activate.6', () => tabsApi.activateTabAt(5), { enabled: tabs.length > 5 })
+  useCommandRegistration('tab.activate.7', () => tabsApi.activateTabAt(6), { enabled: tabs.length > 6 })
+  useCommandRegistration('tab.activate.8', () => tabsApi.activateTabAt(7), { enabled: tabs.length > 7 })
+  useCommandRegistration('tab.activate.9', () => tabsApi.activateTabAt(8), { enabled: tabs.length > 8 })
+  useCommandRegistration('workspace.history', () => { setSideView('history'); setSideOpen(true) })
+  useCommandRegistration('workspace.snippets', () => { setSideView('snippets'); setSideOpen(true) })
+  useCommandRegistration('workspace.dashboard', () => { setSideView('server'); setSideOpen(true) })
+  useCommandRegistration('workspace.settings', () => { setSideView('settings'); setSideOpen(true) })
+  useCommandRegistration('workspace.docs', tabsApi.openDocsTab)
+  useCommandRegistration('split.right', () => { if (activeTab) split.openSplit(activeTab, 'horizontal') }, { enabled: tabs.length > 1 })
+  useCommandRegistration('split.down', () => { if (activeTab) split.openSplit(activeTab, 'vertical') }, { enabled: tabs.length > 1 })
+  useCommandRegistration('split.swap', split.swapSplit, { enabled: split.pinnedTab != null })
+  useCommandRegistration('split.close', split.closeSplit, { enabled: split.pinnedTab != null })
+  useCommandRegistration('explorer.refresh', () => void explorerApi.loadExplorer(activeId), { enabled: !!activeId })
+  useCommandRegistration('session.connect', () => sessionsApi.setCredOpen(true))
+  useCommandRegistration('session.disconnect', () => sessionsApi.disconnect(), { enabled: connected })
 
   useEffect(() => {
     if (!activeId) return
@@ -138,7 +195,7 @@ export default function App() {
 
   // Reopen last session's tabs on the first connection of this app load.
   const restored = useRef(false)
-  const { restoreStoredTabs, newQueryTab } = tabsApi
+  const { restoreStoredTabs } = tabsApi
   useEffect(() => {
     if (!connected || restored.current || !activeId || !bootDone) return
     restored.current = true
@@ -187,6 +244,7 @@ export default function App() {
       <ConnectionBar
         connected={connected}
         onSearch={() => setPaletteOpen(true)}
+        searchShortcut={commands.formatBinding('palette.open')[0]}
         onPanel={(v) => {
           setSideView(v)
           setSideOpen(true)

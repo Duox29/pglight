@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
-import { EditorState, Prec, RangeSet, StateEffect, StateField } from '@codemirror/state'
+import { useEffect, useMemo, useRef } from 'react'
+import { Compartment, EditorState, Prec, RangeSet, StateEffect, StateField } from '@codemirror/state'
 import { Decoration, EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { autocompletion, closeBrackets, completionKeymap, pickedCompletion, startCompletion } from '@codemirror/autocomplete'
@@ -7,20 +7,24 @@ import { PostgreSQL, sql } from '@codemirror/lang-sql'
 import { ensureSnapshot } from '@/lib/schemaCache'
 import { ensureAliases } from '@/lib/aliases'
 import { createCompleteSource, recordUse } from '@/lib/complete'
+import { useCommand } from '@/shortcuts/ShortcutProvider'
+import { toCodeMirrorKey } from '@/shortcuts/normalize'
+import type { CommandId } from '@/commands/types'
 /** Error jump + blink + selection access without touching editor internals. */
 export interface SqlEditorHandle {
   getSelection: () => string
   gotoLine: (line: number, column?: number) => void
   flashErrorLine: (line: number, column?: number) => void
   clearErrorFlash: () => void
+  startCompletion: () => void
 }
 
 interface Props {
   value: string
   session: string
   onChange: (v: string) => void
-  /** Ctrl/Cmd+Enter — same contract as the old Textarea key handler. */
-  onCtrlEnter: () => void
+  /** Keyboard actions are emitted as stable command IDs, not key combinations. */
+  onCommand: (id: CommandId) => void
   handleRef: React.MutableRefObject<SqlEditorHandle | null>
 }
 
@@ -30,15 +34,22 @@ interface Props {
  * Layout contract: fills the parent flex column (same flex-1/min-h-0 slot the
  * Textarea occupied) so the vertical ResizablePanel split keeps working.
  */
-export function SqlEditor({ value, session, onChange, onCtrlEnter, handleRef }: Props) {
+export function SqlEditor({ value, session, onChange, onCommand, handleRef }: Props) {
+  const commands = useCommand()
   const mountRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
-  const cb = useRef({ onChange, onCtrlEnter })
+  const shortcutCompartment = useRef(new Compartment())
+  const cb = useRef({ onChange, onCommand })
   useEffect(() => {
-    cb.current = { onChange, onCtrlEnter }
+    cb.current = { onChange, onCommand }
   })
   // First-render SQL: later prop changes sync via the value effect below.
   const initialRef = useRef(value)
+  const editorKeymap = useMemo(() => {
+    const run = commands.formatBinding('query.run').map(toCodeMirrorKey).filter((key): key is { key: string; mac?: string } => key != null).map((key) => ({ ...key, run: () => (cb.current.onCommand('query.run'), true) }))
+    const complete = commands.formatBinding('query.complete').map(toCodeMirrorKey).filter((key): key is { key: string; mac?: string } => key != null).map((key) => ({ ...key, run: () => (cb.current.onCommand('query.complete'), true) }))
+    return [...run, ...complete]
+  }, [commands])
   useEffect(() => {
     const mount = mountRef.current
     if (!mount) return
@@ -79,12 +90,7 @@ export function SqlEditor({ value, session, onChange, onCtrlEnter, handleRef }: 
         EditorView.lineWrapping,
         errLineField,
         autocompletion({ override: [src], activateOnTyping: true, maxRenderedOptions: 50 }),
-        Prec.high(
-          keymap.of([
-            { key: 'Ctrl-Enter', mac: 'Cmd-Enter', run: () => (cb.current.onCtrlEnter(), true) },
-            { key: 'Ctrl-Space', mac: 'Cmd-Space', run: startCompletion },
-          ]),
-        ),
+        Prec.high(shortcutCompartment.current.of(keymap.of(editorKeymap))),
         keymap.of([...completionKeymap, ...defaultKeymap, ...historyKeymap]),
         update,
         EditorView.theme({
@@ -151,6 +157,10 @@ export function SqlEditor({ value, session, onChange, onCtrlEnter, handleRef }: 
       clearErrorFlash: () => {
         viewRef.current?.dispatch({ effects: setErrLine.of(null) })
       },
+      startCompletion: () => {
+        const current = viewRef.current
+        if (current) startCompletion(current)
+      },
     }
     return () => {
       view.destroy()
@@ -160,6 +170,11 @@ export function SqlEditor({ value, session, onChange, onCtrlEnter, handleRef }: 
     // Session-scoped source: a new session means a new editor (rare).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (view) view.dispatch({ effects: shortcutCompartment.current.reconfigure(keymap.of(editorKeymap)) })
+  }, [editorKeymap])
 
   // Controlled value: Format button / tab restore set props; push into the
   // editor without disturbing the caret when the text is already equal.

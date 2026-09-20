@@ -59,6 +59,7 @@ func main() {
 	mux.HandleFunc("/api/snippets", h.Snippets)
 	mux.HandleFunc("/api/connections", h.Connections)
 	mux.HandleFunc("/api/preferences", h.Preferences)
+	mux.HandleFunc("/api/preferences/shortcuts", h.ShortcutPreferences)
 	mux.HandleFunc("/api/history", h.History)
 	mux.HandleFunc("/api/txn", h.Txn)
 	mux.HandleFunc("/api/server-info", h.ServerInfo)
