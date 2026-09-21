@@ -6,7 +6,6 @@ export type CommandId =
   | 'query.cancel'
   | 'query.format'
   | 'query.explain'
-  | 'query.explainAnalyze'
   | 'query.clearResults'
   | 'query.saveSnippet'
   | 'tab.close'

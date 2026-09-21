@@ -366,7 +366,6 @@ func (h *Handler) Explain(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Session string `json:"session_id"`
 		SQL     string `json:"sql"`
-		Analyze bool   `json:"analyze"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "invalid json"})
@@ -383,10 +382,7 @@ func (h *Handler) Explain(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "empty sql"})
 		return
 	}
-	prefix := "EXPLAIN (FORMAT JSON)"
-	if req.Analyze {
-		prefix = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)"
-	}
+	prefix := "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)"
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	var raw json.RawMessage

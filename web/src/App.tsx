@@ -131,8 +131,7 @@ export default function App() {
   useCommandRegistration('query.run', () => { if (activeQuery) void queryApi.runQuery(activeQuery.id) }, { enabled: !!activeQuery && !activeRunning })
   useCommandRegistration('query.cancel', () => { if (activeQuery) void queryApi.cancelQuery(activeQuery.id) }, { enabled: !!activeQuery && activeRunning })
   useCommandRegistration('query.format', () => { if (activeQuery) updateTab(activeQuery.id, (tab) => tab.kind === 'query' ? { ...tab, sql: formatSqlText(tab.sql) } : tab) }, { enabled: !!activeQuery })
-  useCommandRegistration('query.explain', () => { if (activeQuery) void queryApi.explainQuery(activeQuery.id, false) }, { enabled: !!activeQuery })
-  useCommandRegistration('query.explainAnalyze', () => { if (activeQuery) void queryApi.explainQuery(activeQuery.id, true) }, { enabled: !!activeQuery })
+  useCommandRegistration('query.explain', () => { if (activeQuery) void queryApi.explainQuery(activeQuery.id) }, { enabled: !!activeQuery })
   useCommandRegistration('query.clearResults', () => { if (activeQuery) updateTab(activeQuery.id, (tab) => tab.kind === 'query' ? { ...tab, results: null, error: undefined, plan: undefined } : tab) }, { enabled: !!activeQuery })
   useCommandRegistration('query.saveSnippet', async () => {
     if (!activeQuery) return

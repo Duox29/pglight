@@ -47,8 +47,9 @@ export function SqlEditor({ value, session, onChange, onCommand, handleRef }: Pr
   const initialRef = useRef(value)
   const editorKeymap = useMemo(() => {
     const run = commands.formatBinding('query.run').map(toCodeMirrorKey).filter((key): key is { key: string; mac?: string } => key != null).map((key) => ({ ...key, run: () => (cb.current.onCommand('query.run'), true) }))
+    const explain = commands.formatBinding('query.explain').map(toCodeMirrorKey).filter((key): key is { key: string; mac?: string } => key != null).map((key) => ({ ...key, run: () => (cb.current.onCommand('query.explain'), true) }))
     const complete = commands.formatBinding('query.complete').map(toCodeMirrorKey).filter((key): key is { key: string; mac?: string } => key != null).map((key) => ({ ...key, run: () => (cb.current.onCommand('query.complete'), true) }))
-    return [...run, ...complete]
+    return [...run, ...explain, ...complete]
   }, [commands])
   useEffect(() => {
     const mount = mountRef.current

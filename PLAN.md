@@ -90,7 +90,7 @@ GET  /api/objects?session_id=&schema= (views/matviews/foreign/functions/sequence
 GET  /api/columns?session_id=&schema=&table= | GET /api/ddl?session_id=&schema=&table=
 GET  /api/table-data?session_id=&schema=&table=&limit=&offset=&filter=&order= → {columns,types,rows,total,has_more,in_txn}
 POST /api/query             {session_id,sql,limit} (multi-statement → {results[]}; see below)
-POST /api/explain           {session_id,sql,analyze}
+POST /api/explain           {session_id,sql} → EXPLAIN ANALYZE (JSON, buffers)
 GET  /api/activity?session_id= | GET /api/cancel?session_id=&pid=[&kill=1]
 POST /api/row               {session_id,schema,table,op,values,where[,single]} (`single:true` verifies exactly 1 affected row, 409 otherwise)
 POST /api/rows-delete       {session_id,schema,table,where[]} → {deleted} — atomic bulk delete (one txn; every entry must match exactly 1 row)
@@ -255,7 +255,7 @@ destructive Power button → `onShutdown`: confirm dialog, farewell toast, then
 `Popover` panel over the explorer; auto-collapses on connect,
 reopens on disconnect, state persisted), `Explorer` (databases → schemas →
 tables/views/matviews/foreign/functions/sequences/types + server objects),
-`QueryConsole` (multi-result, EXPLAIN text plan, formatter, per-result
+`QueryConsole` (multi-result, Explain Analyze text plan for whole or selected SQL, formatter, per-result
 CSV/JSON/INSERT export), `TableWorkspace` (Data/Columns/DDL/Indexes/
 Constraints/Triggers/Stats sub-tabs, cell edit/duplicate/delete, CSV import,
 Generate mock data (`MockDataDialog`: Simple zero-config vs Advanced

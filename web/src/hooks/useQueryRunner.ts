@@ -149,11 +149,11 @@ export function useQueryRunner(deps: QueryRunnerDeps) {
   )
 
   const explainQuery = useCallback(
-    async (id: string, analyze: boolean) => {
+    async (id: string, sqlOver?: string) => {
       const t = tabs.find((x) => x.id === id)
       if (!t || t.kind !== 'query' || !t.sessionId) return
       try {
-        const j = await apiClient.explain(t.sessionId, t.sql, analyze)
+        const j = await apiClient.explain(t.sessionId, sqlOver ?? t.sql)
         const err = apiClient.explainError(j)
         if (err) {
           updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: err, errLoc: undefined, flashTick: undefined } : x))

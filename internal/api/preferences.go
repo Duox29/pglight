@@ -13,7 +13,7 @@ const shortcutSettingsVersion = 1
 
 var shortcutCommands = map[string]struct{}{
 	"palette.open": {}, "query.new": {}, "query.run": {}, "query.complete": {}, "query.cancel": {}, "query.format": {},
-	"query.explain": {}, "query.explainAnalyze": {}, "query.clearResults": {}, "query.saveSnippet": {},
+	"query.explain": {}, "query.clearResults": {}, "query.saveSnippet": {},
 	"tab.close": {}, "tab.closeOthers": {}, "tab.closeLeft": {}, "tab.closeRight": {}, "tab.closeAll": {},
 	"tab.next": {}, "tab.previous": {}, "tab.activate.1": {}, "tab.activate.2": {}, "tab.activate.3": {},
 	"tab.activate.4": {}, "tab.activate.5": {}, "tab.activate.6": {}, "tab.activate.7": {}, "tab.activate.8": {}, "tab.activate.9": {},

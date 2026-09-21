@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Play, FileDown, RefreshCw, Sparkles, Square, Star, Trash2, Wand2, ChevronDown, LocateFixed } from 'lucide-react'
+import { Play, FileDown, RefreshCw, Sparkles, Square, Star, Trash2, Wand2, LocateFixed } from 'lucide-react'
 import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
 import { SqlEditor, type SqlEditorHandle } from './SqlEditor'
@@ -31,7 +31,7 @@ interface Props {
   onRun: (sql?: string) => void
   onClearResults: () => void
   onCancel: () => void
-  onExplain: (analyze: boolean) => void
+  onExplain: (sql?: string) => void
   onLimit: (n: number) => void
   onSaveSnippet: () => void
   dialogs: DialogsApi
@@ -57,6 +57,10 @@ export function QueryConsole(p: Props) {
   const runSelected = () => {
     const sel = editorHandle.current?.getSelection() ?? ''
     p.onRun(sel.trim() ? sel : undefined)
+  }
+  const explainSelected = () => {
+    const sel = editorHandle.current?.getSelection() ?? ''
+    p.onExplain(sel.trim() ? sel : undefined)
   }
   const exportAs = async (fmt: 'csv' | 'json' | 'sql', ri = 0) => {
     const r = t.results?.[ri]
@@ -87,6 +91,7 @@ export function QueryConsole(p: Props) {
         onChange={p.onSqlChange}
         onCommand={(id) => {
           if (id === 'query.run') runSelected()
+          if (id === 'query.explain') explainSelected()
           if (id === 'query.complete') editorHandle.current?.startCompletion()
         }}
         handleRef={editorHandle}
@@ -118,17 +123,13 @@ export function QueryConsole(p: Props) {
           onTxn={p.onTxn}
         />
         {/* QUERY: plan + shape the statement */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="secondary">
-              Explain <ChevronDown />
+        <Tip content="Explain Analyze the selected SQL, or the whole script when nothing is selected">
+          <span className="inline-flex">
+            <Button size="sm" variant="ghost" onClick={explainSelected} disabled={p.running}>
+              Explain
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            <DropdownMenuItem onSelect={() => p.onExplain(false)}>Explain</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => p.onExplain(true)}>Explain Analyze</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </span>
+        </Tip>
         <Button size="sm" variant="ghost" onClick={() => p.onSqlChange(formatSqlText(t.sql))}>
           <Wand2 /> Format
         </Button>

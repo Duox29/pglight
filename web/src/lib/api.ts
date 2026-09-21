@@ -108,11 +108,11 @@ export const apiClient = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: session, sql, limit }),
     }),
-  explain: (session: string, sql: string, analyze: boolean) =>
+  explain: (session: string, sql: string) =>
     api<unknown>('/api/explain', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: session, sql, analyze }),
+      body: JSON.stringify({ session_id: session, sql }),
     }),
   explainError: (v: unknown): string | undefined => {
     if (v && typeof v === 'object' && 'error' in v && typeof v.error === 'string') return v.error

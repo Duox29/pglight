@@ -236,7 +236,7 @@ const SECTIONS: Section[] = [
           <Ul>
             <Li><K>Run</K> starts execution. The square button cancels the running query of that tab. With several concurrent runs, use the Workspace Activity view to cancel a specific backend.</Li>
             <Li>The transaction cluster of that tab session, plus the <K>open transaction</K> or <K>no transaction</K> badge. See Transactions.</Li>
-            <Li>The <K>Explain</K> menu offers <K>Explain</K> and <K>Explain Analyze</K>. The text plan includes timing and buffer data.</Li>
+            <Li><K>Explain</K> runs <K>EXPLAIN ANALYZE</K> with buffers. It explains the selected SQL, or the whole script when nothing is selected, and the text plan includes timing data.</Li>
             <Li>The limit picker offers <K>200 rows, 1000 rows,</K> and <K>no limit</K>. The <K>Export</K> menu of the first result offers <K>CSV, JSON,</K> and <K>INSERTs</K>.</Li>
             <Li><K>Clear</K> removes results, plans, and errors. The meta line shows row count and duration.</Li>
           </Ul>
@@ -266,7 +266,7 @@ const SECTIONS: Section[] = [
           <Ul>
             <Li><K>Run</K> bắt đầu chạy. Nút vuông hủy query đang chạy của tab đó. Với nhiều query chạy đồng thời, dùng view Activity trong Workspace để hủy một backend cụ thể.</Li>
             <Li>Cụm transaction của session gắn với tab, kèm badge <K>open transaction</K> hoặc <K>no transaction</K>. Xem mục Transactions.</Li>
-            <Li>Menu <K>Explain</K> gồm <K>Explain</K> và <K>Explain Analyze</K>. Text plan gồm timing và buffer.</Li>
+            <Li><K>Explain</K> chạy <K>EXPLAIN ANALYZE</K> kèm buffers. Nó explain phần SQL đang bôi đen, hoặc toàn bộ script nếu không chọn gì; text plan gồm timing.</Li>
             <Li>Ô limit gồm <K>200 rows, 1000 rows</K> và <K>no limit</K>. Menu <K>Export</K> của result đầu gồm <K>CSV, JSON</K> và <K>INSERTs</K>.</Li>
             <Li><K>Clear</K> xóa results, plan và lỗi. Dòng meta hiển thị số dòng và thời gian chạy.</Li>
           </Ul>

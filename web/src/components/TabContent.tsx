@@ -80,7 +80,7 @@ export function TabContent(p: TabContentProps) {
         onRun={(sql) => p.query.runQuery(tab.id, sql)}
         onCancel={() => p.query.cancelQuery(tab.id)}
         onClearResults={() => p.updateTab(tab.id, (x) => (x.kind === 'query' ? { ...x, results: null, error: undefined, errLoc: undefined, flashTick: undefined, plan: undefined, meta: undefined } : x))}
-        onExplain={(a) => p.query.explainQuery(tab.id, a)}
+        onExplain={(sql) => p.query.explainQuery(tab.id, sql)}
         onLimit={(n) => p.updateTab(tab.id, (x) => (x.kind === 'query' ? { ...x, limit: n } : x))}
         onSaveSnippet={async () => {
           const name = await p.dialogs.prompt({
