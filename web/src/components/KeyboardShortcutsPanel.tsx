@@ -40,11 +40,11 @@ export function KeyboardShortcutsPanel({ dialogs }: { dialogs: DialogsApi }) {
   const visibleCommands = COMMANDS.filter((command) => `${command.title} ${command.id} ${command.category}`.toLowerCase().includes(search.toLowerCase()))
 
   return (
-    <div className="flex flex-col gap-2">
-      <Card className="p-2.5">
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <Card className="flex min-h-0 flex-1 flex-col p-2.5">
         <div className="mb-2 text-[12px] font-semibold">Keyboard Shortcuts</div>
         <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search commands…" className="mb-2" />
-        <div className="max-h-[calc(100vh-260px)] overflow-auto">
+        <div className="min-h-0 flex-1 overflow-auto">
           {visibleCommands.map((command) => {
             const binding = commands.formatBinding(command.id)[0]
             return (
@@ -66,9 +66,8 @@ export function KeyboardShortcutsPanel({ dialogs }: { dialogs: DialogsApi }) {
             )
           })}
         </div>
-        <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-          <span>Overrides sync to the server. Browser-reserved shortcuts may not reach pglight.</span>
-          <Button size="sm" variant="secondary" onClick={async () => {
+        <div className="mt-2 flex shrink-0 items-center justify-between gap-2 text-[10px] text-muted-foreground">
+          <Button className="shrink-0" size="sm" variant="secondary" onClick={async () => {
             const ok = await dialogs.confirm({ title: 'Reset keyboard shortcuts?', description: 'Restore every command to its default binding.', confirmText: 'Reset all' })
             if (ok) commands.resetAll()
           }}>Reset all</Button>

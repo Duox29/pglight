@@ -213,12 +213,12 @@ export function CredentialManager(p: Props) {
   const deadCount = Object.keys(p.deadIds).length
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-auto p-3">
       <div>
         <div className="text-sm font-semibold">Connections</div>
       </div>
 
-      <Card className="p-3">
+      <Card className="shrink-0 p-3">
         <div className="flex items-center gap-2">
           {p.vault.unlocked ? <ShieldCheck className="h-4 w-4 text-emerald-500" /> : <Lock className="h-4 w-4 text-amber-500" />}
           <div className="min-w-0 flex-1">
@@ -234,7 +234,7 @@ export function CredentialManager(p: Props) {
         {p.vault.exists && <div className="mt-2 border-t pt-2 text-[11px] text-muted-foreground">Forgot the master password? Close pglight, then run <code>pglight.exe vault reset</code> to remove saved database passwords while keeping profiles.</div>}
       </Card>
 
-      <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1.2fr)]">
+      <div className="grid shrink-0 min-h-0 gap-3 lg:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1.2fr)]">
         <Card className="min-h-[240px] p-2">
           <div className="mb-2 flex items-center gap-1.5">
             <FieldTip content="Filter saved profiles by name, host, database, user, environment, or tags."><Input placeholder="Filter profiles…" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter connection profiles" /></FieldTip>
@@ -272,7 +272,7 @@ export function CredentialManager(p: Props) {
         </Card>
       </div>
 
-      <Card className="p-3">
+      <Card className="shrink-0 p-3">
         <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold"><span className="flex-1">Active sessions ({p.sessions.length})</span>{deadCount > 0 && <Button size="sm" variant="ghost" onClick={p.onReconnectAll}><RefreshCw /> Reconnect all</Button>}</div>
         <div className="flex flex-col gap-1.5">{p.sessions.map((s) => { const dead = !!p.deadIds[s.id]; return <div key={s.id} className="flex items-center gap-1.5 rounded border px-2 py-1.5 text-[11px]"><Button size="sm" variant="ghost" className="min-w-0 flex-1 justify-start truncate" onClick={() => p.onSwitch(s.id)}><span className={dead ? 'text-red-400' : 'text-emerald-500'}>●</span><span className="truncate">{s.profile_name ? `${s.profile_name} · ` : ''}{s.user}@{s.host}:{s.port}/{s.dbname}</span></Button>{dead && <Button size="sm" variant="ghost" aria-label="Reconnect session" onClick={() => p.onReconnectOne(s.id)}><RefreshCw /></Button>}<Button size="sm" variant="ghost" aria-label="Disconnect session" onClick={() => p.onDisconnectOne(s.id)}><X /></Button></div> })}</div>
         {!p.sessions.length && <EmptyNote text="No active sessions" />}

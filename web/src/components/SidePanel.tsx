@@ -109,7 +109,7 @@ export function SidePanel(p: Props) {
           </TabsList>
         </Tabs>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-2.5">
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto p-2.5">
         {p.view === 'history' && (
           <div className="flex flex-col gap-1.5">
             <Input placeholder="Filter history…" value={filter} onChange={(e) => setFilter(e.target.value)} />
@@ -154,7 +154,7 @@ export function SidePanel(p: Props) {
         {p.view === 'quick-access' && <QuickAccessView quickAccess={p.quickAccess} onChange={p.onQuickAccessChange} />}
         {p.view === 'connections' && <CredentialManager {...p.connection} dialogs={p.dialogs} />}
         {(p.view === 'server' || p.view === 'activity' || p.view === 'locks' || p.view === 'stats' || p.view === 'settings' || p.view === 'shortcuts' || p.view === 'logs') && (
-          <div className="flex flex-col gap-2">
+          <div className="flex min-h-0 flex-1 flex-col gap-2">
             <ErrorText message={error} />
             {p.view === 'server' && payload != null && !(payload as { error?: string }).error && <ServerView data={payload as ServerInfo} />}
             {p.view === 'activity' && payload != null && Array.isArray(payload) && (

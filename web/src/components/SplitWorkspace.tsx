@@ -34,7 +34,7 @@ function paneOverflowClass(tab: Tab | null) {
    state; panes arrive via renderPane. */
 export function SplitWorkspace(p: SplitWorkspaceProps) {
   if (p.secondary == null) {
-    return <div className={cn('min-h-0 flex-1 p-3', paneOverflowClass(p.primary))}>{p.renderPane(p.primary)}</div>
+    return <div className={cn('flex h-full min-h-0 min-w-0 flex-1 flex-col p-3', paneOverflowClass(p.primary))}>{p.renderPane(p.primary)}</div>
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
