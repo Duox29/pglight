@@ -315,7 +315,7 @@ func TestSettingsLogs(t *testing.T) {
 	h := newStoreHandler(t)
 	code, body := callGET(t, h.Settings, "/api/settings")
 	requireStatus(t, body, code, 200)
-	requireDeep(t, body, "settings.keys", mapKeys(decodeObj(t, body)), []string{"logging"})
+	requireDeep(t, body, "settings.keys", mapKeys(decodeObj(t, body)), []string{"logging", "security"})
 	code, body = callPOST(t, h.Settings, "/api/settings", `{"logging":{"enabled":true,"level":"debug","log_http":true,"log_query":true,"slow_ms":100,"max_entries":50}}`)
 	requireStatus(t, body, code, 200)
 	requireDeep(t, body, "settings.saved", decodeObj(t, body)["logging"], map[string]any{

@@ -114,8 +114,8 @@ POST /api/import            {session_id,schema,table,columns,rows,on_conflict_do
 POST /api/alter-table       {session_id,schema,table,op,…} — columns: add_column|drop_column|rename_column|alter_type|set_nullable|set_default|rename_table (types validated via to_regtype, custom enums ok); constraints: add_constraint|drop_constraint; indexes: create_index{index?,unique,method,columns[],include[],where}|drop_index|rename_index (CREATE INDEX takes an unqualified name — always lands in the table's schema); triggers: create_trigger{trigger,timing,events[],for_each,function,update_of[],when}|drop_trigger|enable_trigger|disable_trigger
 Object tabs (functions/sequences/types): view definition + properties; edits run through `POST /api/query` with quoted identifiers — sequence ALTER (increment/min/max/cache/restart/cycle), function CREATE OR REPLACE, enum ADD VALUE, sequence/type RENAME, DROP (functions resolved via `regprocedure`, all overloads confirmed). No new backend endpoint.
 Multi-statement: `POST /api/query` returns `{results[]}` when >1 statement; console limits 200/1000/5000/10000 rows or no limit; no-limit results guarded at 64 MiB with an actionable 413 error; large grids virtualize DOM rows.
-GET  /api/settings          → {logging: {enabled,level,log_http,log_query,slow_ms,max_entries}}
-POST /api/settings          {logging: {...}} (normalized + persisted to data/logging.json)
+GET  /api/settings          → {logging: {enabled,level,log_http,log_query,slow_ms,max_entries}, security: {allow_lan_access,effective_mode,restart_required}}
+POST /api/settings          {logging?: {...}, security?: {allow_lan_access}} (logging persisted to data/logging.json; LAN bind setting persisted to data/server.json and applied live)
 GET  /api/logs?limit=&level=&category= → {entries[]} (newest first; /api/logs not self-logged)
 DELETE /api/logs            clear the ring buffer
 GET  /api/aliases           → {aliases: [{trigger,expansion,detail?,builtin}]} (builtins merged with user overrides; global, no session/PG)
@@ -306,7 +306,10 @@ port, plus `--no-browser` to suppress automatic browser opening. Configuration
 priority is CLI flag, then `PORT`, then the default `8080`. Explicitly selected
 ports are strict: a bind failure exits. With no explicit port, startup tries
 `8080` and then successive ports for up to 100 attempts. On success the binary
-opens `http://127.0.0.1:<actual-port>` through the platform default browser
+opens `http://127.0.0.1:<actual-port>` through the platform default browser.
+The HTTP listener remains available on its port. The Settings → Security →
+Allow LAN access toggle persists `data/server.json`; the live request filter
+allows or blocks non-loopback peers without a restart.
 (Windows `rundll32`, macOS `open`, Linux `xdg-open`); a browser-open failure is
 only logged and does not stop the server. Vite development remains fixed at
 the Go backend's `8080` proxy.

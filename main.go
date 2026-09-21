@@ -37,6 +37,13 @@ func main() {
 		log.Fatal("initialize app user: ", err)
 	}
 	h := &api.Handler{Mgr: mgr, Log: appLog, Store: appStore, UserID: userID}
+	serverSettings, err := api.LoadServerSettings(api.ServerSettingsPath)
+	if err != nil {
+		log.Printf("warning: could not load server settings: %v; using defaults", err)
+		serverSettings = api.ServerSettings{}
+	}
+	h.ServerConfig = serverSettings
+	h.ServerSettingsPath = api.ServerSettingsPath
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/connect", h.Connect)
@@ -101,14 +108,18 @@ func main() {
 	}
 
 	appURL := "http://127.0.0.1:" + strconv.Itoa(port)
-	log.Println("pglight listening on " + appURL)
+	if serverSettings.AllowLANAccess {
+		log.Printf("pglight listening on %s (LAN access enabled)", appURL)
+	} else {
+		log.Println("pglight listening on " + appURL + " (LAN requests blocked)")
+	}
 	if !options.noBrowser {
 		if err := openBrowser(appURL); err != nil {
 			log.Printf("warning: could not open browser: %v", err)
 		}
 	}
 
-	server := &http.Server{Handler: logging.Middleware(appLog, mux)}
+	server := &http.Server{Handler: logging.Middleware(appLog, h.LANAccess(mux))}
 	log.Fatal(server.Serve(listener))
 }
 

@@ -51,6 +51,12 @@ export interface LoggingConfig {
   max_entries: number
 }
 
+export interface SecurityConfig {
+  allow_lan_access: boolean
+  effective_mode?: 'loopback' | 'lan'
+  restart_required?: boolean
+}
+
 export interface ShortcutSettings {
   version: 1
   overrides: Partial<Record<CommandId, string[]>>
@@ -192,12 +198,15 @@ export const apiClient = {
     }),
   cancel: (session: string, pid: number, kill?: boolean) =>
     api<{ ok?: boolean; error?: string }>(`/api/cancel?session_id=${encodeURIComponent(session)}&pid=${pid}${kill ? '&kill=1' : ''}`),
-  getSettings: () => api<{ logging: LoggingConfig }>(`/api/settings`),
-  saveSettings: (logging: LoggingConfig) =>
-    api<{ logging: LoggingConfig; error?: string }>(`/api/settings`, {
+  getSettings: () => api<{ logging: LoggingConfig; security: SecurityConfig }>(`/api/settings`),
+  saveSettings: (logging?: LoggingConfig, security?: SecurityConfig) =>
+    api<{ logging: LoggingConfig; security: SecurityConfig; error?: string }>(`/api/settings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ logging }),
+      body: JSON.stringify({
+        ...(logging ? { logging } : {}),
+        ...(security ? { security: { allow_lan_access: security.allow_lan_access } } : {}),
+      }),
     }),
   getLogs: (params: { limit?: number; level?: string; category?: string }) => {
     const sp = new URLSearchParams()

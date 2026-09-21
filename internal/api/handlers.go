@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"pglight/internal/db"
@@ -24,10 +25,13 @@ import (
 )
 
 type Handler struct {
-	Mgr    *db.Manager
-	Log    *logging.Logger
-	Store  *store.Store
-	UserID string
+	Mgr                *db.Manager
+	Log                *logging.Logger
+	Store              *store.Store
+	UserID             string
+	ServerConfig       ServerSettings
+	ServerSettingsPath string
+	serverConfigMu     sync.RWMutex
 }
 
 // queryTimeout caps user query execution (console, table ops). Long enough

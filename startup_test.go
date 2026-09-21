@@ -113,6 +113,21 @@ func TestListenHTTPStopsAfterMaxPortAttempts(t *testing.T) {
 	}
 }
 
+func TestListenHTTPUsesAllInterfacesForIPFiltering(t *testing.T) {
+	var got string
+	listener, _, err := listenHTTPWith(startupOptions{port: 9000, portSet: true}, func(network, address string) (net.Listener, error) {
+		got = address
+		return net.Listen(network, "127.0.0.1:0")
+	})
+	if err != nil {
+		t.Fatalf("listen loopback: %v", err)
+	}
+	defer listener.Close()
+	if got != ":9000" {
+		t.Fatalf("listen address = %q, want :9000", got)
+	}
+}
+
 func TestBrowserCommand(t *testing.T) {
 	tests := []struct {
 		goos string

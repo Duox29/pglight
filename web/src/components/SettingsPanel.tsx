@@ -8,7 +8,7 @@ import { Switch } from './ui/switch'
 import { Card } from './ui/card'
 import { EmptyNote, ErrorText } from './ui/feedback'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
-import { apiClient, type LoggingConfig } from '@/lib/api'
+import { apiClient, type LoggingConfig, type SecurityConfig } from '@/lib/api'
 import { useAppPreference } from '@/lib/storage'
 import type { DialogsApi } from './dialogs'
 
@@ -26,8 +26,10 @@ const DEFAULTS: LoggingConfig = {
 
 export function SettingsPanel(p: { dialogs: DialogsApi }) {
   const [cfg, setCfg] = useState<LoggingConfig | null>(null)
+  const [security, setSecurity] = useState<SecurityConfig | null>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [securitySaving, setSecuritySaving] = useState(false)
   const [persistHistory, setPersistHistory] = useAppPreference<boolean>('privacy.persistHistory', true)
   const [persistSnapshots, setPersistSnapshots] = useAppPreference<boolean>('privacy.persistSnapshots', false)
   const [retentionDays, setRetentionDays] = useAppPreference<number>('privacy.retentionDays', 30)
@@ -39,6 +41,7 @@ export function SettingsPanel(p: { dialogs: DialogsApi }) {
         const j = await apiClient.getSettings()
         if (!stop) {
           setCfg(j.logging)
+          setSecurity(j.security)
           setError('')
         }
       } catch (e) {
@@ -83,6 +86,54 @@ export function SettingsPanel(p: { dialogs: DialogsApi }) {
   return (
     <div className="flex flex-col gap-2">
       <ErrorText message={error} />
+      <Card className="p-2.5">
+        <div className="mb-2 text-[12px] font-semibold">Security</div>
+        {!security ? (
+          <EmptyNote text="Loading…" />
+        ) : (
+          <div className="flex flex-col gap-2 text-[12px]">
+            <label className="flex items-center justify-between gap-2">
+              <span>Allow LAN access</span>
+              <Switch
+                checked={security.allow_lan_access}
+                onCheckedChange={async (checked) => {
+                  if (checked && !security.allow_lan_access) {
+                    const ok = await p.dialogs.confirm({
+                      title: 'Allow LAN access?',
+                      description: 'This immediately allows devices on the same network to send requests to pglight. Authentication is not enabled yet.',
+                      confirmText: 'Allow LAN access',
+                      danger: true,
+                    })
+                    if (!ok) return
+                  }
+                  const previous = security
+                  const next = { ...security, allow_lan_access: checked, restart_required: false }
+                  setSecurity(next)
+                  setSecuritySaving(true)
+                  try {
+                    const j = await apiClient.saveSettings(undefined, next)
+                    if (j.error) {
+                      setSecurity(previous)
+                      toast.error(j.error)
+                    } else {
+                      setSecurity(j.security)
+                      toast.success(checked ? 'LAN access enabled' : 'LAN access disabled')
+                    }
+                  } catch (e) {
+                    setSecurity(previous)
+                    toast.error(String(e))
+                  } finally {
+                    setSecuritySaving(false)
+                  }
+                }}
+                disabled={securitySaving}
+              />
+            </label>
+            <p className="-mt-1 text-[11px] text-muted-foreground">Changes apply immediately. Authentication is not enabled yet.</p>
+            {security.restart_required && <p className="text-[11px] text-muted-foreground">The running server has not applied this setting yet.</p>}
+          </div>
+        )}
+      </Card>
       <Card className="p-2.5">
         <div className="mb-2 text-[12px] font-semibold">Privacy</div>
         <div className="flex flex-col gap-2 text-[12px]">
