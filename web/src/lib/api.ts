@@ -11,6 +11,43 @@ export interface ConnectParams {
   dbname: string
   sslmode: string
   session_id?: string
+  profile_id?: string
+}
+
+export interface VaultStatus {
+  exists: boolean
+  unlocked: boolean
+  version?: number
+  auto_lock_seconds?: number
+}
+
+export interface ConnectionProfile {
+  id: string
+  name: string
+  host: string
+  port: number
+  user: string
+  dbname: string
+  sslmode?: string
+  has_password: boolean
+  last_used_at?: string
+  folder_id?: string
+  environment?: string
+  color?: string
+  description?: string
+  favorite?: boolean
+  default?: boolean
+  tags?: string[]
+  options?: {
+    connect_timeout?: number
+    keepalive?: number
+    application_name?: string
+    search_path?: string
+    sslrootcert?: string
+    sslcert?: string
+    sslkey?: string
+    unix_socket?: string
+  }
 }
 
 export interface QueryResult {
@@ -88,6 +125,8 @@ export interface SessionInfo {
   in_txn?: boolean
   connected_at?: string
   tls_warn?: boolean
+  profile_id?: string
+  profile_name?: string
 }
 
 export const q = (session: string, path: string) =>
@@ -240,9 +279,16 @@ export const apiClient = {
   listHistory: () => api<{ history: { id: string; sql: string; ms?: number; n?: number; at: string }[] }>('/api/history'),
   addHistory: (sql: string, ms?: number, n?: number) => api('/api/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql, ms, n }) }),
   clearHistory: () => api<{ ok?: boolean; error?: string }>('/api/history', { method: 'DELETE' }),
-  listConnections: () => api<{ connections: { id: string; name: string; host: string; port: number; user: string; dbname: string; sslmode?: string }[] }>('/api/connections'),
-  saveConnection: (p: { name: string; host: string; port: number; user: string; dbname: string; sslmode: string }) => api<{ connection?: { id: string; name: string; host: string; port: number; user: string; dbname: string; sslmode?: string }; error?: string }>('/api/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
-  deleteConnection: (name: string) => api<{ ok?: boolean; error?: string }>(`/api/connections?name=${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  listConnections: (query = '') => api<{ connections: ConnectionProfile[]; folders?: { id: string; name: string; parent_id?: string }[]; vault_unlocked?: boolean }>(`/api/connections${query ? `?${query}` : ''}`),
+  saveConnection: (p: { id?: string; name: string; host: string; port: number; user: string; dbname: string; sslmode: string; password?: string; save_password?: boolean; clear_password?: boolean; duplicate_from?: string; folder_id?: string; environment?: string; color?: string; description?: string; favorite?: boolean; default?: boolean; tags?: string[]; connect_timeout?: number; keepalive?: number; application_name?: string; search_path?: string; sslrootcert?: string; sslcert?: string; sslkey?: string; unix_socket?: string }) => api<{ connection?: ConnectionProfile; error?: string }>('/api/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
+  deleteConnection: (id: string) => api<{ ok?: boolean; error?: string }>(`/api/connections?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  saveConnectionFolder: (p: { id?: string; name: string; parent_id?: string }) => api<{ folder?: { id: string; name: string; parent_id?: string }; error?: string }>('/api/connections/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
+  deleteConnectionFolder: (id: string) => api<{ ok?: boolean; error?: string }>(`/api/connections/folders?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  exportConnections: (encrypted = false, password?: string) => api<ConnectionProfile[] | { format: string; version: number; connections: ConnectionProfile[] }>('/api/connections/export', { method: encrypted ? 'POST' : 'GET', ...(encrypted ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ encrypted: true, password }) } : {}) }),
+  importConnections: (payload: unknown, password?: string) => api<{ ok?: boolean; imported?: number; error?: string }>('/api/connections/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ payload, password }) }),
+  testConnection: (p: { profile_id?: string; host?: string; port?: number; user?: string; dbname?: string; sslmode?: string; password?: string }) => api<{ ok?: boolean; message?: string; database?: string; version?: string; latency_ms?: number; error?: string }>('/api/connections/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
+  getVault: () => api<VaultStatus & { error?: string }>('/api/vault'),
+  vaultAction: (action: 'setup' | 'unlock' | 'lock' | 'change_password', master_password?: string, new_password?: string) => api<VaultStatus & { ok?: boolean; error?: string }>('/api/vault', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action === 'change_password' ? { action, current_password: master_password, new_password } : { action, master_password }) }),
   shutdown: () => api<{ ok?: boolean; error?: string }>(`/api/shutdown`, { method: 'POST' }),
   getMockDataMeta: (session: string, schema: string, table: string) =>
     api<MockDataMeta>(q(session, `/api/mock-data/meta?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)),

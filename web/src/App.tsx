@@ -3,7 +3,7 @@ import { Check, Info, Loader2, X } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { TooltipProvider } from './components/ui/tooltip'
 import { ConnectionBar } from './components/ConnectionBar'
-import { CredentialManager } from './components/CredentialManager'
+import type { ProfileMetadata } from './components/CredentialManager'
 import { DialogHost, createDialogs, type PendingDialog } from './components/dialogs'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './components/ui/resizable'
 import { Explorer } from './components/Explorer'
@@ -185,7 +185,7 @@ export default function App() {
   useCommandRegistration('split.swap', split.swapSplit, { enabled: split.pinnedTab != null })
   useCommandRegistration('split.close', split.closeSplit, { enabled: split.pinnedTab != null })
   useCommandRegistration('explorer.refresh', () => void explorerApi.loadExplorer(activeId), { enabled: !!activeId })
-  useCommandRegistration('session.connect', () => sessionsApi.setCredOpen(true))
+  useCommandRegistration('session.connect', () => tabsApi.openWorkspace('connections'))
   useCommandRegistration('session.disconnect', () => sessionsApi.disconnect(), { enabled: connected })
 
   useEffect(() => {
@@ -216,6 +216,46 @@ export default function App() {
 
   const openTableForSession = (schema: string, table: string, sid?: string) => tableApi.openTableTab(schema, table, sid ?? activeId)
 
+  const connectProfile = (profileId?: string) => {
+    if (!profileId) return sessionsApi.connect(true)
+    const profile = sessionsApi.saved.find((x) => x.id === profileId)
+    if (!profile) return Promise.reject(new Error('Connection profile not found'))
+    return sessionsApi.connectProfile(profile, sessionsApi.fields.password)
+  }
+
+  const testConnection = async (profileId?: string, password?: string) => {
+    const f = sessionsApi.fields
+    const j = await apiClient.testConnection(profileId ? { profile_id: profileId, password: password || undefined } : { host: f.host, port: Number(f.port) || 5432, user: f.user, password: password ?? f.password, dbname: f.dbname, sslmode: f.sslmode })
+    if (j.error) throw new Error(j.error)
+    return { database: j.database, version: j.version, latency_ms: j.latency_ms }
+  }
+
+  const saveConnection = async (name: string, savePassword: boolean, clearPassword: boolean, metadata: ProfileMetadata) => {
+    const f = sessionsApi.fields
+    const j = await apiClient.saveConnection({ id: f.profileId, name, host: f.host, port: Number(f.port) || 5432, user: f.user, password: f.password, dbname: f.dbname, sslmode: f.sslmode, save_password: savePassword, clear_password: clearPassword, ...metadata })
+    if (j.error || !j.connection) throw new Error(j.error ?? 'Failed to save connection')
+    const c = j.connection
+    sessionsApi.setSaved((list) => [{ id: c.id, name: c.name, host: c.host, port: String(c.port), user: c.user, password: '', dbname: c.dbname, sslmode: c.sslmode ?? f.sslmode, has_password: c.has_password, last_used_at: c.last_used_at, folder_id: c.folder_id, environment: c.environment, color: c.color, description: c.description, favorite: c.favorite, default: c.default, tags: c.tags, options: c.options }, ...list.filter((x) => x.id !== c.id)])
+    sessionsApi.setFields({ ...f, password: '', profileId: c.id })
+  }
+
+  const deleteConnection = async (id: string) => {
+    const j = await apiClient.deleteConnection(id)
+    if (j.error) throw new Error(j.error)
+    sessionsApi.setSaved((list) => list.filter((x) => x.id !== id))
+  }
+
+  const duplicateConnection = async (name: string): Promise<string> => {
+    const f = sessionsApi.fields
+    if (!f.profileId) throw new Error('Select a saved profile first')
+    const j = await apiClient.saveConnection({ duplicate_from: f.profileId, name, host: f.host, port: Number(f.port) || 5432, user: f.user, dbname: f.dbname, sslmode: f.sslmode })
+    if (j.error || !j.connection) throw new Error(j.error ?? 'Failed to duplicate connection')
+    const c = j.connection
+    sessionsApi.setSaved((list) => [{ id: c.id, name: c.name, host: c.host, port: String(c.port), user: c.user, password: '', dbname: c.dbname, sslmode: c.sslmode ?? f.sslmode, has_password: c.has_password, last_used_at: c.last_used_at, folder_id: c.folder_id, environment: c.environment, color: c.color, description: c.description, favorite: c.favorite, default: c.default, tags: c.tags, options: c.options }, ...list.filter((x) => x.id !== c.id)])
+    sessionsApi.setFields({ ...f, password: '', profileId: c.id })
+    return c.id
+  }
+
   return (
     <TooltipProvider delayDuration={200}>
     <div className="flex h-screen flex-col">
@@ -225,11 +265,13 @@ export default function App() {
         theme="dark"
         position="bottom-right"
         gap={6}
+        closeButton
         icons={{
           success: <Check className="h-3.5 w-3.5 text-white" />,
-          error: <X className="h-3.5 w-3.5 text-white" />,
+          error: null,
           info: <Info className="h-3.5 w-3.5 text-white" />,
           loading: <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />,
+          close: <X className="h-3 w-3" />,
         }}
         toastOptions={{
           style: {
@@ -272,55 +314,6 @@ export default function App() {
       <ResizablePanelGroup direction="horizontal" autoSaveId="pglight-main-layout" className="min-h-0 flex-1">
         <ResizablePanel defaultSize={20} minSize={12} maxSize={32} className="min-h-0">
         <aside className="flex h-full min-h-0 flex-col border-r bg-card">
-          <CredentialManager
-            fields={sessionsApi.fields}
-            setFields={sessionsApi.setFields}
-            saved={sessionsApi.saved}
-            open={sessionsApi.credOpen}
-            onOpenChange={sessionsApi.setCredOpen}
-            onPickSaved={(i) => {
-              const c = sessionsApi.saved[i]
-              if (c) sessionsApi.setFields({ host: c.host, port: c.port, user: c.user, password: c.password, dbname: c.dbname, sslmode: c.sslmode })
-            }}
-            onDeleteSaved={(i) => {
-              const item = sessionsApi.saved[i]
-              if (!item) return
-              void apiClient.deleteConnection(item.name).then((j) => {
-                if (j.error) toast.error(j.error)
-                else sessionsApi.setSaved((l) => l.filter((_, x) => x !== i))
-              }).catch((e) => toast.error(e instanceof Error ? e.message : String(e)))
-            }}
-            onConnect={() => {
-              sessionsApi.connect(true).then((ok) => {
-                if (ok) sessionsApi.setCredOpen(false)
-              })
-            }}
-            onSave={async () => {
-              const name = await dialogs.prompt({
-                title: 'Save connection',
-                defaultValue: `${sessionsApi.fields.host}/${sessionsApi.fields.dbname}`,
-              })
-              if (name == null) return
-              const f = sessionsApi.fields
-              const savedName = name.trim() || 'conn'
-              const j = await apiClient.saveConnection({ name: savedName, host: f.host, port: Number(f.port) || 5432, user: f.user, dbname: f.dbname, sslmode: f.sslmode })
-              if (j.error || !j.connection) toast.error(j.error ?? 'Failed to save connection')
-              else sessionsApi.setSaved((l) => [{ id: j.connection!.id, name: j.connection!.name, host: j.connection!.host, port: String(j.connection!.port), user: j.connection!.user, password: '', dbname: j.connection!.dbname, sslmode: j.connection!.sslmode ?? f.sslmode }, ...l.filter((x) => x.name !== j.connection!.name)])
-            }}
-            onDisconnect={() => {
-              sessionsApi.disconnect()
-            }}
-            autoLogin={sessionsApi.autoLogin}
-            onAutoLogin={sessionsApi.setAutoLogin}
-            connected={connected}
-            sessions={sessions}
-            activeId={activeId}
-            onSwitch={(id) => sessionsApi.setActiveId(id)}
-            onDisconnectOne={(id) => sessionsApi.disconnect(id)}
-            deadIds={sessionsApi.deadIds}
-            onReconnectOne={(id) => void sessionsApi.reconnectOne(id)}
-            onReconnectAll={() => void sessionsApi.reconnectAll()}
-          />
           <Explorer
             connected={connected}
             databases={explorerApi.databases}
@@ -399,10 +392,33 @@ export default function App() {
                   }).catch((e) => toast.error(e instanceof Error ? e.message : String(e)))
                 }}
                 quickAccess={quickAccess}
-                onQuickAccessChange={(view, enabled) => setQuickAccess((current) => {
-                  const selected = new Set(enabled ? [...current, view] : current.filter((item) => item !== view))
-                  return QUICK_ACCESS_VIEWS.filter((item) => selected.has(item))
-                })}
+                onQuickAccessChange={(view, enabled) => {
+                  setQuickAccess((current) => {
+                    const selected = new Set(enabled ? [...current, view] : current.filter((item) => item !== view))
+                    return QUICK_ACCESS_VIEWS.filter((item) => selected.has(item))
+                  })
+                }}
+                connection={{
+                  fields: sessionsApi.fields,
+                  setFields: sessionsApi.setFields,
+                  saved: sessionsApi.saved,
+                  onConnect: connectProfile,
+                  onTest: testConnection,
+                  onSave: saveConnection,
+                  onDuplicate: duplicateConnection,
+                  onDelete: deleteConnection,
+                  vault: sessionsApi.vault,
+                  onVaultAction: sessionsApi.vaultAction,
+                  autoLogin: sessionsApi.autoLogin,
+                  onAutoLogin: sessionsApi.setAutoLogin,
+                  sessions,
+                  activeId,
+                  onSwitch: (id) => sessionsApi.setActiveId(id),
+                  onDisconnectOne: (id) => sessionsApi.disconnect(id),
+                  deadIds: sessionsApi.deadIds,
+                  onReconnectOne: (id) => void sessionsApi.reconnectOne(id),
+                  onReconnectAll: () => void sessionsApi.reconnectAll(),
+                }}
               />
             )}
           />

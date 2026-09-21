@@ -168,6 +168,7 @@ export function formatSqlText(s: string): string {
     .map((t) => (t.code ? fmt(t.text) : ` ${t.text} `))
     .join('')
     .replace(/[ \t]+/g, ' ')
+    .replace(/[ \t]+([,;)])/g, '$1')
     .replace(/ *\n */g, '\n')
     .trim()
     .replace(/\n+/g, '\n')

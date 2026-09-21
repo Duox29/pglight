@@ -1,4 +1,4 @@
-import { BookOpen, Database, MoreHorizontal, Power, Search } from 'lucide-react'
+import { BookOpen, Database, KeyRound, MoreHorizontal, Power, Search } from 'lucide-react'
 import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
@@ -12,6 +12,7 @@ export interface ConnFields {
   password: string
   dbname: string
   sslmode: string
+  profileId?: string
 }
 
 export function ConnectionBar(props: {
@@ -48,6 +49,9 @@ export function ConnectionBar(props: {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => props.onWorkspace('connections')}>
+            <KeyRound /> Connections
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => props.onWorkspace('quick-access')}>
             <MoreHorizontal /> Workspace
           </DropdownMenuItem>

@@ -7,6 +7,7 @@ import { forgetSessionConn, readSessionConns, rememberSessionConn } from '../lib
 import { onUnauthorized, useAppPreference } from '../lib/storage'
 import { readJSON } from '../lib/tabs'
 import type { SavedConnection, SessionInfo } from '../types'
+import type { VaultStatus } from '../lib/api'
 
 /* Multi-session connection state: N live backend pools. Tabs bind to one
    session id each; the explorer follows the active session; txn controls
@@ -15,6 +16,8 @@ import type { SavedConnection, SessionInfo } from '../types'
 export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: string) => void }) {
   const [fields, setFields] = useState<ConnFields>({ host: 'localhost', port: '5432', user: 'postgres', password: '', dbname: 'postgres', sslmode: 'prefer' })
   const [saved, setSaved] = useState<SavedConnection[]>([])
+  const [vault, setVault] = useState<VaultStatus>({ exists: false, unlocked: false })
+  const [vaultWarningShown, setVaultWarningShown] = useState(false)
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [activeId, setActiveId] = useState<string>('')
   const active = sessions.find((s) => s.id === activeId) ?? null
@@ -22,8 +25,10 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
   const connected = !!active
   useEffect(() => {
     void apiClient.listConnections().then((j) => {
-      setSaved((j.connections ?? []).map((c) => ({ id: c.id, name: c.name, host: c.host, port: String(c.port), user: c.user, password: '', dbname: c.dbname, sslmode: c.sslmode ?? 'prefer' })))
+      setSaved((j.connections ?? []).map((c) => ({ id: c.id, name: c.name, host: c.host, port: String(c.port), user: c.user, password: '', dbname: c.dbname, sslmode: c.sslmode ?? 'prefer', has_password: c.has_password, last_used_at: c.last_used_at, folder_id: c.folder_id, environment: c.environment, color: c.color, description: c.description, favorite: c.favorite, default: c.default, tags: c.tags, options: c.options })))
+      setVault((v) => ({ ...v, unlocked: !!j.vault_unlocked }))
     }).catch(() => undefined)
+    void apiClient.getVault().then((j) => { setVault({ exists: !!j.exists, unlocked: !!j.unlocked }); if (j.unlocked) setVaultWarningShown(false) }).catch(() => undefined)
   }, [])
   const [inTxnMap, setInTxnMap] = useState<Record<string, boolean>>({})
   const markTxn = useCallback((sid: string, v: boolean) => {
@@ -85,7 +90,7 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
 
   /* ---------- connection (multi-session) ---------- */
   const bootConnect = useCallback(
-    async (f: ConnFields, fresh: boolean, dbnameOver?: string, sidOver?: string, activate = true, quiet = false): Promise<string> => {
+    async (f: ConnFields, fresh: boolean, dbnameOver?: string, sidOver?: string, activate = true, quiet = false, profileId?: string): Promise<string> => {
       const dbname = dbnameOver || f.dbname
       const j = await apiClient.connect({
         host: f.host,
@@ -94,6 +99,7 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
         password: f.password,
         dbname,
         sslmode: f.sslmode,
+        profile_id: profileId || f.profileId,
         session_id: fresh ? '' : sidOver || session || undefined,
       })
       if (j.error || !j.session_id) {
@@ -102,12 +108,12 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
       }
       const sid = j.session_id
       const info: SessionInfo = j.info
-        ? { id: sid, host: j.info.host, port: String(j.info.port ?? f.port), user: j.info.user || f.user, dbname: j.info.dbname || dbname, sslmode: j.info.sslmode || f.sslmode, tls_warn: j.info.tls_warn }
-        : { id: sid, host: f.host, port: f.port, user: f.user, dbname, sslmode: f.sslmode }
+        ? { id: sid, host: j.info.host, port: String(j.info.port ?? f.port), user: j.info.user || f.user, dbname: j.info.dbname || dbname, sslmode: j.info.sslmode || f.sslmode, tls_warn: j.info.tls_warn, profile_id: j.info.profile_id, profile_name: j.info.profile_name }
+        : { id: sid, host: f.host, port: f.port, user: f.user, dbname, sslmode: f.sslmode, profile_id: profileId || f.profileId }
       setSessions((prev) => (prev.some((s) => s.id === sid) ? prev.map((s) => (s.id === sid ? info : s)) : [...prev, info]))
       if (activate) setActiveId(sid)
       markTxn(sid, !!j.info?.in_txn)
-      rememberSessionConn(sid, { ...f, dbname })
+      rememberSessionConn(sid, { ...f, dbname, profileId: profileId || f.profileId })
       clearDead(sid)
       return sid
     },
@@ -176,7 +182,14 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
         if (!opts?.silent) toast.error('No saved credentials for this session — connect manually')
         return ''
       }
-      const nid = await bootConnect({ ...f }, true, undefined, undefined, false, !!opts?.silent)
+      if (opts?.silent && f.profileId && !vault.unlocked) {
+        if (!vaultWarningShown) {
+          setVaultWarningShown(true)
+          toast.info('Vault is locked — automatic profile reconnect is paused until you unlock it')
+        }
+        return ''
+      }
+      const nid = await bootConnect({ ...f }, true, undefined, undefined, false, !!opts?.silent, f.profileId)
       if (!nid) return ''
       forgetSessionConn(oldSid)
       dropSnapshot(oldSid)
@@ -187,7 +200,7 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
       if (!opts?.silent) toast.success(`Reconnected ${f.user}@${f.host}/${f.dbname}`)
       return nid
     },
-    [bootConnect, onRemap, clearDead, setSessions, setActiveId],
+    [bootConnect, onRemap, clearDead, setSessions, setActiveId, vault.unlocked, vaultWarningShown],
   )
 
   const reconnectAll = useCallback(async () => {
@@ -221,10 +234,59 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
           return Promise.resolve(hit.id)
         }
       }
-      return bootConnect(fields, fresh, dbnameOver)
+      return bootConnect(fields, fresh, dbnameOver, undefined, true, false, fields.profileId)
     },
     [bootConnect, fields, findSession, deadIds, reconnectOne, setActiveId],
   )
+
+  const connectProfile = useCallback(
+    (profile: SavedConnection, password = '') => {
+      const f: ConnFields = {
+        host: profile.host,
+        port: profile.port,
+        user: profile.user,
+        password,
+        dbname: profile.dbname,
+        sslmode: profile.sslmode,
+        profileId: profile.id,
+      }
+      setFields(f)
+      const hit = findSession(f.host, f.port, f.user, f.dbname, f.sslmode)
+      if (hit) {
+        if (deadIds[hit.id]) {
+          return reconnectOne(hit.id).then((nid) => {
+            if (nid) setActiveId(nid)
+            return nid
+          })
+        }
+        setActiveId(hit.id)
+        return Promise.resolve(hit.id)
+      }
+      return bootConnect(f, true, undefined, undefined, true, false, profile.id)
+    },
+    [bootConnect, deadIds, findSession, reconnectOne, setActiveId],
+  )
+
+  const vaultAction = useCallback(async (action: 'setup' | 'unlock' | 'lock' | 'change_password', masterPassword?: string, newPassword?: string) => {
+    const j = await apiClient.vaultAction(action, masterPassword, newPassword)
+    if (j.error) throw new Error(j.error)
+    setVault({ exists: !!j.exists, unlocked: !!j.unlocked })
+    if (action === 'setup' || action === 'unlock' || action === 'change_password') setVaultWarningShown(false)
+    if (action === 'lock') {
+      for (const [sid, f] of Object.entries(readSessionConns())) rememberSessionConn(sid, { ...f, password: '' })
+    }
+  }, [])
+  // Lock the server-side vault when this browser session ends. Beacon is
+  // designed to survive pagehide cancellation where fetch often does not.
+  useEffect(() => {
+    const lockVaultOnExit = () => {
+      if (!navigator.sendBeacon) return
+      const body = new Blob([JSON.stringify({ action: 'lock' })], { type: 'application/json' })
+      navigator.sendBeacon('/api/vault', body)
+    }
+    window.addEventListener('pagehide', lockVaultOnExit)
+    return () => window.removeEventListener('pagehide', lockVaultOnExit)
+  }, [])
 
   const doTxn = useCallback(
     async (action: string, sidOver?: string) => {
@@ -275,6 +337,8 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
           dbname: s.dbname || 'postgres',
           sslmode: s.sslmode || '',
           tls_warn: s.tls_warn,
+          profile_id: s.profile_id,
+          profile_name: s.profile_name,
         }))
         setSessions((prev) => {
           const ids = new Set(mapped.map((s) => s.id))
@@ -365,7 +429,7 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
   }, [])
 
   return {
-    fields, setFields, saved, setSaved, sessions, setSessions,
+    fields, setFields, saved, setSaved, sessions, setSessions, connectProfile, vault, vaultAction,
     active, activeId, setActiveId, session, connected,
     inTxnMap, markTxn, setInTxn, autocommit, setAutocommit,
     autoLogin, setAutoLogin, credOpen, setCredOpen,

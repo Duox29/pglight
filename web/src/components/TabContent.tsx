@@ -6,6 +6,7 @@ import { ObjectView } from './ObjectView'
 import { QueryConsole } from './QueryConsole'
 import { TableWorkspace } from './TableWorkspace'
 import { SidePanel } from './SidePanel'
+import type { ProfileMetadata } from './CredentialManager'
 import type { DialogsApi } from './dialogs'
 import type { UseExplorer } from '../hooks/useExplorer'
 import type { UseObjectOps } from '../hooks/useObjectOps'
@@ -17,6 +18,8 @@ import { api, apiClient, q } from '../lib/api'
 import { download, resultToCSV, resultToInserts, resultToJSON } from '../lib/format'
 import { erdConnectionIdFor, pkOf, qi } from '../lib/tabs'
 import type { HistoryEntry, SideView, Snippet, Tab } from '../types'
+import type { ConnFields } from './ConnectionBar'
+import type { SavedConnection, SessionInfo } from '../types'
 
 export interface TabContentProps {
   tab: Tab | null
@@ -42,6 +45,27 @@ export interface TabContentProps {
   onDeleteSnippet: (i: number) => void
   quickAccess: SideView[]
   onQuickAccessChange: (view: SideView, enabled: boolean) => void
+  connection: {
+    fields: ConnFields
+    setFields: (fields: ConnFields) => void
+    saved: SavedConnection[]
+    onConnect: (profileId?: string) => Promise<string>
+    onTest: (profileId?: string, password?: string) => Promise<{ database?: string; version?: string; latency_ms?: number }>
+    onSave: (name: string, savePassword: boolean, clearPassword: boolean, metadata: ProfileMetadata) => Promise<void>
+    onDuplicate: (name: string) => Promise<string>
+    onDelete: (id: string) => Promise<void>
+    vault: { exists: boolean; unlocked: boolean }
+    onVaultAction: (action: 'setup' | 'unlock' | 'lock' | 'change_password', masterPassword?: string, newPassword?: string) => Promise<void>
+    autoLogin: boolean
+    onAutoLogin: (value: boolean) => void
+    sessions: SessionInfo[]
+    activeId: string
+    onSwitch: (id: string) => void
+    onDisconnectOne: (id: string) => void
+    deadIds: Record<string, boolean>
+    onReconnectOne: (id: string) => void
+    onReconnectAll: () => void
+  }
 }
 
 /* Tab-kind composition root (succeeds the former inline switch in App.tsx):
@@ -66,6 +90,7 @@ export function TabContent(p: TabContentProps) {
         dialogs={p.dialogs}
         quickAccess={p.quickAccess}
         onQuickAccessChange={p.onQuickAccessChange}
+        connection={p.connection}
       />
     )
   }

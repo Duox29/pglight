@@ -58,39 +58,55 @@ const SECTIONS: Section[] = [
     body: {
       en: (
         <>
-          <P>Use the Connections panel in the left sidebar to open a database session.</P>
+          <P>Open the Connections workspace tab to manage database sessions and saved profiles.</P>
           <H>To connect</H>
           <Ol>
             <Li>Enter <K>host, port, user, password, database</K>, and <K>sslmode</K> (<K>disable</K>, <K>prefer</K>, or <K>require</K>).</Li>
-            <Li>Select <K>Connect</K>. The panel collapses to a one line summary after connecting.</Li>
+            <Li>Select <K>Connect</K>. Active sessions remain available in the Connections tab.</Li>
           </Ol>
           <H>Sessions</H>
           <Ul>
-            <Li><K>Save</K> stores the connection profile on the backend without the password. Select it later from the saved list and enter the password when connecting. <K>Delete</K> removes the selected entry.</Li>
-            <Li><K>Auto-connect on startup</K> is a session preference; passwords remain runtime-only and are never persisted by pglight.</Li>
+            <Li>Create a credential vault with a master password before saving database passwords. The vault is encrypted in SQLite; the master password cannot be recovered.</Li>
+            <Li>The vault auto-locks after 15 minutes without activity. It also locks when the browser session ends or when you select <K>Lock</K>.</Li>
+            <Li>When the vault is locked or not configured, pglight never auto-fills or auto-connects with a saved password. Manual password entry still works.</Li>
+            <Li><K>Save</K> stores the connection profile and, when the vault is unlocked and a password is entered, encrypts that password in the vault. <K>Delete</K> removes the profile and its secret.</Li>
             <Li><K>Active sessions</K> lists each open session. Select a session to switch to it. Select <K>X</K> to disconnect one session.</Li>
             <Li>A session marked <K>dead</K> lost its server pool, for example after a server restart. Use <K>Reconnect</K> for one session or <K>Reconnect all</K> to restore them with saved credentials.</Li>
             <Li>Select a database in the Explorer to reconnect to that database. Tabs are kept after disconnect and reload on the next connect.</Li>
             <Li>The status bar shows the session count, the active connection, and the <K>Ctrl+K</K> and <K>Ctrl+Enter</K> hints.</Li>
           </Ul>
+          <H>Vault recovery</H>
+          <Ul>
+            <Li>The master password cannot be recovered. If it is forgotten, close pglight and run <K>pglight.exe vault reset</K>.</Li>
+            <Li>Reset requires exclusive access to the app store. It removes the vault verifier and saved database passwords, creates a new locked vault, and keeps profiles, folders, tags, and non-secret metadata.</Li>
+            <Li>For automation, pipe one new password with <K>--password-stdin --yes</K>. History, snippets, backups, and PostgreSQL server passwords are outside this reset.</Li>
+          </Ul>
         </>
       ),
       vi: (
         <>
-          <P>Dùng panel Connections ở sidebar trái để mở phiên làm việc với database.</P>
+          <P>Mở tab Workspace → Connections để quản lý session và các profile database.</P>
           <H>Để kết nối</H>
           <Ol>
             <Li>Nhập <K>host, port, user, password, database</K> và <K>sslmode</K> (<K>disable</K>, <K>prefer</K> hoặc <K>require</K>).</Li>
-            <Li>Chọn <K>Connect</K>. Panel thu gọn thành một dòng tóm tắt sau khi kết nối.</Li>
+            <Li>Chọn <K>Connect</K>. Các session đang hoạt động vẫn hiển thị trong tab Connections.</Li>
           </Ol>
           <H>Phiên</H>
           <Ul>
-            <Li><K>Save</K> lưu profile connection trên backend nhưng không lưu password. Khi chọn lại profile, nhập password lúc connect. <K>Delete</K> xóa mục đang chọn.</Li>
-            <Li><K>Auto-connect on startup</K> là preference của session; pglight không persist password.</Li>
+            <Li>Tạo credential vault bằng master password trước khi lưu password database. Vault được mã hóa trong SQLite và không thể khôi phục master password.</Li>
+            <Li>Vault tự khóa sau 15 phút không hoạt động, khi browser session kết thúc hoặc khi chọn <K>Lock</K>.</Li>
+            <Li>Khi vault đang khóa hoặc chưa tạo, pglight không tự điền và không tự connect bằng password đã lưu. Vẫn có thể nhập password thủ công.</Li>
+            <Li><K>Save</K> lưu profile và mã hóa password vào vault nếu vault đã unlock. <K>Delete</K> xóa profile cùng secret của nó.</Li>
             <Li><K>Active sessions</K> liệt kê từng session đang mở. Chọn một session để chuyển sang. Chọn <K>X</K> để ngắt một session.</Li>
             <Li>Session gắn nhãn <K>dead</K> đã mất pool trên server, ví dụ sau khi server khởi động lại. Dùng <K>Reconnect</K> cho một session hoặc <K>Reconnect all</K> để khôi phục bằng credentials đã lưu.</Li>
             <Li>Chọn một database trong Explorer để kết nối lại sang database đó. Các tab được giữ sau khi ngắt và tải lại ở lần kết nối sau.</Li>
             <Li>Thanh trạng thái hiển thị số session, connection hiện tại và gợi ý <K>Ctrl+K</K>, <K>Ctrl+Enter</K>.</Li>
+          </Ul>
+          <H>Khôi phục vault</H>
+          <Ul>
+            <Li>Không thể khôi phục master password. Nếu quên password, đóng pglight rồi chạy <K>pglight.exe vault reset</K>.</Li>
+            <Li>Reset cần quyền độc quyền trên app store. Lệnh xóa verifier của vault và password database đã lưu, tạo vault mới ở trạng thái khóa, đồng thời giữ profile, folder, tag và metadata không nhạy cảm.</Li>
+            <Li>Chạy tự động bằng cách pipe một password mới với <K>--password-stdin --yes</K>. History, snippets, backup và password trên PostgreSQL không thuộc phạm vi reset này.</Li>
           </Ul>
         </>
       ),
@@ -1069,7 +1085,7 @@ export function DocsView() {
 
 function textOf(id: string): string {
   const hints: Record<string, string> = {
-    connect: 'connect login password saved auto-connect disconnect database session reconnect dead sslmode kết nối phiên lưu đăng nhập',
+    connect: 'connect login password saved auto-connect disconnect database session reconnect dead sslmode vault reset password-stdin master password recovery kết nối phiên lưu đăng nhập vault khôi phục reset',
     explorer: 'tree tables views matviews foreign functions sequences types extensions roles filter definition right-click context menu cây duyệt đối tượng lọc',
     search: 'ctrl k palette global search tables columns debounce tìm kiếm toàn cục bảng cột',
     tabs: 'tab layout resizable middle-click close dirty active badge thẻ bố cục đóng',

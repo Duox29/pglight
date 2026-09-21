@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -59,6 +60,36 @@ func TestDBNormalizeSSLMode(t *testing.T) {
 	// edge: case-insensitive
 	if got := db.NormalizeSSLMode("DISABLE"); got != "disable" {
 		t.Fatalf("DISABLE -> %q", got)
+	}
+}
+
+func TestDBConnStringWithOptionsDoesNotEncodeKeepaliveAsRuntimeParams(t *testing.T) {
+	connStr := db.ConnStringWithOptions("localhost", 5432, "postgres", "postgres", "postgres", "disable", db.ConnOptions{
+		ConnectTimeout: 5,
+		Keepalive:      30,
+	})
+
+	parsed, err := url.Parse(connStr)
+	if err != nil {
+		t.Fatalf("parse connection string: %v", err)
+	}
+	query := parsed.Query()
+	if got := query.Get("keepalives"); got != "" {
+		t.Fatalf("keepalives must not be sent as a connection-string parameter, got %q", got)
+	}
+	if got := query.Get("keepalives_idle"); got != "" {
+		t.Fatalf("keepalives_idle must not be sent as a connection-string parameter, got %q", got)
+	}
+	if got := query.Get("connect_timeout"); got != "5" {
+		t.Fatalf("connect_timeout = %q, want 5", got)
+	}
+
+	cfg, err := pgxpool.ParseConfig(connStr)
+	if err != nil {
+		t.Fatalf("pgx parse config: %v", err)
+	}
+	if _, ok := cfg.ConnConfig.RuntimeParams["keepalives"]; ok {
+		t.Fatal("keepalives must not be a PostgreSQL runtime parameter")
 	}
 }
 

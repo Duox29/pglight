@@ -56,6 +56,28 @@ func TestParseStartupOptionsRejectsInvalidOrDuplicatePorts(t *testing.T) {
 	}
 }
 
+func TestParseStartupOptionsVaultReset(t *testing.T) {
+	options, err := parseStartupOptions([]string{"vault", "reset", "--password-stdin", "--yes", "--store", "vault.db", "--user", "dev"}, func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("parse vault reset: %v", err)
+	}
+	if !options.vaultReset || !options.vaultPasswordStdin || !options.vaultResetYes || options.vaultStore != "vault.db" || options.vaultUser != "dev" {
+		t.Fatalf("unexpected vault reset options: %+v", options)
+	}
+
+	for _, args := range [][]string{
+		{"vault"},
+		{"vault", "drop"},
+		{"vault", "reset", "--store", ""},
+		{"vault", "reset", "--user", ""},
+		{"--password", "new-password"},
+	} {
+		if _, err := parseStartupOptions(args, func(string) string { return "" }); err == nil {
+			t.Fatalf("expected vault reset error for %v", args)
+		}
+	}
+}
+
 func TestListenHTTPFallsBackWhenDefaultPortIsInUse(t *testing.T) {
 	blocked, err := net.Listen("tcp", ":0")
 	if err != nil {

@@ -110,6 +110,7 @@ func TestConnectionsCRUD(t *testing.T) {
 	requireDeep(t, body, "connection", c, map[string]any{
 		"id": c["id"], "name": "local", "host": "localhost", "port": 5432,
 		"user": "postgres", "dbname": "postgres", "sslmode": "disable",
+		"has_password": false, "last_used_at": "",
 	})
 	code, body = callGET(t, h.Connections, "/api/connections")
 	requireStatus(t, body, code, 200)
@@ -122,10 +123,10 @@ func TestConnectionsCRUD(t *testing.T) {
 	code, body = callPOST(t, h.Connections, "/api/connections", `{"Name":"x"}`)
 	requireErrContains(t, body, code, 400, "required")
 	code, body = callMethod(t, h.Connections, "DELETE", "/api/connections", "")
-	requireErrContains(t, body, code, 400, "name is required")
-	code, body = callMethod(t, h.Connections, "DELETE", "/api/connections?name=ghost", "")
+	requireErrContains(t, body, code, 400, "id is required")
+	code, body = callMethod(t, h.Connections, "DELETE", "/api/connections?id=ghost", "")
 	requireErrContains(t, body, code, 404, "not found")
-	code, body = callMethod(t, h.Connections, "DELETE", "/api/connections?name=local", "")
+	code, body = callMethod(t, h.Connections, "DELETE", "/api/connections?id="+c["id"].(string), "")
 	requireStatus(t, body, code, 200)
 	code, body = callGET(t, h.Connections, "/api/connections")
 	requireDeep(t, body, "connections.empty", decodeObj(t, body)["connections"], []any{})

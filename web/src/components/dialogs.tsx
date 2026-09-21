@@ -20,6 +20,7 @@ export interface FormField {
   key: string
   label: string
   placeholder?: string
+  type?: string
   /** When true the field renders a NULL toggle; a nulled field resolves to null. */
   allowNull?: boolean
 }
@@ -159,6 +160,7 @@ function FormHost({ dlg }: { dlg: PendingDialog }) {
                 <span className="truncate text-muted-foreground">{f.label}</span>
               </Tip>
               <Input
+                type={f.type}
                 placeholder={f.placeholder}
                 disabled={!!nulls[f.key]}
                 value={nulls[f.key] ? 'NULL' : (values[f.key] ?? '')}

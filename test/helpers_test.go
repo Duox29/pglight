@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -38,7 +40,18 @@ var sidSeq atomic.Int64
 
 // testConnStr points at the docker test DB (see docker/docker-compose.yml).
 func testConnStr() string {
-	return db.ConnString("localhost", 5432, "postgres", "postgres", "postgres", "disable")
+	port := testPort()
+	return db.ConnString("localhost", port, "postgres", "postgres", "postgres", "disable")
+}
+
+func testPort() int {
+	port := 5432
+	if raw := os.Getenv("PGLIGHT_TEST_PORT"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			port = parsed
+		}
+	}
+	return port
 }
 
 // newHandler builds a Handler backed by a fresh Manager + temp sqlite Store.
@@ -51,7 +64,7 @@ func newHandler(t *testing.T) (*api.Handler, string) {
 		t.Skipf("test postgres unreachable: %v", err)
 	}
 	// Mirror /api/connect: production sessions always carry display meta.
-	mgr.SetMeta(sid, db.ConnMeta{Host: "localhost", Port: 5432, User: "postgres", DbName: "postgres", SSLMode: "disable"})
+	mgr.SetMeta(sid, db.ConnMeta{Host: "localhost", Port: testPort(), User: "postgres", DbName: "postgres", SSLMode: "disable"})
 	t.Cleanup(func() { mgr.Close(sid) })
 	s, err := store.Open(filepath.Join(t.TempDir(), "pglight.db"))
 	if err != nil {

@@ -19,12 +19,23 @@ const (
 )
 
 type startupOptions struct {
-	port      int
-	portSet   bool
-	noBrowser bool
+	port               int
+	portSet            bool
+	noBrowser          bool
+	vaultReset         bool
+	vaultPasswordStdin bool
+	vaultResetYes      bool
+	vaultStore         string
+	vaultUser          string
 }
 
 func parseStartupOptions(args []string, getenv func(string) string) (startupOptions, error) {
+	if len(args) >= 1 && args[0] == "vault" {
+		if len(args) < 2 || args[1] != "reset" {
+			return startupOptions{}, errors.New("usage: pglight vault reset [--password-stdin] [--yes] [--store path] [--user id]")
+		}
+		return parseVaultResetOptions(args[2:])
+	}
 	fs := flag.NewFlagSet("pglight", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	p := fs.Int("p", 0, "HTTP port")
@@ -72,6 +83,44 @@ func parseStartupOptions(args []string, getenv func(string) string) (startupOpti
 	}
 
 	return startupOptions{port: defaultHTTPPort, noBrowser: *noBrowser}, nil
+}
+
+func parseVaultResetOptions(args []string) (startupOptions, error) {
+	fs := flag.NewFlagSet("pglight vault reset", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	passwordStdin := fs.Bool("password-stdin", false, "read the new master password from stdin")
+	yes := fs.Bool("yes", false, "skip the interactive reset confirmation")
+	storePath := fs.String("store", "", "path to the existing app store")
+	userID := fs.String("user", "", "app user id")
+	if err := fs.Parse(args); err != nil {
+		return startupOptions{}, err
+	}
+	if fs.NArg() > 0 {
+		return startupOptions{}, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	if *storePath == "" && flagWasSet(fs, "store") {
+		return startupOptions{}, errors.New("--store must not be empty")
+	}
+	if *userID == "" && flagWasSet(fs, "user") {
+		return startupOptions{}, errors.New("--user must not be empty")
+	}
+	return startupOptions{
+		vaultReset:         true,
+		vaultPasswordStdin: *passwordStdin,
+		vaultResetYes:      *yes,
+		vaultStore:         *storePath,
+		vaultUser:          *userID,
+	}, nil
+}
+
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
 }
 
 func validatePort(port int) error {

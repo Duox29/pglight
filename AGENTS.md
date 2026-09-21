@@ -184,6 +184,15 @@ backend/frontend surface:
   transaction-aware query/data paths. Safe DSN building (spaces/IPv6),
   sslmode allow-list (`disable|prefer|require|verify-ca|verify-full`), TLS
   warnings for unverified non-loopback links.
+- Credential vault and recovery: versioned Argon2id + AES-GCM vault records,
+  atomic master-password rotation, 15-minute inactivity auto-lock,
+  session-end locking, unlock backoff,
+  encrypted profile export/import, and clear-on-lock runtime keys. The only
+  reset flow is offline `pglight.exe vault reset`: it requires an existing
+  store, an exclusive OS lock, confirmation (or `--password-stdin --yes`),
+  and a new master password; it removes stored database credentials while
+  preserving profiles, folders, tags, and non-secret metadata. It does not
+  erase history/snippets/backups or change PostgreSQL passwords.
 - Explorer and schema work: databases, schemas, tables, views, materialized
   views, foreign tables, functions, sequences, types, indexes, triggers,
   constraints, table statistics, DDL, ERD (`@xyflow/react` canvas:

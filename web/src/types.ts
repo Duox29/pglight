@@ -9,6 +9,8 @@ export interface SessionInfo {
   sslmode: string
   /** True when a non-loopback host connects without certificate verification. */
   tls_warn?: boolean
+  profile_id?: string
+  profile_name?: string
 }
 
 export interface SavedConnection {
@@ -20,6 +22,25 @@ export interface SavedConnection {
   password: string
   dbname: string
   sslmode: string
+	has_password?: boolean
+	last_used_at?: string
+	folder_id?: string
+	environment?: string
+	color?: string
+	description?: string
+	favorite?: boolean
+	default?: boolean
+	tags?: string[]
+	options?: {
+		connect_timeout?: number
+		keepalive?: number
+		application_name?: string
+		search_path?: string
+		sslrootcert?: string
+		sslcert?: string
+		sslkey?: string
+		unix_socket?: string
+	}
 }
 
 export interface HistoryEntry {
@@ -160,7 +181,7 @@ export interface ObjectTabT {
 
 export type Tab = QueryTabT | TableTabT | BrowserTabT | ErdTabT | DocsTabT | WorkspaceTabT | ObjectTabT
 
-export type SideView = 'history' | 'snippets' | 'aliases' | 'server' | 'activity' | 'locks' | 'stats' | 'settings' | 'shortcuts' | 'logs' | 'quick-access'
+export type SideView = 'history' | 'snippets' | 'aliases' | 'server' | 'activity' | 'locks' | 'stats' | 'connections' | 'settings' | 'shortcuts' | 'logs' | 'quick-access'
 
 /** Capped result snapshot kept for query tabs (never auto re-run). */
 export interface QuerySnapshot {

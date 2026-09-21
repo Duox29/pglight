@@ -30,6 +30,7 @@ Source features surveyed: JetBrains DataGrip (explorer, consoles, diff, Explain,
 | Mock-data generator (Simple/Advanced) | ✅ (`meta`/preview≤100/generate≤20000) |
 | Split workspace (2-pane) + Docs tab + shutdown | ✅ |
 | Privacy controls + TLS warnings + exact numerics | ✅ |
+| Destructive offline vault reset (`pglight.exe vault reset`) | ✅ (clears vault secrets, preserves profile metadata) |
 | Diff / schema compare, backup/restore | ❌ (later) |
 | Debugger, SSH tunnel | ❌ (out of scope) |
 
@@ -57,12 +58,12 @@ Backend (`internal/db`, `internal/api`):
 - [x] `POST /api/import {columns, rows[][]}` — txn-wrapped bulk INSERT for CSV import (500-row batches, `ON CONFLICT DO NOTHING` option).
 
 Frontend (`web/`):
-- [x] UX hierarchy pass: header reduces visual competition (search-first + configurable Quick Access buttons, with History/Dashboard as defaults + utility menu for Workspace/Docs); query toolbar grouped Primary/Query/Result/Utility with Run dominant and Explain in a dropdown; connection panel is a floating Radix Popover over the explorer (never pushes the tree down); Explorer tiers schema > muted-uppercase group > object, Tables open by default, Lucide-only icons with subtle type colors, filter match counts; tabs show active dot/dirty state, middle-click close, DB badges; DataGrid is type-aware (OID-based numeric right-align, bool, JSON, type tooltips, zebra rows, Lucide sort icons); table workspace has a real identity header with Data | Structure (Columns/Constraints/Triggers) | SQL | Indexes | Stats; side-panel tools moved into one persisted Workspace tab with a single navigation bar and Quick Access configuration …
+- [x] UX hierarchy pass: header reduces visual competition (search-first + configurable Quick Access buttons, with Connections/Settings as defaults + utility menu for Workspace/Docs); query toolbar grouped Primary/Query/Result/Utility with Run dominant and Explain in a dropdown; connection management lives in the persisted Workspace → Connections tab with vault lock state; Explorer tiers schema > muted-uppercase group > object, Tables open by default, Lucide-only icons with subtle type colors, filter match counts; tabs show active dot/dirty state, middle-click close, DB badges; DataGrid is type-aware (OID-based numeric right-align, bool, JSON, type tooltips, zebra rows, Lucide sort icons); table workspace has a real identity header with Data | Structure (Columns/Constraints/Triggers) | SQL | Indexes | Stats; side-panel tools moved into one persisted Workspace tab with a single navigation bar and Quick Access configuration …
 - [x] Table workspace with sections **Data | Structure (Columns/Constraints/Triggers) | SQL (DDL) | Indexes | Stats**. DDL uses server definition + reconstructed fallback. Columns tab edits via `POST /api/alter-table`: add/drop/rename column, change type (smart-suggest input, custom enums accepted), toggle nullable, set/drop default, rename table; Constraints tab adds/drops CHECK|UNIQUE|PK|FK|EXCLUDE; Indexes tab creates (unique, btree|hash|gin|gist|spgist|brin, multi-key ASC/DESC, expression keys, INCLUDE, partial WHERE, live SQL preview)/renames/drops; Triggers tab creates (BEFORE|AFTER|INSTEAD OF, INSERT|UPDATE|DELETE|TRUNCATE, ROW|STATEMENT, function, UPDATE OF cols, WHEN)/enables/disables/drops with status badge (`GET /api/triggers` now also returns `enabled` O|D|R|A).
 - [x] Query console upgrades: txn controls live inside each tab's own toolbar (per-tab session: `user@host/dbname` label, autocommit toggle, Begin/Commit/Rollback, open/no-transaction badge) — no separate global bar, so switching tabs can never act on the wrong session; Format button, Save-snippet, multi-result rendering (one grid per statement), per-result CSV/INSERT export. Statement timeout 120s (`queryTimeout` in `internal/api/handlers.go`, console paths only). Cancel button (■): matches the tab's pool via `application_name=pglight:<session>` (`Manager.Add`) against active backends, SQL text only disambiguates concurrent runs; unique hit → `GET /api/cancel`, else toast pointing to Dashboard.
 - [x] Global search palette (Ctrl+K / button): jump to table/column, open data.
 - [x] Session survive-restart: per-session credentials (`session-conns`), boot 1:1 reconnect so tabs keep their own DB (dead sessions badged, never collapsed onto another DB), global 401 hook + 30s/focus heartbeat with one-shot auto-retry, per-session Reconnect / Reconnect-all in Connections, tab ids remapped on reconnect.
-- [x] Workspace tab: History | Snippets | Aliases | Server | Activity | Locks | Stats | Settings | Shortcuts | Logs, with one navigation bar; Quick Access uses a per-section toggle list for Connection Bar visibility (History/Dashboard by default) and database views retain auto-refresh for Activity/Locks.
+- [x] Workspace tab: History | Snippets | Aliases | Server | Activity | Locks | Stats | Connections | Settings | Shortcuts | Logs, with one navigation bar; Quick Access uses a per-section toggle list for Connection Bar visibility (Connections/Settings by default, while respecting user changes) and database views retain auto-refresh for Activity/Locks. Connections provides a compact Simple form plus an Advanced mode for optional profile metadata and PostgreSQL options; connection fields expose contextual tooltips.
 - [x] ERD tab per schema: SVG FK graph (click node → open table).
 - [x] Import CSV into open table (file picker, `.tsv` forced to tab delimiter + header detection + ragged-width reject, batch POST), Export as INSERT statements (identifier-quoted, typed literals: NULL/TRUE/FALSE/numbers/JSON/arrays), right-click opens the row menu (Copy cell value / Export / Copy / Delete — never `preventDefault` on the cell, or Radix skips open). CSV export quotes headers, NULL as empty, objects as JSON.
 - [x] Grid selection flow (shared `useGridSelection`, Open Data + query `DataGrid[selectable]`): plain left-click selects exactly one row, ctrl/meta toggles, shift ranges from anchor, right-click keeps multi-selection when inside it; query grids offer Copy cell value / Copy rows / Export selected CSV|JSON.
@@ -77,6 +78,34 @@ Frontend (`web/`):
 - Row-level security / privilege editor (GRANT wizard), role membership editor.
 - Charts from result sets, query plan history, slow-query panel (`pg_stat_statements` when installed).
 - Multi-connection tabs (per-tab session) ✅ (sessions list + active session; explorer/txn/dashboard follow active, tabs keep their session; `switchDb` opens a new session) | SSH tunnel + SSL cert auth, read-only mode (later).
+
+### Vault recovery (development)
+
+`pglight.exe vault reset` performs an offline destructive reset. It requires
+the existing app store and an exclusive process lock, deletes the vault
+verifier and every stored connection secret, then creates a fresh locked vault.
+Connection profiles, folders, tags, and non-secret metadata remain. The
+The running server holds the same OS lock for its lifetime, so the command
+refuses to run while the application owns the store lock. The command exits
+without starting the HTTP server; the former `--password` entrypoint and HTTP
+`reset` action are intentionally removed.
+
+Interactive use prompts for confirmation and reads the new master password
+without echoing it:
+
+```powershell
+pglight.exe vault reset
+```
+
+Automation reads one password from stdin and requires explicit confirmation:
+
+```powershell
+"new-password" | pglight.exe vault reset --password-stdin --yes
+```
+
+`--store` and `--user` select an existing store/user. Reset removes stored
+database credentials only; it does not change passwords on PostgreSQL servers
+or erase history/snippets/backups outside the vault tables.
 
 ## API added in Phase 1
 
@@ -123,7 +152,10 @@ POST /api/aliases           {trigger,expansion} → upsert user entry (trigger: 
 DELETE /api/aliases?trigger= drop one user entry (builtin restored) · DELETE /api/aliases reset all to defaults
 GET  /api/snippets | POST /api/snippets {name,sql} | DELETE /api/snippets?name= (sqlite-backed, per user)
 GET  /api/history | POST /api/history {sql,ms?,n?} | DELETE /api/history (sqlite-backed, retention-pruned)
-GET  /api/connections | POST /api/connections {name,host,port,user,dbname,sslmode} | DELETE /api/connections?name= (saved profiles, no passwords stored client-side)
+GET  /api/connections[?q=&folder_id=&tag=&favorite=1] | POST /api/connections {id?,name,host,port,user,dbname,sslmode,password?,save_password?,clear_password?,folder_id?,environment?,color?,description?,favorite?,default?,tags?,connection options} | DELETE /api/connections?id= (SQLite profiles; passwords are vault-encrypted and never returned)
+GET|POST /api/connections/folders (folder/group CRUD) | GET /api/connections/export (password-free JSON) | POST /api/connections/export {encrypted,password} (encrypted JSON) | POST /api/connections/import {payload,password?}
+GET|POST /api/vault (status; actions setup|unlock|lock|change_password; versioned Argon2id + AES-GCM vault, master password never persisted; 15-minute inactivity auto-lock, browser/session-end lock, and unlock backoff)
+POST /api/connections/test {profile_id? or host,port,user,dbname,sslmode,password?} → {ok,message} (temporary PostgreSQL ping; profile secrets require an unlocked vault)
 GET  /api/preferences | POST /api/preferences {…} (per-user JSON blob: autocommit, privacy, layout)
 GET  /api/preferences/shortcuts | PUT /api/preferences/shortcuts {version,overrides} (validated application-wide command-key overrides)
 GET  /api/complete?session_id=[&refresh=1] (+ ETag/If-None-Match → 304; auto-invalidated after DDL/disconnect)
@@ -219,6 +251,17 @@ prune), and clear-history / clear-all-local-data. NULL is real JSON null
 with Set-NULL controls — the `__NULL__` sentinel is gone (literal text
 stores verbatim).
 
+Credential vault: SQLite stores only Argon2id-derived AES-GCM ciphertext;
+master passwords are never persisted or returned, and locked/unconfigured
+vaults disable password autofill and profile-based auto-connect. Vault v2
+uses a strict current-version verifier, atomic master-password rotation with
+secret re-encryption, 15-minute idle auto-lock (runtime key zeroing), pagehide
+lock, corrupted/unknown-version rejection, and per-user exponential unlock
+backoff. Connection profiles support folders, tags, favorite/default state,
+environment/color/description metadata, portable encrypted JSON import/export
+(plain export never contains passwords), and timeout/keepalive/application-name/
+search-path/SSL certificate/Unix-socket options.
+
 All txn-aware: `/api/query`, `/api/explain`, `/api/table-data`, `/api/row`, `/api/rows-delete`, `/api/import`, `/api/alter-table`.
 
 ## Frontend stack (Phase 2 — shadcn)
@@ -251,9 +294,9 @@ destructive Power button → `onShutdown`: confirm dialog, farewell toast, then
 `POST /api/shutdown`) +
 `SettingsPanel` (logging config: enabled/level/http/query/slow-threshold/max
 + live log viewer with level/category filters, auto-refresh, clear) +
-`CredentialManager` (saved servers + credential form in a floating Radix
-`Popover` panel over the explorer; auto-collapses on connect,
-reopens on disconnect, state persisted), `Explorer` (databases → schemas →
+`CredentialManager` (Workspace → Connections tab: SQLite profiles, encrypted
+master-password vault lifecycle, test/connect/reconnect, active sessions and
+locked-vault manual-password fallback), `Explorer` (databases → schemas →
 tables/views/matviews/foreign/functions/sequences/types + server objects),
 `QueryConsole` (multi-result, Explain Analyze text plan for whole or selected SQL, formatter, per-result
 CSV/JSON/INSERT export), `TableWorkspace` (Data/Columns/DDL/Indexes/
@@ -489,9 +532,10 @@ previously every constraint (incl. the PK) leaked into that list.
 `AGENTS.md` + `PLAN.md` re-scanned against the tree (no code changes):
 `internal/api/` is 14 domains + kernel + complete cache (routes ~47 in
 `main.go`); `internal/store/` sqlite tables
-(`snippets/query_history/aliases/connection_profiles/user_preferences/erd_layouts`);
+(`snippets/query_history/aliases/connection_profiles/vaults/connection_secrets/user_preferences/erd_layouts`);
 `internal/mockgen/` pure engine vs `mockdata.go` HTTP; frontend tab kinds
-`query|table|browser|erd|docs|object`, hooks
+`query|table|browser|erd|docs|object` plus Workspace views including
+`connections`, hooks
 (`useSessions|useTabs|useSplit|useExplorer|useQueryRunner|useTableOps|useObjectOps|useGridSelection`),
 full `ui/*` widget list, `dialogs` `promptNullable`/`form` shapes, and the
 `schemaCache.ts` direct-`fetch` exception; API list de-duplicated

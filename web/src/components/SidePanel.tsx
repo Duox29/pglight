@@ -7,9 +7,11 @@ import { Tabs, TabsList, TabsTrigger } from './ui/tabs'
 import { Switch } from './ui/switch'
 import { DataGrid } from './ui/data-grid'
 import { EmptyNote, ErrorText } from './ui/feedback'
-import type { HistoryEntry, SideView, Snippet } from '@/types'
+import type { ConnFields } from './ConnectionBar'
+import type { HistoryEntry, SavedConnection, SessionInfo, SideView, Snippet } from '@/types'
 import type { DialogsApi } from './dialogs'
 import { SettingsPanel } from './SettingsPanel'
+import { CredentialManager, type ProfileMetadata } from './CredentialManager'
 import { KeyboardShortcutsPanel } from './KeyboardShortcutsPanel'
 import { AliasesPanel } from './AliasesPanel'
 import { LogsPanel } from './LogsPanel'
@@ -27,6 +29,27 @@ interface Props {
   dialogs: DialogsApi
   quickAccess: SideView[]
   onQuickAccessChange: (view: SideView, enabled: boolean) => void
+  connection: {
+    fields: ConnFields
+    setFields: (fields: ConnFields) => void
+    saved: SavedConnection[]
+    onConnect: (profileId?: string) => Promise<string>
+    onTest: (profileId?: string, password?: string) => Promise<{ database?: string; version?: string; latency_ms?: number }>
+    onSave: (name: string, savePassword: boolean, clearPassword: boolean, metadata: ProfileMetadata) => Promise<void>
+    onDuplicate: (name: string) => Promise<string>
+    onDelete: (id: string) => Promise<void>
+    vault: { exists: boolean; unlocked: boolean }
+    onVaultAction: (action: 'setup' | 'unlock' | 'lock' | 'change_password', masterPassword?: string, newPassword?: string) => Promise<void>
+    autoLogin: boolean
+    onAutoLogin: (value: boolean) => void
+    sessions: SessionInfo[]
+    activeId: string
+    onSwitch: (id: string) => void
+    onDisconnectOne: (id: string) => void
+    deadIds: Record<string, boolean>
+    onReconnectOne: (id: string) => void
+    onReconnectAll: () => void
+  }
 }
 
 export function SidePanel(p: Props) {
@@ -35,7 +58,7 @@ export function SidePanel(p: Props) {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    if (p.view === 'history' || p.view === 'snippets' || p.view === 'aliases' || p.view === 'settings' || p.view === 'shortcuts' || p.view === 'logs' || p.view === 'quick-access') return
+    if (p.view === 'history' || p.view === 'snippets' || p.view === 'aliases' || p.view === 'connections' || p.view === 'settings' || p.view === 'shortcuts' || p.view === 'logs' || p.view === 'quick-access') return
     // Drop the previous view's payload: without this a slow fetch briefly
     // renders stale data (e.g. an array) under the new view and crashes it.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -129,6 +152,7 @@ export function SidePanel(p: Props) {
         )}
         {p.view === 'aliases' && <AliasesPanel dialogs={p.dialogs} />}
         {p.view === 'quick-access' && <QuickAccessView quickAccess={p.quickAccess} onChange={p.onQuickAccessChange} />}
+        {p.view === 'connections' && <CredentialManager {...p.connection} dialogs={p.dialogs} />}
         {(p.view === 'server' || p.view === 'activity' || p.view === 'locks' || p.view === 'stats' || p.view === 'settings' || p.view === 'shortcuts' || p.view === 'logs') && (
           <div className="flex flex-col gap-2">
             <ErrorText message={error} />

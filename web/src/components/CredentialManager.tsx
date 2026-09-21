@@ -1,15 +1,35 @@
-import { useState } from 'react'
-import { Plug, PlugZap, RefreshCw, Save, Trash2, KeyRound, ChevronsUpDown, X } from 'lucide-react'
+import { useMemo, useState, type ReactElement } from 'react'
+import { Copy, KeyRound, Lock, LockOpen, Plus, RefreshCw, Save, ShieldCheck, Trash2, Unlock, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from './ui/button'
-import { Tip } from './ui/tooltip'
+import { Card } from './ui/card'
 import { Input } from './ui/input'
-import { Switch } from './ui/switch'
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
-import type { SessionInfo } from '@/types'
+import { Switch } from './ui/switch'
+import { Tip } from './ui/tooltip'
+import { EmptyNote } from './ui/feedback'
 import type { ConnFields } from './ConnectionBar'
+import type { DialogsApi } from './dialogs'
+import type { SavedConnection, SessionInfo } from '@/types'
 
-/** Mirrors db.InsecureTLS on the backend: non-loopback host without verify-ca/full. */
+export interface ProfileMetadata {
+  folder_id: string
+  environment: string
+  color: string
+  description: string
+  favorite: boolean
+  default: boolean
+  tags: string[]
+  connect_timeout: number
+  keepalive: number
+  application_name: string
+  search_path: string
+  sslrootcert: string
+  sslcert: string
+  sslkey: string
+  unix_socket: string
+}
+
 export function isInsecureTls(host: string, sslmode: string): boolean {
   const h = host.trim().toLowerCase()
   if (!h || h === 'localhost' || h === '127.0.0.1' || h === '::1') return false
@@ -18,18 +38,26 @@ export function isInsecureTls(host: string, sslmode: string): boolean {
   return m !== 'verify-ca' && m !== 'verify-full'
 }
 
+function FieldTip({ content, children }: { content: string; children: ReactElement }) {
+  return <Tip content={content} side="top" align="start">{children}</Tip>
+}
+
+function SwitchTip({ content, children }: { content: string; children: ReactElement }) {
+  return <Tip content={content} side="top" align="start"><span className="inline-flex">{children}</span></Tip>
+}
+
 interface Props {
   fields: ConnFields
   setFields: (f: ConnFields) => void
-  saved: { name: string }[]
-  open: boolean
-  onOpenChange: (v: boolean) => void
-  onPickSaved: (i: number) => void
-  onDeleteSaved: (i: number) => void
-  onConnect: () => void
-  onSave: () => void
-  onDisconnect: () => void
-  connected: boolean
+  saved: SavedConnection[]
+  onConnect: (profileId?: string) => Promise<string>
+  onTest: (profileId?: string, password?: string) => Promise<{ database?: string; version?: string; latency_ms?: number }>
+  onSave: (name: string, savePassword: boolean, clearPassword: boolean, metadata: ProfileMetadata) => Promise<void>
+  onDuplicate: (name: string) => Promise<string>
+  onDelete: (id: string) => Promise<void>
+  vault: { exists: boolean; unlocked: boolean }
+  onVaultAction: (action: 'setup' | 'unlock' | 'lock' | 'change_password', masterPassword?: string, newPassword?: string) => Promise<void>
+  dialogs: DialogsApi
   autoLogin: boolean
   onAutoLogin: (v: boolean) => void
   sessions: SessionInfo[]
@@ -42,190 +70,213 @@ interface Props {
 }
 
 export function CredentialManager(p: Props) {
-  const { fields: f, setFields: set } = p
-  const [savedKey, setSavedKey] = useState<string>('')
-  const inp = (k: keyof ConnFields, placeholder?: string, type?: string) => (
-    <Input
-      placeholder={placeholder ?? k}
-      type={type}
-      value={f[k]}
-      onChange={(e) => set({ ...f, [k]: e.target.value })}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') p.onConnect()
-      }}
-    />
-  )
+  const [selectedId, setSelectedId] = useState('')
+  const [name, setName] = useState('')
+  const [filter, setFilter] = useState('')
+  const [advanced, setAdvanced] = useState(false)
+  const emptyMetadata = (): ProfileMetadata => ({ folder_id: '', environment: '', color: '', description: '', favorite: false, default: false, tags: [], connect_timeout: 5, keepalive: 30, application_name: '', search_path: '', sslrootcert: '', sslcert: '', sslkey: '', unix_socket: '' })
+  const [metadata, setMetadata] = useState<ProfileMetadata>(emptyMetadata())
+  const selected = useMemo(() => p.saved.find((x) => x.id === selectedId), [p.saved, selectedId])
 
-  const active = p.sessions.find((s) => s.id === p.activeId)
+  const choose = (c: SavedConnection) => {
+    setSelectedId(c.id ?? '')
+    setName(c.name)
+    setMetadata({ ...emptyMetadata(), folder_id: c.folder_id ?? '', environment: c.environment ?? '', color: c.color ?? '', description: c.description ?? '', favorite: !!c.favorite, default: !!c.default, tags: c.tags ?? [], connect_timeout: c.options?.connect_timeout ?? 5, keepalive: c.options?.keepalive ?? 30, application_name: c.options?.application_name ?? '', search_path: c.options?.search_path ?? '', sslrootcert: c.options?.sslrootcert ?? '', sslcert: c.options?.sslcert ?? '', sslkey: c.options?.sslkey ?? '', unix_socket: c.options?.unix_socket ?? '' })
+    p.setFields({ host: c.host, port: c.port, user: c.user, password: '', dbname: c.dbname, sslmode: c.sslmode, profileId: c.id })
+  }
+
+  const fresh = () => {
+    setSelectedId('')
+    setName('')
+    setMetadata(emptyMetadata())
+    p.setFields({ ...p.fields, password: '', profileId: undefined })
+  }
+
+  const vaultDialog = async (action: 'setup' | 'unlock' | 'change_password') => {
+    try {
+      if (action === 'setup') {
+        const values = await p.dialogs.form({
+          title: 'Create credential vault',
+          description: 'The master password unlocks saved database passwords. It cannot be recovered.',
+          fields: [
+            { key: 'master', label: 'Master password', placeholder: 'At least 8 characters', type: 'password' },
+            { key: 'confirm', label: 'Confirm master password', placeholder: 'Repeat master password', type: 'password' },
+          ],
+          submitText: 'Create vault',
+        })
+        if (!values || values.master !== values.confirm) {
+          if (values) toast.error('Master passwords do not match')
+          return
+        }
+        await p.onVaultAction('setup', values.master ?? undefined)
+        toast.success('Vault created and unlocked')
+      } else if (action === 'change_password') {
+        const values = await p.dialogs.form({
+          title: 'Change vault master password',
+          description: 'Saved database passwords are re-encrypted atomically with the new master password.',
+          fields: [
+            { key: 'current', label: 'Current master password', placeholder: 'Current password', type: 'password' },
+            { key: 'next', label: 'New master password', placeholder: 'At least 8 characters', type: 'password' },
+            { key: 'confirm', label: 'Confirm new password', placeholder: 'Repeat new password', type: 'password' },
+          ],
+          submitText: 'Change password',
+        })
+        if (!values || values.current == null || values.next == null) return
+        if (values.next !== values.confirm) { toast.error('New master passwords do not match'); return }
+        await p.onVaultAction('change_password', values.current, values.next)
+        toast.success('Vault master password changed')
+      } else {
+        const values = await p.dialogs.form({
+          title: 'Unlock credential vault',
+          description: 'Enter the vault master password.',
+          fields: [{ key: 'master', label: 'Master password', placeholder: 'Master password', type: 'password' }],
+          submitText: 'Unlock',
+        })
+        if (!values || values.master == null) return
+        await p.onVaultAction(action, values.master)
+        toast.success('Vault unlocked')
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      toast.error(message)
+    }
+  }
+
+  const save = async () => {
+    if (!name.trim()) {
+      toast.error('Enter a profile name')
+      return
+    }
+    try {
+      await p.onSave(name.trim(), p.fields.password.length > 0, false, metadata)
+      toast.success('Connection profile saved')
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      toast.error(message)
+    }
+  }
+
+  const duplicate = async () => {
+    if (!selected) return
+    const copyName = `${selected.name} copy`
+    try {
+      const id = await p.onDuplicate(copyName)
+      setSelectedId(id)
+      setName(copyName)
+      p.setFields({ ...p.fields, password: '', profileId: id })
+      toast.success('Connection profile duplicated')
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      toast.error(message)
+    }
+  }
+
+  const connect = async () => {
+    try {
+      await p.onConnect(selectedId || undefined)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      toast.error(message)
+    }
+  }
+
+  const test = async () => {
+    try {
+      const result = await p.onTest(selectedId || undefined, p.fields.password)
+      toast.success(`Connection test succeeded · ${result.database ?? 'database'} · PostgreSQL ${result.version ?? 'unknown'} · ${result.latency_ms ?? 0} ms`)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      toast.error(message)
+    }
+  }
+
+  const remove = async () => {
+    if (!selected) return
+    const ok = await p.dialogs.confirm({
+      title: `Delete ${selected.name}?`,
+      description: 'This removes the connection profile and its encrypted vault password.',
+      confirmText: 'Delete',
+      danger: true,
+    })
+    if (!ok) return
+    try {
+      await p.onDelete(selected.id ?? '')
+      fresh()
+      toast.success('Connection profile deleted')
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      toast.error(message)
+    }
+  }
+
+  const visible = p.saved.filter((c) => !filter || `${c.name} ${c.host} ${c.dbname} ${c.user} ${c.environment ?? ''} ${(c.tags ?? []).join(' ')}`.toLowerCase().includes(filter.toLowerCase()))
+  const deadCount = Object.keys(p.deadIds).length
 
   return (
-    <div className="border-b">
-      <Popover open={p.open} onOpenChange={p.onOpenChange}>
-        <PopoverTrigger asChild>
-          <button className="-mb-px flex h-10 w-full items-center gap-1.5 px-2.5 text-left text-[12px] font-semibold hover:bg-accent">
-            <span className={active ? 'text-emerald-500' : 'text-muted-foreground'} aria-hidden>
-              ●
-            </span>
-            {active ? (
-              <span className="min-w-0 flex-1 truncate font-semibold">
-                {active.user}@{active.host}/{active.dbname}
-                <span className="ml-1.5 font-normal text-muted-foreground">
-                  {active.port !== '5432' ? `:${active.port}` : ''} · {p.sessions.length} session
-                  {p.sessions.length === 1 ? '' : 's'}
-                </span>
-              </span>
-            ) : (
-              <>
-                <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="flex-1">Connections</span>
-              </>
-            )}
-            {!active && <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" />}
-          </button>
-        </PopoverTrigger>
-        <PopoverContent align="start" side="bottom" sideOffset={4} className="max-h-[min(70vh,560px)] w-[min(320px,90vw)] overflow-x-hidden overflow-y-auto">
-          <div className="flex flex-col gap-1.5">
-            {p.sessions.length > 0 && (
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
-                  <span className="flex-1">Active sessions ({p.sessions.length})</span>
-                  {Object.keys(p.deadIds).length > 0 && (
-                    <Tip content="Reconnect every lost session with its saved credentials">
-                      <button className="flex items-center gap-1 hover:text-foreground" onClick={p.onReconnectAll}>
-                        <RefreshCw className="h-3 w-3" /> Reconnect all
-                      </button>
-                    </Tip>
-                  )}
-                </div>
-                {p.sessions.map((s) => {
-                  const dead = !!p.deadIds[s.id]
-                  return (
-                    <div
-                      key={s.id}
-                      className={`flex items-center gap-1.5 rounded border px-1.5 py-1 text-[11px] ${s.id === p.activeId ? 'border-foreground/30 bg-accent' : 'border-border'}`}
-                    >
-                      <Tip content={`${s.user}@${s.host}:${s.port}/${s.dbname}${dead ? ' — pool lost (server restart?)' : ''}`}>
-                        <button
-                          className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left hover:underline"
-                          onClick={() => p.onSwitch(s.id)}
-                        >
-                          <span className={dead ? 'text-red-400' : s.id === p.activeId ? '' : 'opacity-60'} aria-hidden>
-                            {dead ? '○' : s.id === p.activeId ? '●' : '○'}
-                          </span>
-                          <span className="truncate">
-                            {s.user}@{s.host}/{s.dbname}
-                          </span>
-                          {dead && <span className="shrink-0 rounded bg-red-500/15 px-1 text-[10px] text-red-400">dead</span>}
-                          {!dead && (s.tls_warn || isInsecureTls(s.host, s.sslmode)) && (
-                            <Tip content="Connected without certificate verification">
-                              <span className="shrink-0 rounded bg-amber-500/15 px-1 text-[10px] text-amber-600 dark:text-amber-400">insecure</span>
-                            </Tip>
-                          )}
-                        </button>
-                      </Tip>
-                      {dead && (
-                        <Tip content="Reconnect this session with its saved credentials">
-                          <Button size="sm" variant="ghost" aria-label="Reconnect this session" onClick={() => p.onReconnectOne(s.id)}>
-                            <RefreshCw className="h-3 w-3" />
-                          </Button>
-                        </Tip>
-                      )}
-                      <Tip content="Disconnect this session">
-                        <Button size="sm" variant="ghost" aria-label="Disconnect this session" onClick={() => p.onDisconnectOne(s.id)}>
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </Tip>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-            <div className="flex gap-1.5">
-              <Select
-                value={savedKey}
-                onValueChange={(v) => {
-                  setSavedKey(v)
-                  p.onPickSaved(Number(v))
-                }}
-              >
-                <SelectTrigger className="flex-1">
-                  <SelectValue placeholder="— saved —" />
-                </SelectTrigger>
-                <SelectContent>
-                  {p.saved.map((c, i) => (
-                    <SelectItem key={i} value={String(i)}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Tip content="Delete selected saved connection">
-                <span className="inline-flex">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label="Delete selected saved connection"
-                    disabled={savedKey === '' || !p.saved[Number(savedKey)]}
-                    onClick={() => {
-                      p.onDeleteSaved(Number(savedKey))
-                      setSavedKey('')
-                    }}
-                  >
-                    <Trash2 />
-                  </Button>
-                </span>
-              </Tip>
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3">
+      <div>
+        <div className="text-sm font-semibold">Connections</div>
+      </div>
+
+      <Card className="p-3">
+        <div className="flex items-center gap-2">
+          {p.vault.unlocked ? <ShieldCheck className="h-4 w-4 text-emerald-500" /> : <Lock className="h-4 w-4 text-amber-500" />}
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-semibold">Credential vault</div>
+            <div className="text-[11px] text-muted-foreground">
+              {!p.vault.exists ? 'Vault not configured' : p.vault.unlocked ? 'Vaut unlocked' : 'Vault locked'}
             </div>
-            <div className="grid grid-cols-[1fr_64px] gap-1.5">
-              {inp('host')}
-              {inp('port')}
-            </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {inp('user')}
-              {inp('password', 'pass', 'password')}
-            </div>
-            <div className="grid grid-cols-[1fr_96px] gap-1.5">
-              {inp('dbname', 'db')}
-              <Select value={f.sslmode} onValueChange={(v) => set({ ...f, sslmode: v })}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {['disable', 'prefer', 'require', 'verify-ca', 'verify-full'].map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {m}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {isInsecureTls(f.host, f.sslmode) && (
-              <p className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-[11px] text-amber-600 dark:text-amber-400">
-                Non-local host without certificate verification — traffic can be intercepted. Use verify-full with a trusted CA for production.
-              </p>
-            )}
-            <div className="flex gap-1.5">
-              <Button size="sm" className="flex-1" onClick={p.onConnect}>
-                {p.connected ? <PlugZap /> : <Plug />} Connect
-              </Button>
-              <Tip content="Save connection">
-                <Button size="sm" variant="secondary" onClick={p.onSave} aria-label="Save connection">
-                  <Save />
-                </Button>
-              </Tip>
-              <Tip content="Disconnect">
-                <Button size="sm" variant="ghost" onClick={p.onDisconnect} aria-label="Disconnect">
-                  <X className="h-3 w-3" />
-                </Button>
-              </Tip>
-            </div>
-            <label className="flex cursor-pointer items-center justify-between gap-2 text-[12px] text-muted-foreground">
-              <span>Auto-connect on startup</span>
-              <Switch checked={p.autoLogin} onCheckedChange={p.onAutoLogin} />
-            </label>
           </div>
-        </PopoverContent>
-      </Popover>
+          {!p.vault.exists && <Button size="sm" onClick={() => void vaultDialog('setup')}><KeyRound /> Create</Button>}
+          {p.vault.exists && !p.vault.unlocked && <Button size="sm" onClick={() => void vaultDialog('unlock')}><Unlock /> Unlock</Button>}
+          {p.vault.unlocked && <><Button size="sm" variant="ghost" onClick={() => void p.onVaultAction('lock').then(() => p.setFields({ ...p.fields, password: '' })).catch((e) => toast.error(e instanceof Error ? e.message : String(e)))}><Lock /> Lock</Button><Button size="sm" variant="ghost" onClick={() => void vaultDialog('change_password')}><KeyRound /> Change password</Button></>}
+        </div>
+        {p.vault.exists && <div className="mt-2 border-t pt-2 text-[11px] text-muted-foreground">Forgot the master password? Close pglight, then run <code>pglight.exe vault reset</code> to remove saved database passwords while keeping profiles.</div>}
+      </Card>
+
+      <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1.2fr)]">
+        <Card className="min-h-[240px] p-2">
+          <div className="mb-2 flex items-center gap-1.5">
+            <FieldTip content="Filter saved profiles by name, host, database, user, environment, or tags."><Input placeholder="Filter profiles…" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter connection profiles" /></FieldTip>
+            <Tip content="New connection profile"><Button size="icon" variant="ghost" aria-label="New connection profile" onClick={fresh}><Plus /></Button></Tip>
+          </div>
+          <div className="flex flex-col gap-1">
+            {visible.map((c) => (
+              <Button key={c.id} variant="ghost" className={`h-auto w-full justify-start rounded border px-2 py-1.5 text-left text-[12px] ${c.id === selectedId ? 'border-primary bg-accent' : 'border-border hover:bg-accent'}`} onClick={() => choose(c)}>
+                <span className="flex items-center gap-1.5"><KeyRound className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 truncate font-medium">{c.name}</span>{c.has_password && <LockOpen className="h-3 w-3 shrink-0 text-emerald-500" />}</span>
+                <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">{c.user}@{c.host}:{c.port}/{c.dbname}</span>
+              </Button>
+            ))}
+            {!visible.length && <EmptyNote text={filter ? 'No matching profiles' : 'No saved profiles'} />}
+          </div>
+        </Card>
+
+        <Card className="p-3">
+          <div className="mb-2 flex min-h-7 min-w-0 flex-nowrap items-center gap-2"><div className="min-w-0 flex-1 truncate text-[12px] font-semibold">{selected ? `Edit ${selected.name}` : 'New connection'}</div>{selected && <div className="flex shrink-0 items-center gap-1.5"><Button size="sm" variant="ghost" onClick={() => void duplicate()}><Copy /> Duplicate</Button><Button size="sm" variant="ghost" onClick={fresh}><Plus /> New</Button></div>}<div className="shrink-0"><FieldTip content="Simple shows the connection essentials. Advanced reveals optional profile metadata and PostgreSQL connection options."><label className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className={!advanced ? 'font-medium text-foreground' : undefined}>Simple</span><Switch checked={advanced} onCheckedChange={setAdvanced} aria-label="Advanced connection form" /><span className={advanced ? 'font-medium text-foreground' : undefined}>Advanced</span></label></FieldTip></div></div>
+          <div className="grid gap-1.5 sm:grid-cols-[1fr_90px]"><FieldTip content="Friendly name used for this saved connection profile."><Input placeholder="Profile name" value={name} onChange={(e) => setName(e.target.value)} aria-label="Profile name" /></FieldTip><FieldTip content="PostgreSQL port. The default is 5432."><Input placeholder="Port" value={p.fields.port} onChange={(e) => p.setFields({ ...p.fields, port: e.target.value })} aria-label="Port" /></FieldTip></div>
+          <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2"><FieldTip content="Database server hostname, IP address, or Unix socket host."><Input placeholder="Host" value={p.fields.host} onChange={(e) => p.setFields({ ...p.fields, host: e.target.value })} aria-label="Host" /></FieldTip><FieldTip content="Name of the PostgreSQL database to open."><Input placeholder="Database" value={p.fields.dbname} onChange={(e) => p.setFields({ ...p.fields, dbname: e.target.value })} aria-label="Database" /></FieldTip></div>
+          <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2"><FieldTip content="PostgreSQL role used to authenticate."><Input placeholder="User" value={p.fields.user} onChange={(e) => p.setFields({ ...p.fields, user: e.target.value })} aria-label="User" /></FieldTip><FieldTip content="Password for this connection. It is saved only when you explicitly save it to the credential vault."><Input placeholder={selected?.has_password ? 'Password (vault)' : 'Password'} type="password" value={p.fields.password} onChange={(e) => p.setFields({ ...p.fields, password: e.target.value })} aria-label="Password" /></FieldTip></div>
+          <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2"><Select value={p.fields.sslmode} onValueChange={(v) => p.setFields({ ...p.fields, sslmode: v })}><FieldTip content="TLS behavior: prefer negotiates TLS when available; verify-ca and verify-full require certificate verification."><SelectTrigger aria-label="SSL mode"><SelectValue /></SelectTrigger></FieldTip><SelectContent>{['disable', 'prefer', 'require', 'verify-ca', 'verify-full'].map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent></Select><FieldTip content={selected?.has_password ? 'This profile has a password stored in the credential vault.' : 'No password is currently stored in the credential vault.'}><div className="flex items-center text-[11px] text-muted-foreground">{selected?.has_password ? <><LockOpen className="mr-1 h-3 w-3 text-emerald-500" /> Saved in vault</> : 'No saved password'}</div></FieldTip></div>
+          {advanced && <>
+            <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2"><FieldTip content="Optional environment label such as dev, staging, or prod."><Input placeholder="Environment (dev/staging/prod)" value={metadata.environment} onChange={(e) => setMetadata({ ...metadata, environment: e.target.value })} aria-label="Environment" /></FieldTip><FieldTip content="Optional folder identifier used to organize saved profiles."><Input placeholder="Folder id (optional)" value={metadata.folder_id} onChange={(e) => setMetadata({ ...metadata, folder_id: e.target.value })} aria-label="Folder id" /></FieldTip></div>
+            <FieldTip content="Optional comma-separated tags for filtering saved profiles."><Input className="mt-1.5" placeholder="Tags, comma separated" value={metadata.tags.join(', ')} onChange={(e) => setMetadata({ ...metadata, tags: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} aria-label="Tags" /></FieldTip>
+            <FieldTip content="Optional notes shown only in pglight. This is not sent to PostgreSQL."><Input className="mt-1.5" placeholder="Description" value={metadata.description} onChange={(e) => setMetadata({ ...metadata, description: e.target.value })} aria-label="Description" /></FieldTip>
+            <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2"><FieldTip content="Maximum time, in seconds, to establish a new connection."><Input type="number" min={0} max={300} placeholder="Connection timeout (s)" value={metadata.connect_timeout} onChange={(e) => setMetadata({ ...metadata, connect_timeout: Number(e.target.value) || 0 })} aria-label="Connection timeout" /></FieldTip><FieldTip content="TCP keepalive interval, in seconds. Use 0 to leave the driver default."><Input type="number" min={0} max={86400} placeholder="Keepalive (s)" value={metadata.keepalive} onChange={(e) => setMetadata({ ...metadata, keepalive: Number(e.target.value) || 0 })} aria-label="Keepalive" /></FieldTip></div>
+            <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2"><FieldTip content="Application name reported to PostgreSQL activity and logs."><Input placeholder="Application name" value={metadata.application_name} onChange={(e) => setMetadata({ ...metadata, application_name: e.target.value })} aria-label="Application name" /></FieldTip><FieldTip content="PostgreSQL startup search_path, for example public, extensions."><Input placeholder="Startup search_path" value={metadata.search_path} onChange={(e) => setMetadata({ ...metadata, search_path: e.target.value })} aria-label="Startup search_path" /></FieldTip></div>
+            <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2"><FieldTip content="Optional Unix socket directory used instead of TCP host lookup."><Input placeholder="Unix socket path (optional)" value={metadata.unix_socket} onChange={(e) => setMetadata({ ...metadata, unix_socket: e.target.value })} aria-label="Unix socket path" /></FieldTip><FieldTip content="Path to the CA certificate used for PostgreSQL TLS verification."><Input placeholder="SSL CA/client cert paths" value={metadata.sslrootcert} onChange={(e) => setMetadata({ ...metadata, sslrootcert: e.target.value })} aria-label="SSL CA/client cert paths" /></FieldTip></div>
+            <div className="mt-1.5 flex gap-4 text-[11px] text-muted-foreground"><label className="flex items-center gap-1"><SwitchTip content="Mark this profile as a favorite for easier discovery."><Switch checked={metadata.favorite} onCheckedChange={(v) => setMetadata({ ...metadata, favorite: v })} aria-label="Favorite" /></SwitchTip> Favorite</label><label className="flex items-center gap-1"><SwitchTip content="Use this profile as the default when pglight starts or opens a connection."><Switch checked={metadata.default} onCheckedChange={(v) => setMetadata({ ...metadata, default: v })} aria-label="Default" /></SwitchTip> Default</label></div>
+          </>}
+          {isInsecureTls(p.fields.host, p.fields.sslmode) && <p className="mt-2 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-[11px] text-amber-600 dark:text-amber-400">Non-local host without certificate verification.</p>}
+          <div className="mt-2 flex flex-wrap gap-1.5"><Button size="sm" onClick={() => void connect()}><Unlock /> Connect</Button><Button size="sm" variant="secondary" onClick={() => void test()}><RefreshCw /> Test</Button><Button size="sm" variant="secondary" onClick={() => void save()}><Save /> Save</Button>{selected && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => void remove()}><Trash2 /> Delete</Button>}</div>
+          <label className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground"><span>Auto-connect on startup (requires unlocked vault for saved passwords)</span><SwitchTip content="Automatically connect to the default profile when pglight starts, if the vault is unlocked."><Switch checked={p.autoLogin} onCheckedChange={p.onAutoLogin} aria-label="Auto-connect on startup" /></SwitchTip></label>
+        </Card>
+      </div>
+
+      <Card className="p-3">
+        <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold"><span className="flex-1">Active sessions ({p.sessions.length})</span>{deadCount > 0 && <Button size="sm" variant="ghost" onClick={p.onReconnectAll}><RefreshCw /> Reconnect all</Button>}</div>
+        <div className="flex flex-col gap-1.5">{p.sessions.map((s) => { const dead = !!p.deadIds[s.id]; return <div key={s.id} className="flex items-center gap-1.5 rounded border px-2 py-1.5 text-[11px]"><Button size="sm" variant="ghost" className="min-w-0 flex-1 justify-start truncate" onClick={() => p.onSwitch(s.id)}><span className={dead ? 'text-red-400' : 'text-emerald-500'}>●</span><span className="truncate">{s.profile_name ? `${s.profile_name} · ` : ''}{s.user}@{s.host}:{s.port}/{s.dbname}</span></Button>{dead && <Button size="sm" variant="ghost" aria-label="Reconnect session" onClick={() => p.onReconnectOne(s.id)}><RefreshCw /></Button>}<Button size="sm" variant="ghost" aria-label="Disconnect session" onClick={() => p.onDisconnectOne(s.id)}><X /></Button></div> })}</div>
+        {!p.sessions.length && <EmptyNote text="No active sessions" />}
+      </Card>
     </div>
   )
 }

@@ -20,11 +20,11 @@ func TestStoreOpenSchemaIdempotent(t *testing.T) {
 		s.Close()
 		t.Fatal(err)
 	}
-	if version != 1 {
+	if version != 4 {
 		s.Close()
-		t.Fatalf("schema version = %d, want 1", version)
+		t.Fatalf("schema version = %d, want 4", version)
 	}
-	for _, table := range []string{"app_users", "snippets", "query_history", "aliases", "connection_profiles", "user_preferences", "erd_layouts"} {
+	for _, table := range []string{"app_users", "snippets", "query_history", "aliases", "connection_profiles", "vaults", "connection_secrets", "user_preferences", "erd_layouts"} {
 		var got string
 		if err := s.DB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&got); err != nil {
 			s.Close()
@@ -44,7 +44,7 @@ func TestStoreOpenSchemaIdempotent(t *testing.T) {
 	// (do not actually create data/ in repo — just verify Open("") picks default path logic
 	// by failing closedir? no: skip filesystem side effects, assert migrate is idempotent instead)
 	var v2 int
-	if err := s2.DB().QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&v2); err != nil || v2 != 1 {
+	if err := s2.DB().QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&v2); err != nil || v2 != 4 {
 		t.Fatalf("reopen version=%d err=%v", v2, err)
 	}
 }

@@ -67,6 +67,8 @@ type ConnMeta struct {
 	DbName      string    `json:"dbname"`
 	SSLMode     string    `json:"sslmode"`
 	ConnectedAt time.Time `json:"connected_at"`
+	ProfileID   string    `json:"profile_id,omitempty"`
+	ProfileName string    `json:"profile_name,omitempty"`
 }
 
 // SessionInfo is the list entry returned by GET /api/sessions.
@@ -147,6 +149,25 @@ func InsecureTLS(host, sslmode string) bool {
 }
 
 func ConnString(host string, port int, user, password, dbname, sslmode string) string {
+	return ConnStringWithOptions(host, port, user, password, dbname, sslmode, ConnOptions{})
+}
+
+// ConnOptions contains PostgreSQL libpq/pgx connection settings that are safe
+// to persist with a profile. Certificate paths are local filesystem paths;
+// their contents never enter the profile database or API response. Keepalive
+// is applied to the TCP dialer, not encoded as a PostgreSQL runtime parameter.
+type ConnOptions struct {
+	ConnectTimeout  int
+	Keepalive       int
+	ApplicationName string
+	SearchPath      string
+	SSLRootCert     string
+	SSLCert         string
+	SSLKey          string
+	UnixSocket      string
+}
+
+func ConnStringWithOptions(host string, port int, user, password, dbname, sslmode string, opts ConnOptions) string {
 	if port == 0 {
 		port = 5432
 	}
@@ -169,11 +190,40 @@ func ConnString(host string, port int, user, password, dbname, sslmode string) s
 	}
 	q := u.Query()
 	q.Set("sslmode", sslmode)
+	if opts.ConnectTimeout > 0 {
+		q.Set("connect_timeout", strconv.Itoa(opts.ConnectTimeout))
+	}
+	if opts.ApplicationName != "" {
+		q.Set("application_name", opts.ApplicationName)
+	}
+	if opts.SearchPath != "" {
+		q.Set("options", "-c search_path="+opts.SearchPath)
+	}
+	if opts.SSLRootCert != "" {
+		q.Set("sslrootcert", opts.SSLRootCert)
+	}
+	if opts.SSLCert != "" {
+		q.Set("sslcert", opts.SSLCert)
+	}
+	if opts.SSLKey != "" {
+		q.Set("sslkey", opts.SSLKey)
+	}
+	if opts.UnixSocket != "" {
+		q.Set("host", opts.UnixSocket)
+	}
 	u.RawQuery = q.Encode()
 	return u.String()
 }
 
 func (m *Manager) Add(id, connStr string) error {
+	return m.AddWithOptions(id, connStr, ConnOptions{})
+}
+
+// AddWithOptions creates a pool and applies socket-level options before the
+// first connection is opened. Keepalive must be configured on net.Dialer;
+// sending libpq's keepalives keywords as pgx runtime parameters makes
+// PostgreSQL treat them as unknown GUCs and reject the startup packet.
+func (m *Manager) AddWithOptions(id, connStr string, opts ConnOptions) error {
 	lock := m.txnLock(id)
 	lock.Lock()
 	defer lock.Unlock()
@@ -183,6 +233,11 @@ func (m *Manager) Add(id, connStr string) error {
 	cfg, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
 		return err
+	}
+	if opts.Keepalive > 0 {
+		dialer := &net.Dialer{KeepAlive: time.Duration(opts.Keepalive) * time.Second}
+		dialer.Timeout = cfg.ConnConfig.ConnectTimeout
+		cfg.ConnConfig.DialFunc = dialer.DialContext
 	}
 	// A GUI session rarely needs many simultaneous PostgreSQL backends. Keep
 	// the default footprint small while allowing pgxpool to grow under load.

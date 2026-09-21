@@ -32,6 +32,17 @@ type Handler struct {
 	ServerConfig       ServerSettings
 	ServerSettingsPath string
 	serverConfigMu     sync.RWMutex
+	vaultMu            sync.RWMutex
+	vaultKey           []byte
+	vaultTimer         *time.Timer
+	vaultEpoch         uint64
+	vaultFailMu        sync.Mutex
+	vaultFailures      map[string]vaultFailure
+}
+
+type vaultFailure struct {
+	count   int
+	retryAt time.Time
 }
 
 // queryTimeout caps user query execution (console, table ops). Long enough
