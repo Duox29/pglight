@@ -77,6 +77,10 @@ function lexSql(s: string): SqlTok[] {
       flush()
       let j = i + 2
       while (j < s.length && s[j] !== '\n') j++
+      // Keep the line ending with the comment. Dropping it makes the next
+      // SQL token part of the `--` comment after formatting, changing valid
+      // SQL such as `ON DELETE SET NULL` into an invalid statement.
+      if (j < s.length) j++
       out.push({ text: s.slice(i, j), code: false })
       i = j
     } else if (c === '/' && next === '*') {
@@ -144,6 +148,10 @@ export function formatSqlText(s: string): string {
     'CREATE TABLE', 'ALTER TABLE', 'DROP TABLE', 'CREATE INDEX', 'VACUUM', 'ANALYZE', 'EXPLAIN',
   ]
   const fmt = (code: string): string => {
+    // A comment can start on the next line while still sharing this code
+    // token. Keep that boundary; otherwise a standalone comment is pulled
+    // onto the previous SQL statement.
+    const endsWithLineBreak = /\r?\n[ \t]*$/.test(code)
     let out = ' ' + code.replace(/\s+/g, ' ').trim()
     const sorted = [...kws].sort((a, b) => b.length - a.length)
     for (const k of sorted) {
@@ -154,7 +162,7 @@ export function formatSqlText(s: string): string {
       /\b(select|from|where|join|left|right|full|inner|outer|on|order|group|having|limit|offset|insert|into|values|update|set|delete|create|table|alter|drop|index|and|or|not|null|as|distinct|count|sum|avg|coalesce|now|begin|commit|rollback|with|returning|union|except|explain|analyze|vacuum|primary|key|references|default|constraint)\b/gi,
       (m) => m.toUpperCase(),
     )
-    return out.trim().replace(/\n+/g, '\n')
+    return `${out.trim().replace(/\n+/g, '\n')}${endsWithLineBreak ? '\n' : ''}`
   }
   return lexSql(s)
     .map((t) => (t.code ? fmt(t.text) : ` ${t.text} `))
