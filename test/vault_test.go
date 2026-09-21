@@ -46,8 +46,10 @@ func TestVaultLifecycleAndSecretAtRest(t *testing.T) {
 	requireErrContains(t, body, code, 401, "invalid master password")
 	code, body = callPOST(t, h.Vault, "/api/vault", `{"action":"unlock","master_password":"correct horse battery staple"}`)
 	requireStatus(t, body, code, 200)
+	// Destructive vault reset is intentionally an offline CLI operation, not
+	// an HTTP action. Keep the API contract explicit here.
 	code, body = callPOST(t, h.Vault, "/api/vault", `{"action":"reset","master_password":"correct horse battery staple"}`)
-	requireStatus(t, body, code, 200)
+	requireErrContains(t, body, code, 400, "unknown vault action")
 }
 
 func TestVaultBackedConnectionTestAgainstDocker(t *testing.T) {

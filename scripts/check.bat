@@ -14,6 +14,9 @@ for %%S in ("%TEMP%\pglight-gofmt.txt") do if not %%~zS==0 (
 echo == go vet ==
 go vet ./... || exit /b 1
 
+echo == go test ==
+go test ./... || exit /b 1
+
 echo == go build ==
 go build -o "%TEMP%\pglight-check.exe" . || exit /b 1
 
