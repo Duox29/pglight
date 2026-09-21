@@ -61,7 +61,7 @@ const SECTIONS: Section[] = [
           <P>Open the Connections workspace tab to manage database sessions and saved profiles.</P>
           <H>To connect</H>
           <Ol>
-            <Li>Enter <K>host, port, user, password, database</K>, and <K>sslmode</K> (<K>disable</K>, <K>prefer</K>, or <K>require</K>).</Li>
+            <Li>Enter <K>host, port, user, password, database</K>, and <K>sslmode</K> (<K>disable</K>, <K>prefer</K>, <K>require</K>, <K>verify-ca</K>, or <K>verify-full</K>).</Li>
             <Li>Select <K>Connect</K>. Active sessions remain available in the Connections tab.</Li>
           </Ol>
           <H>Sessions</H>
@@ -74,6 +74,13 @@ const SECTIONS: Section[] = [
             <Li>A session marked <K>dead</K> lost its server pool, for example after a server restart. Use <K>Reconnect</K> for one session or <K>Reconnect all</K> to restore them with saved credentials.</Li>
             <Li>Select a database in the Explorer to reconnect to that database. Tabs are kept after disconnect and reload on the next connect.</Li>
             <Li>The status bar shows the session count, the active connection, and the <K>Ctrl+K</K> and <K>Ctrl+Enter</K> hints.</Li>
+          </Ul>
+          <H>Profiles, options, and TLS</H>
+          <Ul>
+            <Li>Use <K>Advanced</K> to add folders, tags, environment, favorite/default flags, a description, connection timeout, TCP keepalive, application name, search path, Unix socket, and certificate paths.</Li>
+            <Li><K>Test</K> performs a temporary PostgreSQL ping without saving the profile. <K>Duplicate</K> copies a saved profile without copying its password into the form.</Li>
+            <Li>SSL modes are <K>disable, prefer, require, verify-ca,</K> and <K>verify-full</K>. A non-local host using a mode without certificate verification shows a warning.</Li>
+            <Li><K>Auto-connect on startup</K> uses the default profile only when the vault is unlocked. The Power button asks for confirmation, closes sessions, and stops the local server.</Li>
           </Ul>
           <H>Vault recovery</H>
           <Ul>
@@ -88,7 +95,7 @@ const SECTIONS: Section[] = [
           <P>Mở tab Workspace → Connections để quản lý session và các profile database.</P>
           <H>Để kết nối</H>
           <Ol>
-            <Li>Nhập <K>host, port, user, password, database</K> và <K>sslmode</K> (<K>disable</K>, <K>prefer</K> hoặc <K>require</K>).</Li>
+            <Li>Nhập <K>host, port, user, password, database</K> và <K>sslmode</K> (<K>disable</K>, <K>prefer</K>, <K>require</K>, <K>verify-ca</K> hoặc <K>verify-full</K>).</Li>
             <Li>Chọn <K>Connect</K>. Các session đang hoạt động vẫn hiển thị trong tab Connections.</Li>
           </Ol>
           <H>Phiên</H>
@@ -101,6 +108,13 @@ const SECTIONS: Section[] = [
             <Li>Session gắn nhãn <K>dead</K> đã mất pool trên server, ví dụ sau khi server khởi động lại. Dùng <K>Reconnect</K> cho một session hoặc <K>Reconnect all</K> để khôi phục bằng credentials đã lưu.</Li>
             <Li>Chọn một database trong Explorer để kết nối lại sang database đó. Các tab được giữ sau khi ngắt và tải lại ở lần kết nối sau.</Li>
             <Li>Thanh trạng thái hiển thị số session, connection hiện tại và gợi ý <K>Ctrl+K</K>, <K>Ctrl+Enter</K>.</Li>
+          </Ul>
+          <H>Profile, tùy chọn và TLS</H>
+          <Ul>
+            <Li>Dùng <K>Advanced</K> để thêm folder, tag, environment, cờ favorite/default, mô tả, timeout kết nối, TCP keepalive, application name, search path, Unix socket và đường dẫn certificate.</Li>
+            <Li><K>Test</K> ping PostgreSQL tạm thời mà không lưu profile. <K>Duplicate</K> sao chép profile đã lưu nhưng không đưa password vào form.</Li>
+            <Li>SSL mode gồm <K>disable, prefer, require, verify-ca</K> và <K>verify-full</K>. Host không phải local dùng mode không xác minh certificate sẽ hiện cảnh báo.</Li>
+            <Li><K>Auto-connect on startup</K> chỉ dùng profile mặc định khi vault đã unlock. Nút Power hỏi xác nhận, đóng các session và dừng server local.</Li>
           </Ul>
           <H>Khôi phục vault</H>
           <Ul>
@@ -214,6 +228,7 @@ const SECTIONS: Section[] = [
             <Li>The dot marks tab state: blue for the active tab, amber for an edited query that has not run. The DB badge shows the tab session database.</Li>
             <Li>To close a tab, use the <K>X</K> button or middle-click. Right-click a tab for <K>Close, Close Others, Close to the Right, Close to the Left,</K> and <K>Close All</K>.</Li>
             <Li>Use the <K>+ Query</K> button at the end of the tab bar to open a new console.</Li>
+            <Li>Right-click a tab and choose <K>Split Right</K> or <K>Split Down</K> to show two panes. The split is limited to two panes; use the secondary picker to switch tabs, or use swap/close controls. Pane direction and layout sizes persist.</Li>
           </Ul>
         </>
       ),
@@ -224,6 +239,7 @@ const SECTIONS: Section[] = [
             <Li>Chấm tròn báo trạng thái tab: xanh cho tab đang mở, hổ phách cho query đã sửa nhưng chưa chạy. Badge DB cho biết database của session gắn với tab.</Li>
             <Li>Để đóng tab, dùng nút <K>X</K> hoặc middle-click. Chuột phải lên tab để dùng <K>Close, Close Others, Close to the Right, Close to the Left</K> và <K>Close All</K>.</Li>
             <Li>Dùng nút <K>+ Query</K> ở cuối thanh tab để mở console mới.</Li>
+            <Li>Chuột phải lên tab rồi chọn <K>Split Right</K> hoặc <K>Split Down</K> để mở hai pane. Split tối đa hai pane; dùng picker phụ để đổi tab hoặc nút swap/close. Hướng pane và kích thước layout được lưu lại.</Li>
           </Ul>
         </>
       ),
@@ -374,6 +390,45 @@ const SECTIONS: Section[] = [
             <Li>Header map theo tên cột, không phân biệt hoa thường, dự phòng theo vị trí. File lệch số cột bị từ chối kèm số cột từng dòng.</Li>
             <Li>Xác nhận hộp thoại ghi số dòng, bảng đích và cột. Import trên server mang tính nguyên tử, tối đa 20.000 dòng theo batch 500.</Li>
           </Ol>
+        </>
+      ),
+    },
+  },
+  {
+    id: 'mock-data',
+    title: { en: 'Generate mock data', vi: 'Tạo mock data' },
+    group: { en: 'Tables', vi: 'Bảng' },
+    body: {
+      en: (
+        <>
+          <P>Open <K>Generate</K> from a table Data tab to create test rows without leaving the workspace.</P>
+          <H>Simple mode</H>
+          <Ul>
+            <Li>Simple uses datatype-only generators. Identity, generated, serial, and default-backed columns are left for PostgreSQL to fill.</Li>
+            <Li>PostgreSQL remains the final validator for CHECK, UNIQUE, foreign-key, and other constraints. Use Advanced when those rules need to be planned before insertion.</Li>
+          </Ul>
+          <H>Advanced mode</H>
+          <Ul>
+            <Li>Advanced loads normalized column, enum, foreign-key, CHECK, primary-key, and unique metadata. Configure Auto, DB Default, NULL, Constant, numeric/date ranges, Choice, Sequence, JSON/Array, semantic values, foreign keys, and relative datetimes per column.</Li>
+            <Li>Set nullable probability, single-column uniqueness, and structured compare constraints. Composite foreign keys are generated as one tuple so members cannot be mixed.</Li>
+            <Li>Enter an optional integer seed for repeatable output. <K>Preview</K> shows a small sample and warnings; <K>Generate</K> inserts up to 20,000 rows atomically and reports whether the session transaction remains open.</Li>
+          </Ul>
+        </>
+      ),
+      vi: (
+        <>
+          <P>Mở <K>Generate</K> từ tab Data của bảng để tạo các dòng test ngay trong workspace.</P>
+          <H>Chế độ Simple</H>
+          <Ul>
+            <Li>Simple chỉ dùng generator theo datatype. Cột identity, generated, serial và có default được để PostgreSQL tự điền.</Li>
+            <Li>PostgreSQL vẫn là validator cuối cho CHECK, UNIQUE, foreign key và các constraint khác. Dùng Advanced khi cần lập kế hoạch theo các luật này trước khi insert.</Li>
+          </Ul>
+          <H>Chế độ Advanced</H>
+          <Ul>
+            <Li>Advanced tải metadata chuẩn hóa của column, enum, foreign key, CHECK, primary key và unique. Có thể cấu hình Auto, DB Default, NULL, Constant, khoảng số/ngày, Choice, Sequence, JSON/Array, giá trị ngữ nghĩa, foreign key và datetime tương đối theo từng cột.</Li>
+            <Li>Thiết lập xác suất NULL, unique một cột và compare constraint dạng cấu trúc. Composite foreign key được sinh như một tuple nên các member không bị trộn sai.</Li>
+            <Li>Nhập seed nguyên để lặp lại kết quả. <K>Preview</K> hiển thị mẫu nhỏ và warning; <K>Generate</K> insert tối đa 20.000 dòng nguyên tử và báo session còn transaction mở hay không.</Li>
+          </Ul>
         </>
       ),
     },
@@ -844,6 +899,12 @@ const SECTIONS: Section[] = [
             <Li><K>Slow query threshold</K> in ms marks slower queries as warnings. <K>Max entries</K> bounds the in-memory ring buffer.</Li>
             <Li><K>Save</K> stores the config. <K>Defaults</K> restores the factory config. The config persists in <K>data/logging.json</K>. Change it through the panel or API.</Li>
           </Ul>
+          <H>Security and privacy</H>
+          <Ul>
+            <Li><K>Allow LAN access</K> applies immediately and lets other devices on the same network send requests to pglight. Authentication is not enabled yet, so keep it off on untrusted networks.</Li>
+            <Li><K>Persist query history</K> controls server-side history writes. <K>Restore result snapshots</K> keeps up to 50 rows per query tab across reloads without re-running SQL. Retention is 1–365 days.</Li>
+            <Li><K>Clear history</K> removes server history. <K>Clear all local data</K> removes saved tabs, snapshots, preferences, and history, then reloads while keeping live sessions connected.</Li>
+          </Ul>
         </>
       ),
       vi: (
@@ -854,6 +915,12 @@ const SECTIONS: Section[] = [
             <Li><K>HTTP requests</K> log status và duration. <K>Queries</K> log nội dung SQL, session và số dòng.</Li>
             <Li><K>Slow query threshold</K> tính bằng ms đánh dấu query chậm hơn thành warning. <K>Max entries</K> giới hạn ring buffer trong RAM.</Li>
             <Li><K>Save</K> lưu cấu hình. <K>Defaults</K> khôi phục cấu hình gốc. Cấu hình persist trong <K>data/logging.json</K>. Thay đổi qua panel hoặc API.</Li>
+          </Ul>
+          <H>Bảo mật và riêng tư</H>
+          <Ul>
+            <Li><K>Allow LAN access</K> áp dụng ngay và cho phép thiết bị cùng mạng gửi request đến pglight. Chưa có authentication, vì vậy nên tắt khi dùng mạng không tin cậy.</Li>
+            <Li><K>Persist query history</K> điều khiển việc ghi history phía server. <K>Restore result snapshots</K> giữ tối đa 50 dòng mỗi query tab sau khi reload mà không chạy lại SQL. Retention từ 1–365 ngày.</Li>
+            <Li><K>Clear history</K> xóa history phía server. <K>Clear all local data</K> xóa tabs, snapshots, preferences và history đã lưu rồi reload, nhưng giữ các session đang kết nối.</Li>
           </Ul>
         </>
       ),
@@ -928,6 +995,7 @@ const SECTIONS: Section[] = [
             <Li><K>Middle-click</K>: close a tab. <K>Double-click</K> a cell: edit the value.</Li>
             <Li><K>Ctrl/Command-click, Shift-click</K>: multi-select rows in Data.</Li>
             <Li><K>Right-click</K>: copy a cell, row menu, explorer and tab menus.</Li>
+            <Li>Open Workspace → <K>Shortcuts</K> to search commands, record a new binding, replace conflicts with confirmation, reset one command, or reset all. Overrides are validated and saved per app user; browser-reserved bindings are marked.</Li>
           </Ul>
         </>
       ),
@@ -941,6 +1009,7 @@ const SECTIONS: Section[] = [
             <Li><K>Middle-click</K>: đóng tab. <K>Double-click</K> cell: sửa giá trị.</Li>
             <Li><K>Ctrl/Command-click, Shift-click</K>: chọn nhiều dòng trong Data.</Li>
             <Li><K>Right-click</K>: copy cell, menu dòng, menu explorer và tab.</Li>
+            <Li>Mở Workspace → <K>Shortcuts</K> để tìm command, ghi binding mới, thay binding xung đột sau khi xác nhận, reset từng command hoặc reset tất cả. Override được validate và lưu theo app user; binding bị browser giữ chỗ sẽ được đánh dấu.</Li>
           </Ul>
         </>
       ),
@@ -1085,13 +1154,14 @@ export function DocsView() {
 
 function textOf(id: string): string {
   const hints: Record<string, string> = {
-    connect: 'connect login password saved auto-connect disconnect database session reconnect dead sslmode vault reset password-stdin master password recovery kết nối phiên lưu đăng nhập vault khôi phục reset',
+    connect: 'connect login password saved auto-connect disconnect database session reconnect dead sslmode tls profile folder tags favorite default duplicate test vault reset password-stdin master password recovery kết nối phiên lưu đăng nhập tls profile folder tag vault khôi phục reset',
     explorer: 'tree tables views matviews foreign functions sequences types extensions roles filter definition right-click context menu cây duyệt đối tượng lọc',
     search: 'ctrl k palette global search tables columns debounce tìm kiếm toàn cục bảng cột',
-    tabs: 'tab layout resizable middle-click close dirty active badge thẻ bố cục đóng',
+    tabs: 'tab layout resizable split right down swap pane middle-click close dirty active badge thẻ bố cục chia pane đổi đóng',
     query: 'sql run multi-statement explain analyze format snippet export csv json insert transaction autocommit autocomplete codemirror limit cancel truy vấn chạy gợi ý',
     txn: 'transaction begin commit rollback autocommit in_txn giao dịch',
     'table-data': 'data where order paging edit delete insert csv import bulk select null primary key dữ liệu dòng nhập sửa xóa',
+    'mock-data': 'mock generate preview simple advanced seed generator datatype fk foreign key check unique null probability dữ liệu mẫu sinh xem trước',
     'table-structure': 'columns add rename type nullable default alter structure cột cấu trúc thêm đổi tên kiểu',
     'table-indexes': 'index unique btree gin gist brin include partial where keys expression chỉ mục',
     'table-constraints': 'constraint check unique primary key foreign key exclude ràng buộc',
@@ -1108,10 +1178,10 @@ function textOf(id: string): string {
     activity: 'activity pg_stat_activity cancel kill pid backend sessions hoạt động tiến trình hủy',
     locks: 'locks pg_locks blockers granted waiting khóa blocker chờ',
     'stats-panel': 'stats databases hit ratio top tables thống kê cơ sở dữ liệu',
-    settings: 'settings logging aop level debug slow threshold max entries config cài đặt nhật ký',
+    settings: 'settings logging aop level debug slow threshold max entries security lan privacy history snapshots retention clear config cài đặt nhật ký bảo mật riêng tư',
     logs: 'logs viewer level category http query txn system clear nhật ký xem',
     'sessions-restore': 'restore reopen tabs autologin heartbeat persist reload khôi phục phiên',
-    shortcuts: 'keyboard shortcuts ctrl enter escape search phím tắt',
+    shortcuts: 'keyboard shortcuts command rebind conflict reset ctrl enter escape search phím tắt lệnh đổi phím',
     safety: 'safety where primary key maintenance import limit sanitize param an toàn',
   }
   return hints[id] ?? ''

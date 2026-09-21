@@ -137,6 +137,7 @@ GET  /api/seq-def?session_id=&schema=&name=   → {schema,name,data_type,start_v
 GET  /api/type-def?session_id=&schema=&name=  → {schema,name,kind,comment,labels,definition,display} (definition set for enums; display=format_type for the rest)
 GET  /api/table-stats?session_id=&schema=&table=
 GET  /api/erd?session_id=&schema=  (also returns `columns: {table: [{name,type,pk,fk}]}` for the ERD canvas — additive, nodes/edges unchanged)
+GET|POST|DELETE /api/erd?layout=1&connection_id=&schema=  (SQLite-backed ERD layout + viewport persistence; this branch does not require a PG session)
 GET  /api/search?session_id=&q=
 POST /api/maintenance       {session_id,schema,table,op}
 POST /api/import            {session_id,schema,table,columns,rows,on_conflict_do_nothing}
@@ -527,25 +528,26 @@ Safety kept: UPDATE/DELETE without WHERE still refused; maintenance allow-lists 
 Fix 2026-09-18: `GET /api/ddl` `foreign_keys` now filters `contype='f'` —
 previously every constraint (incl. the PK) leaked into that list.
 
-## Docs sync — 2026-09-20
+## Docs sync — 2026-09-21 (full project scan)
 
-`AGENTS.md` + `PLAN.md` re-scanned against the tree (no code changes):
-`internal/api/` is 14 domains + kernel + complete cache (routes ~47 in
-`main.go`); `internal/store/` sqlite tables
-(`snippets/query_history/aliases/connection_profiles/vaults/connection_secrets/user_preferences/erd_layouts`);
-`internal/mockgen/` pure engine vs `mockdata.go` HTTP; frontend tab kinds
-`query|table|browser|erd|docs|object` plus Workspace views including
-`connections`, hooks
-(`useSessions|useTabs|useSplit|useExplorer|useQueryRunner|useTableOps|useObjectOps|useGridSelection`),
-full `ui/*` widget list, `dialogs` `promptNullable`/`form` shapes, and the
-`schemaCache.ts` direct-`fetch` exception; API list de-duplicated
-(`rows-delete`/`row single`, single `query` multi-statement note) and
-completed with the missing appdata surface
-(`snippets/history/connections/preferences/complete`); status table extended
-(mock-data, split view, shutdown, privacy/TLS/numerics); `check.sh` vs CI
-gate difference recorded. Remaining follow-ups from the review above still
-stand (trusted-caller decision for free-form `filter`, raw-button drift
-migration).
+`AGENTS.md`, `PLAN.md`, and the in-app bilingual `DocsView` were re-scanned
+against the complete tree. The current implementation has 14 API domains plus
+the shared kernel, vault domain, and completion cache; `main.go` registers 53
+API paths. The SQLite store now documents `app_users`, snippets, query history,
+aliases, connection profiles/folders/tags/options, vaults/secrets, user
+preferences, and ERD layout/viewport records. The API inventory includes the
+three `mock-data` stages, shortcut preferences, connection test/import/export,
+and the `erd?layout=1` persistence branch.
+
+The frontend inventory is also kept explicit: tab kinds
+`query|table|browser|erd|docs|object|workspace`, all Workspace views, the
+eight domain hooks, command registry/shortcut normalization, SQL
+format/export, schema-cache completion, promise dialogs, and ERD layout
+storage. `DocsView` now covers mock-data Simple/Advanced generation, saved
+profile options and TLS warnings, split panes, Quick Access, LAN/privacy
+settings, and shortcut rebinding. Remaining engineering follow-ups are still
+the trusted-caller decision for free-form `/api/table-data` `filter` and the
+known raw-button migration drift.
 
 ## Keyboard command system — 2026-09-20
 

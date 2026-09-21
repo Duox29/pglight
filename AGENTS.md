@@ -7,14 +7,15 @@
 
 - **Backend**: Go 1.26.8, `github.com/jackc/pgx/v5`. API in `internal/api/`
   (domain files: `session|explorer|query|data|admin|alter|complete|settings|aliases`
-  + `connections|preferences|appdata|mockdata`, shared kernel in `handlers.go`,
-  autocomplete cache in `complete_cache.go`), connection pool + explicit-txn
-  state + operation leases in `internal/db/manager.go`, app data (sqlite
-  `data/pglight.db`: snippets, history, connections, preferences, aliases,
-  ERD layouts) in `internal/store/`, pure mock-data engine in
-  `internal/mockgen/` (HTTP orchestration in `mockdata.go`), HTTP/query/txn
-  logging in `internal/logging/`, flat route table in `main.go` (~47 `/api/*`
-  routes; `Manager.CloseAll` + `os.Exit` shutdown).
+  + `connections|preferences|appdata|mockdata|vault`, shared kernel in
+  `handlers.go`, autocomplete cache in `complete_cache.go`), connection pool +
+  explicit-txn state + operation leases in `internal/db/manager.go`, app data
+  (sqlite `data/pglight.db`: users, snippets, history, aliases, connection
+  profiles/folders/tags/options, vaults/secrets, preferences, ERD layouts) in
+  `internal/store/`, pure mock-data engine in `internal/mockgen/` (HTTP
+  orchestration in `mockdata.go`), HTTP/query/txn logging in `internal/logging/`,
+  flat route table in `main.go` (53 `/api/*` registrations; `Manager.CloseAll`
+  + `os.Exit` shutdown).
 - **Frontend**: React 18 + Vite 5 + Tailwind v3 + shadcn-style prebuilt
   components (`web/src/components/ui/*`: Button, Input, Textarea, Badge,
   Card, Table, Tabs, Dialog, AlertDialog, Select, SearchSelect, Separator,
@@ -89,15 +90,17 @@ is git-ignored: rebuild it, never commit it).
     roles/extensions/maintenance/cancel/shutdown), `alter`, `complete`
     (+ `complete_cache.go`), `settings` (settings/logs), `aliases`,
     `connections`, `preferences`, `appdata` (snippets/history), `mockdata`
-    (HTTP orchestration over the pure `internal/mockgen/` engine).
+    (HTTP orchestration over the pure `internal/mockgen/` engine), `vault`
+    (credential-vault state and actions).
     `handlers.go` owns only the shared kernel
     (`Handler`, `writeJSON`, `sessionID`/`sessionFromBody`, `q`/`pool`, `queryJSON`/`execQuery`,
     `rowsToMaps`, `errLocation`, cross-domain detectors like `ddlRe`). NEVER copy kernel
     helpers into a domain file; NEVER touch another domain's unexported state — use its
     exported API (`globalComplete.Invalidate`, `globalAliases.List`). No `misc.go`/`utils.go` catch-alls.
-    App data lives in `internal/store/` (sqlite tables `snippets`,
-    `query_history`, `aliases`, `connection_profiles`, `user_preferences`,
-    `erd_layouts`) — never in PG target connections.
+    App data lives in `internal/store/` (sqlite tables `app_users`, `snippets`,
+    `query_history`, `aliases`, `connection_profiles`, `connection_folders`,
+    `connection_tags`, `connection_options`, `vaults`, `connection_secrets`,
+    `user_preferences`, `erd_layouts`) — never in PG target connections.
 
 ## 3. Frontend rules (React + shadcn)
 
@@ -222,8 +225,47 @@ backend/frontend surface:
   (sqlite `Store`, `PGLIGHT_STORE`/`PGLIGHT_USER_ID` overridable),
   privacy controls (history persistence, snapshot restore default off,
   retention prune, clear-all), and persisted ERD layouts.
+- Application controls and recovery: bilingual in-app `DocsView`, command
+  palette plus rebindable/validated shortcuts, configurable Workspace Quick
+  Access buttons, live LAN-access security toggle, startup port selection and
+  browser suppression (`--p/--port`, `PORT`, `--no-browser`), and the offline
+  `vault reset` flow with process locking and password-stdin automation.
 
-## 6. Docs & commits
+## 6. Current function inventory (full project scan — 2026-09-21)
+
+The route table currently contains 53 registrations. Keep this inventory in
+sync when adding or removing a user-visible function:
+
+- **Sessions and connections**: `connect`, `sessions`, `disconnect`, `txn`,
+  `connections`, `connections/folders`, `connections/export`,
+  `connections/import`, `connections/test`, and `vault`.
+- **Explorer and schema**: `databases`, `schemas`, `tables`, `objects`,
+  `columns`, `ddl`, `view-def`, `func-def`, `seq-def`, `type-def`, `types`,
+  `constraints`, `triggers`, `table-stats`, `erd`, and `search` (including
+  SQLite-backed ERD layout/viewport persistence through `erd?layout=1`).
+- **Query and data**: `query` (single and multi-statement), `explain`,
+  `complete`, `table-data`, `row`, `rows-delete`, `import`, `maintenance`,
+  `activity`, and `cancel`.
+- **App data and administration**: `aliases`, `snippets`, `history`,
+  `preferences`, `preferences/shortcuts`, `server-info`, `stats`, `locks`,
+  `roles`, `extensions`, `settings`, `logs`, and `shutdown`.
+- **Mock data**: `mock-data/meta`, `mock-data/preview`, and
+  `mock-data/generate`; generation logic stays pure in `internal/mockgen/` and
+  the HTTP layer remains txn-aware.
+- **Frontend composition**: tab kinds are `query|table|browser|erd|docs|object`
+  plus `workspace`; Workspace views are `history|snippets|aliases|server|
+  activity|locks|stats|connections|settings|shortcuts|logs|quick-access`.
+  Domain hooks are `useSessions`, `useTabs`, `useSplit`, `useExplorer`,
+  `useQueryRunner`, `useTableOps`, `useObjectOps`, and `useGridSelection`.
+  Shared UI functions include SQL formatting/export, schema-cache completion,
+  ERD layout/storage, dialog promises, command registration, and shortcut
+  normalization.
+
+When changing one of these functions, update `PLAN.md` and the bilingual
+`DocsView` when it affects user behavior, then run the frontend build so the
+embedded `web/dist` stays current locally (without committing it).
+
+## 7. Docs & commits
 
 - New endpoint/component/behavior ⇒ update `PLAN.md` (API list / stack section).
 - Never commit `web/dist` (git-ignored build output), `web/node_modules`, `*.tsbuildinfo`, `data/`, binaries, or `.env` files.
