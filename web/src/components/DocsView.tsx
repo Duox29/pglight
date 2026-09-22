@@ -223,7 +223,7 @@ const SECTIONS: Section[] = [
     body: {
       en: (
         <>
-          <P>The workspace has a resizable explorer column and a main tab area. Tab kinds include <K>Query, Table, Object, Browser, ERD, Docs,</K> and <K>Workspace</K>. Workspace contains History, database monitoring, settings, logs, and Quick Access in one navigation bar.</P>
+          <P>The workspace has a resizable explorer column and a main tab area. Tab kinds include <K>Query, Table, Object, Browser, ERD, Docs,</K> and <K>Workspace</K>. Workspace contains History, database monitoring, Appearance, Settings, logs, and Quick Access in one navigation bar.</P>
           <Ul>
             <Li>The dot marks tab state: blue for the active tab, amber for an edited query that has not run. The DB badge shows the tab session database.</Li>
             <Li>To close a tab, use the <K>X</K> button or middle-click. Right-click a tab for <K>Close, Close Others, Close to the Right, Close to the Left,</K> and <K>Close All</K>.</Li>
@@ -234,7 +234,7 @@ const SECTIONS: Section[] = [
       ),
       vi: (
         <>
-          <P>Workspace gồm cột explorer co giãn và vùng tab chính. Các loại tab gồm <K>Query, Table, Object, Browser, ERD, Docs</K> và <K>Workspace</K>. Workspace chứa History, giám sát database, settings, logs và Quick Access trong một thanh điều hướng.</P>
+          <P>Workspace gồm cột explorer co giãn và vùng tab chính. Các loại tab gồm <K>Query, Table, Object, Browser, ERD, Docs</K> và <K>Workspace</K>. Workspace chứa History, giám sát database, Appearance, Settings, logs và Quick Access trong một thanh điều hướng.</P>
           <Ul>
             <Li>Chấm tròn báo trạng thái tab: xanh cho tab đang mở, hổ phách cho query đã sửa nhưng chưa chạy. Badge DB cho biết database của session gắn với tab.</Li>
             <Li>Để đóng tab, dùng nút <K>X</K> hoặc middle-click. Chuột phải lên tab để dùng <K>Close, Close Others, Close to the Right, Close to the Left</K> và <K>Close All</K>.</Li>
@@ -894,6 +894,7 @@ const SECTIONS: Section[] = [
         <>
           <P>Logging is centralized: HTTP through middleware, queries through the Querier wrapper, transactions through the transaction logger. Steady queries log at debug, slow queries at warning, failures at error.</P>
           <Ul>
+            <Li>The separate <K>Appearance</K> workspace tab changes the whole app immediately. Choose <K>Dark</K> or <K>Light</K>, select a preset, or use the color pickers for a custom background, text, panel, accent, and border palette. Customizing a color switches the preset to <K>Custom</K>; the choice is restored after reload.</Li>
             <Li><K>Enabled</K> turns logging on or off. <K>Level</K> selects <K>debug, info, warn,</K> or <K>error</K>. Debug shows each SQL statement.</Li>
             <Li><K>HTTP requests</K> logs status and duration. <K>Queries</K> logs SQL text, session, and row counts.</Li>
             <Li><K>Slow query threshold</K> in ms marks slower queries as warnings. <K>Max entries</K> bounds the in-memory ring buffer.</Li>
@@ -911,6 +912,7 @@ const SECTIONS: Section[] = [
         <>
           <P>Logging tập trung: HTTP qua middleware, query qua wrapper Querier, transaction qua logger transaction. Query thường log ở debug, query chậm ở warning, lỗi ở error.</P>
           <Ul>
+            <Li>Tab workspace riêng <K>Appearance</K> thay đổi toàn bộ app ngay lập tức. Chọn <K>Dark</K> hoặc <K>Light</K>, chọn preset, hoặc dùng color picker để tùy chỉnh nền, chữ, panel, accent và border. Khi chỉnh màu, preset chuyển thành <K>Custom</K>; lựa chọn vẫn được giữ sau khi reload.</Li>
             <Li><K>Enabled</K> bật hoặc tắt logging. <K>Level</K> chọn <K>debug, info, warn</K> hoặc <K>error</K>. Debug hiển thị từng câu SQL.</Li>
             <Li><K>HTTP requests</K> log status và duration. <K>Queries</K> log nội dung SQL, session và số dòng.</Li>
             <Li><K>Slow query threshold</K> tính bằng ms đánh dấu query chậm hơn thành warning. <K>Max entries</K> giới hạn ring buffer trong RAM.</Li>
@@ -1178,7 +1180,7 @@ function textOf(id: string): string {
     activity: 'activity pg_stat_activity cancel kill pid backend sessions hoạt động tiến trình hủy',
     locks: 'locks pg_locks blockers granted waiting khóa blocker chờ',
     'stats-panel': 'stats databases hit ratio top tables thống kê cơ sở dữ liệu',
-    settings: 'settings logging aop level debug slow threshold max entries security lan privacy history snapshots retention clear config cài đặt nhật ký bảo mật riêng tư',
+    settings: 'settings appearance theme dark light preset custom color picker background foreground panel accent border logging aop level debug slow threshold max entries security lan privacy history snapshots retention clear config cài đặt giao diện chủ đề màu nền chữ panel accent border nhật ký bảo mật riêng tư',
     logs: 'logs viewer level category http query txn system clear nhật ký xem',
     'sessions-restore': 'restore reopen tabs autologin heartbeat persist reload khôi phục phiên',
     shortcuts: 'keyboard shortcuts command rebind conflict reset ctrl enter escape search phím tắt lệnh đổi phím',

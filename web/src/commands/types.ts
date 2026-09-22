@@ -30,6 +30,7 @@ export type CommandId =
   | 'workspace.history'
   | 'workspace.snippets'
   | 'workspace.dashboard'
+  | 'workspace.appearance'
   | 'workspace.settings'
   | 'workspace.shortcuts'
   | 'workspace.docs'

@@ -32,6 +32,8 @@
     @apply bg-background text-foreground text-[13px];
     font-family: system-ui, -apple-system, sans-serif;
   }
+  :root[data-theme='dark'] { color-scheme: dark; }
+  :root[data-theme='light'] { color-scheme: light; }
 }
 
 /* Native scrollbars are hidden globally. FloatingScrollbars renders the

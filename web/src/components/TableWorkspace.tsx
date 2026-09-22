@@ -498,7 +498,7 @@ export function TableWorkspace(p: Props) {
                     <Copy className="h-3.5 w-3.5" /> Copy
                   </Button>
                 </div>
-                <pre className="overflow-auto rounded-md border border-border bg-[#0b0d11] p-2.5 font-mono text-[12px] leading-relaxed">{t.ddl.ddl}</pre>
+                <pre className="overflow-auto rounded-md border border-border bg-background p-2.5 font-mono text-[12px] leading-relaxed">{t.ddl.ddl}</pre>
               </Card>
               <Card className="p-2.5">
                 <div className="mb-1 text-[12px] font-semibold">Constraints</div>

@@ -63,7 +63,7 @@ Frontend (`web/`):
 - [x] Query console upgrades: txn controls live inside each tab's own toolbar (per-tab session: `user@host/dbname` label, autocommit toggle, Begin/Commit/Rollback, open/no-transaction badge) — no separate global bar, so switching tabs can never act on the wrong session; Format button, Save-snippet, multi-result rendering (one grid per statement), per-result CSV/INSERT export. Statement timeout 120s (`queryTimeout` in `internal/api/handlers.go`, console paths only). Cancel button (■): matches the tab's pool via `application_name=pglight:<session>` (`Manager.Add`) against active backends, SQL text only disambiguates concurrent runs; unique hit → `GET /api/cancel`, else toast pointing to Dashboard.
 - [x] Global search palette (Ctrl+K / button): jump to table/column, open data.
 - [x] Session survive-restart: per-session credentials (`session-conns`), boot 1:1 reconnect so tabs keep their own DB (dead sessions badged, never collapsed onto another DB), global 401 hook + 30s/focus heartbeat with one-shot auto-retry, per-session Reconnect / Reconnect-all in Connections, tab ids remapped on reconnect.
-- [x] Workspace tab: History | Snippets | Aliases | Server | Activity | Locks | Stats | Connections | Settings | Shortcuts | Logs, with one navigation bar; Quick Access uses a per-section toggle list for Connection Bar visibility (Connections/Settings by default, while respecting user changes) and database views retain auto-refresh for Activity/Locks. Connections provides a compact Simple form plus an Advanced mode for optional profile metadata and PostgreSQL options; connection fields expose contextual tooltips.
+- [x] Workspace tab: History | Snippets | Aliases | Server | Activity | Locks | Stats | Connections | Appearance | Settings | Shortcuts | Logs, with one navigation bar; Quick Access uses a per-section toggle list for Connection Bar visibility (Connections/Settings by default, while respecting user changes) and database views retain auto-refresh for Activity/Locks. Connections provides a compact Simple form plus an Advanced mode for optional profile metadata and PostgreSQL options; connection fields expose contextual tooltips. Appearance is a peer workspace view with app-wide Dark/Light themes, Dark/Light/Ocean presets, live custom color pickers for background/text/panel/accent/border, CSS-token synchronization across the UI and SQL editor, and persisted reload-safe preferences.
 - [x] ERD tab per schema: SVG FK graph (click node → open table).
 - [x] Import CSV into open table (file picker, `.tsv` forced to tab delimiter + header detection + ragged-width reject, batch POST), Export as INSERT statements (identifier-quoted, typed literals: NULL/TRUE/FALSE/numbers/JSON/arrays), right-click opens the row menu (Copy cell value / Export / Copy / Delete — never `preventDefault` on the cell, or Radix skips open). CSV export quotes headers, NULL as empty, objects as JSON.
 - [x] Grid selection flow (shared `useGridSelection`, Open Data + query `DataGrid[selectable]`): plain left-click selects exactly one row, ctrl/meta toggles, shift ranges from anchor, right-click keeps multi-selection when inside it; query grids offer Copy cell value / Copy rows / Export selected CSV|JSON.
@@ -293,8 +293,9 @@ widgets, to avoid custom-CSS and bespoke-component bugs.
 Feature views: slim `ConnectionBar` (status/badges/actions + Settings gear +
 destructive Power button → `onShutdown`: confirm dialog, farewell toast, then
 `POST /api/shutdown`) +
-`SettingsPanel` (logging config: enabled/level/http/query/slow-threshold/max
-+ live log viewer with level/category filters, auto-refresh, clear) +
+`AppearancePanel` (theme/presets/custom color pickers) + `SettingsPanel`
+(logging config: enabled/level/http/query/slow-threshold/max + live log viewer
+with level/category filters, auto-refresh, clear) +
 `CredentialManager` (Workspace → Connections tab: SQLite profiles, encrypted
 master-password vault lifecycle, test/connect/reconnect, active sessions and
 locked-vault manual-password fallback), `Explorer` (databases → schemas →

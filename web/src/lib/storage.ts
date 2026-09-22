@@ -84,6 +84,11 @@ export function useAppPreference<T>(key: string, initial: T) {
   })
   useEffect(() => {
     let alive = true
+    const onPreferenceChange = (event: Event) => {
+      const changed = event as CustomEvent<{ key?: string; value?: unknown }>
+      if (changed.detail?.key === key) setValue(changed.detail.value as T)
+    }
+    window.addEventListener('pglight-preference-change', onPreferenceChange)
     void api<{ preferences?: Record<string, unknown> }>('/api/preferences').then((j) => {
       if (!alive) return
       if (j.preferences && Object.prototype.hasOwnProperty.call(j.preferences, key)) {
@@ -92,7 +97,10 @@ export function useAppPreference<T>(key: string, initial: T) {
         void api('/api/preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: value }) }).catch(() => undefined)
       }
     }).catch(() => undefined)
-    return () => { alive = false }
+    return () => {
+      alive = false
+      window.removeEventListener('pglight-preference-change', onPreferenceChange)
+    }
     // Initial cache is only a fast first paint; backend becomes source of truth.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
@@ -101,6 +109,7 @@ export function useAppPreference<T>(key: string, initial: T) {
     setValue((prev) => {
       const next = typeof v === 'function' ? (v as (p: T) => T)(prev) : v
       try { localStorage.setItem(key, JSON.stringify(next)) } catch { /* cache is best-effort */ }
+      window.dispatchEvent(new CustomEvent('pglight-preference-change', { detail: { key, value: next } }))
       void api('/api/preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: next }) }).catch(() => undefined)
       return next
     })

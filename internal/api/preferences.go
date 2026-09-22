@@ -17,7 +17,7 @@ var shortcutCommands = map[string]struct{}{
 	"tab.close": {}, "tab.closeOthers": {}, "tab.closeLeft": {}, "tab.closeRight": {}, "tab.closeAll": {},
 	"tab.next": {}, "tab.previous": {}, "tab.activate.1": {}, "tab.activate.2": {}, "tab.activate.3": {},
 	"tab.activate.4": {}, "tab.activate.5": {}, "tab.activate.6": {}, "tab.activate.7": {}, "tab.activate.8": {}, "tab.activate.9": {},
-	"table.refresh": {}, "table.nextPage": {}, "table.previousPage": {}, "workspace.history": {}, "workspace.snippets": {},
+	"table.refresh": {}, "table.nextPage": {}, "table.previousPage": {}, "workspace.history": {}, "workspace.snippets": {}, "workspace.appearance": {},
 	"workspace.dashboard": {}, "workspace.settings": {}, "workspace.shortcuts": {}, "workspace.docs": {}, "split.right": {}, "split.down": {},
 	"split.swap": {}, "split.close": {}, "explorer.refresh": {}, "session.connect": {}, "session.disconnect": {},
 }

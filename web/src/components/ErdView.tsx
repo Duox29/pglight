@@ -30,6 +30,7 @@ import {
 } from './erd/erdStorage'
 import type { ErdTabT } from '@/types'
 import { cn } from '@/lib/utils'
+import { useAppearance } from '@/hooks/useAppearance'
 
 type FlowNode = ErdTableNodeT
 type FlowEdge = ErdRelationEdgeT
@@ -59,6 +60,7 @@ function ErdCanvasInner(props: {
 }) {
   const { tab: t } = props
   const data = t.data as ErdDataDto | null
+  const { appearance } = useAppearance()
 
   const graph = useMemo(() => (data ? mapErd(t.schema, data) : { tables: [], relations: [] }), [data, t.schema])
 
@@ -138,9 +140,9 @@ function ErdCanvasInner(props: {
       target: r.targetTable,
       sourceHandle: srcHandle(r.sourceColumn),
       targetHandle: dstHandle(r.targetColumn),
-      markerEnd: { type: 'arrowclosed' as const, color: '#1f6feb' },
+      markerEnd: { type: 'arrowclosed' as const, color: 'hsl(var(--primary))' },
       data: { label: r.labeled ? r.sourceColumn : '', dimmed: false, line },
-      style: { stroke: '#1f6feb', strokeWidth: 1.5 },
+      style: { stroke: 'hsl(var(--primary))', strokeWidth: 1.5 },
     }))
     return { nodes, edges }
     // Layout inputs only; live drag/selection state must not rebuild the graph.
@@ -335,7 +337,7 @@ function ErdCanvasInner(props: {
           No foreign-key relationships — tables shown without edges.
         </div>
       )}
-      <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg border bg-[#0b0d11]">
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg border bg-background">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -353,12 +355,12 @@ function ErdCanvasInner(props: {
           zoomOnPinch
           onlyRenderVisibleElements
           proOptions={{ hideAttribution: true }}
-          colorMode="dark"
+          colorMode={appearance.mode}
           className="[&_.react-flow__attribution]:hidden [&_.react-flow__pane]:!touch-none"
         >
-          <Background gap={24} size={1} color="#1a1f2a" />
+          <Background gap={24} size={1} color="hsl(var(--border))" />
           <Panel position="top-left">
-            <div className="flex overflow-hidden rounded-full border border-[#2a2f3a] bg-[#13161c]/95 shadow-sm" role="group" aria-label="Relation line style">
+            <div className="flex overflow-hidden rounded-full border border-border bg-card/95 shadow-sm" role="group" aria-label="Relation line style">
               <Tip content="Curved lines">
                 <button
                   type="button"
@@ -367,7 +369,7 @@ function ErdCanvasInner(props: {
                   aria-pressed={line === 'bezier'}
                   className={cn(
                     'flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                    line === 'bezier' && 'bg-[#1f6feb]/20 text-foreground',
+                    line === 'bezier' && 'bg-accent text-foreground',
                   )}
                 >
                   <Spline className="h-3.5 w-3.5" />
@@ -381,7 +383,7 @@ function ErdCanvasInner(props: {
                   aria-pressed={line === 'straight'}
                   className={cn(
                     'flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                    line === 'straight' && 'bg-[#1f6feb]/20 text-foreground',
+                    line === 'straight' && 'bg-accent text-foreground',
                   )}
                 >
                   <Slash className="h-3.5 w-3.5" />
@@ -395,7 +397,7 @@ function ErdCanvasInner(props: {
                   aria-pressed={line === 'smoothstep'}
                   className={cn(
                     'flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                    line === 'smoothstep' && 'bg-[#1f6feb]/20 text-foreground',
+                    line === 'smoothstep' && 'bg-accent text-foreground',
                   )}
                 >
                   <Workflow className="h-3.5 w-3.5" />
@@ -406,25 +408,24 @@ function ErdCanvasInner(props: {
           <Controls
             showInteractive={false}
             className={cn(
-              '[&>button]:!border-[#2a2f3a] [&>button]:!bg-[#13161c] [&>button]:!fill-[#9aa1b2]',
-              '[&>button:hover]:!bg-[#1a1f2a]',
+              '[&>button]:!border-border [&>button]:!bg-card [&>button]:!fill-muted-foreground',
+              '[&>button:hover]:!bg-accent',
             )}
           />
           <MiniMap
             pannable
             zoomable
             nodeBorderRadius={6}
-            bgColor="#13161c"
-            nodeColor="#5b6478"
-            maskColor="rgba(0,0,0,0.55)"
-            maskStrokeColor="#ffffff"
+            bgColor="hsl(var(--card))"
+            nodeColor="hsl(var(--muted-foreground))"
+            maskColor="hsl(var(--background) / 0.55)"
+            maskStrokeColor="hsl(var(--foreground))"
             maskStrokeWidth={1}
-            style={{ borderRadius: 8, overflow: 'hidden' }}
-            className="!border-[#2a2f3a]"
+            style={{ borderRadius: 8, overflow: 'hidden', borderColor: 'hsl(var(--border))' }}
           />
         </ReactFlow>
         {(matchIds || selected.nodes.length === 1 || selectedRel) && (
-          <div className="pointer-events-none absolute left-2 top-14 max-w-[70%] truncate rounded border border-[#2a2f3a] bg-[#13161c]/95 px-2 py-1 text-[11px] text-muted-foreground">
+          <div className="pointer-events-none absolute left-2 top-14 max-w-[70%] truncate rounded border border-border bg-card/95 px-2 py-1 text-[11px] text-muted-foreground">
             {matchIds && !selectedRel && selected.nodes.length !== 1
               ? `${shownCounts} matching table${shownCounts === 1 ? '' : 's'} — Enter to focus`
               : selectedRel

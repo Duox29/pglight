@@ -53,7 +53,7 @@ function ErdRelationEdgeInner({
         <EdgeLabelRenderer>
           <div
             style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
-            className="pointer-events-none absolute rounded border border-[#2a2f3a] bg-[#13161c] px-1 text-[10px] text-muted-foreground"
+            className="pointer-events-none absolute rounded border border-border bg-card px-1 text-[10px] text-muted-foreground"
           >
             {data.label}
           </div>
@@ -63,7 +63,7 @@ function ErdRelationEdgeInner({
         <EdgeLabelRenderer>
           <div
             style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
-            className="pointer-events-none absolute h-2 w-2 rounded-full bg-[#1f6feb]"
+            className="pointer-events-none absolute h-2 w-2 rounded-full bg-primary"
           />
         </EdgeLabelRenderer>
       )}

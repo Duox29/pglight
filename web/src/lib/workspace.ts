@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Activity, Database, FileClock, Keyboard, KeyRound, LayoutDashboard, List, Settings, SlidersHorizontal, Terminal, Zap } from 'lucide-react'
+import { Activity, Database, FileClock, Keyboard, KeyRound, LayoutDashboard, List, Palette, Settings, SlidersHorizontal, Terminal, Zap } from 'lucide-react'
 import type { SideView } from '@/types'
 
 export const WORKSPACE_VIEW_META: Record<SideView, { label: string; icon: LucideIcon }> = {
@@ -11,6 +11,7 @@ export const WORKSPACE_VIEW_META: Record<SideView, { label: string; icon: Lucide
   locks: { label: 'Locks', icon: SlidersHorizontal },
   stats: { label: 'Stats', icon: LayoutDashboard },
   connections: { label: 'Connections', icon: KeyRound },
+  appearance: { label: 'Appearance', icon: Palette },
   settings: { label: 'Settings', icon: Settings },
   shortcuts: { label: 'Shortcuts', icon: Keyboard },
   logs: { label: 'Logs', icon: Terminal },
@@ -19,7 +20,7 @@ export const WORKSPACE_VIEW_META: Record<SideView, { label: string; icon: Lucide
 
 export const WORKSPACE_VIEWS: SideView[] = [
   'history', 'snippets', 'aliases', 'server', 'activity', 'locks', 'stats',
-  'connections', 'settings', 'shortcuts', 'logs', 'quick-access',
+  'connections', 'appearance', 'settings', 'shortcuts', 'logs', 'quick-access',
 ]
 
 export const QUICK_ACCESS_VIEWS = WORKSPACE_VIEWS.filter((view) => view !== 'quick-access')

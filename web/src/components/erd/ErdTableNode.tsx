@@ -36,10 +36,10 @@ function ErdTableNodeInner({ data, selected }: NodeProps<ErdTableNodeT>) {
         <div
           style={{ width: ERD_NODE_WIDTH }}
           className={cn(
-            'overflow-hidden rounded-lg border bg-[#13161c] text-left shadow-sm transition-colors',
+            'overflow-hidden rounded-lg border bg-card text-left shadow-sm transition-colors',
             selected
-              ? 'border-[#1f6feb] shadow-[0_0_0_1px_#1f6feb]'
-              : 'border-[#2a2f3a] hover:border-[#3a4152] hover:shadow-lg',
+              ? 'border-primary shadow-[0_0_0_1px_hsl(var(--primary))]'
+              : 'border-border hover:border-primary/60 hover:shadow-lg',
             dimmed && 'opacity-40',
           )}
         >
@@ -60,7 +60,7 @@ function ErdTableNodeInner({ data, selected }: NodeProps<ErdTableNodeT>) {
             </span>
             <span className="truncate text-[10px] text-muted-foreground">{table.schema}</span>
           </button>
-          <div className="border-t border-[#232936]" />
+          <div className="border-t border-border" />
           {shown.length === 0 && (
             <div className="flex h-5 items-center px-2.5 text-[11px] italic text-muted-foreground">
               no columns
@@ -88,7 +88,7 @@ function ErdTableNodeInner({ data, selected }: NodeProps<ErdTableNodeT>) {
                     id={dstHandle(c.name)}
                     isConnectable={false}
                     style={{ top: ROW_H / 2 }}
-                    className="!h-2 !w-2 !border !border-[#0b0d11] !bg-[#1f6feb]"
+                    className="!h-2 !w-2 !border !border-background !bg-primary"
                   />
                   <Handle
                     type="source"
@@ -96,7 +96,7 @@ function ErdTableNodeInner({ data, selected }: NodeProps<ErdTableNodeT>) {
                     id={srcHandle(c.name)}
                     isConnectable={false}
                     style={{ top: ROW_H / 2 }}
-                    className="!h-2 !w-2 !border !border-[#0b0d11] !bg-[#1f6feb]"
+                    className="!h-2 !w-2 !border !border-background !bg-primary"
                   />
                 </>
               )}

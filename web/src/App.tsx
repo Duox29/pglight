@@ -25,6 +25,7 @@ import type { SideView } from './types'
 import { formatSqlText } from './lib/format'
 import { DEFAULT_QUICK_ACCESS, QUICK_ACCESS_VIEWS } from './lib/workspace'
 import { useAppPreference } from './lib/storage'
+import { useAppearance } from './hooks/useAppearance'
 import { useCommand, useCommandRegistration } from './shortcuts/ShortcutProvider'
 
 /* Thin shell: hook composition + layout. All domain logic lives in hooks/*
@@ -37,6 +38,7 @@ export default function App() {
   const [dlg, setDlg] = useState<PendingDialog | null>(null)
   const dialogs = useMemo(() => createDialogs(setDlg), [])
   const [quickAccess, setQuickAccess] = useAppPreference<SideView[]>('workspace.quickAccess', DEFAULT_QUICK_ACCESS)
+  const { appearance } = useAppearance()
   const commands = useCommand()
   const { paletteOpen, setPaletteOpen } = commands
 
@@ -177,6 +179,7 @@ export default function App() {
   useCommandRegistration('workspace.history', () => tabsApi.openWorkspace('history'))
   useCommandRegistration('workspace.snippets', () => tabsApi.openWorkspace('snippets'))
   useCommandRegistration('workspace.dashboard', () => tabsApi.openWorkspace('server'))
+  useCommandRegistration('workspace.appearance', () => tabsApi.openWorkspace('appearance'))
   useCommandRegistration('workspace.settings', () => tabsApi.openWorkspace('settings'))
   useCommandRegistration('workspace.shortcuts', () => tabsApi.openWorkspace('shortcuts'))
   useCommandRegistration('workspace.docs', tabsApi.openDocsTab)
@@ -262,22 +265,22 @@ export default function App() {
       <FloatingScrollbars />
       <DialogHost dlg={dlg} />
       <Toaster
-        theme="dark"
+        theme={appearance.mode}
         position="bottom-right"
         gap={6}
         closeButton
         icons={{
-          success: <Check className="h-3.5 w-3.5 text-white" />,
+          success: <Check className="h-3.5 w-3.5 text-popover-foreground" />,
           error: null,
-          info: <Info className="h-3.5 w-3.5 text-white" />,
-          loading: <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />,
+          info: <Info className="h-3.5 w-3.5 text-popover-foreground" />,
+          loading: <Loader2 className="h-3.5 w-3.5 animate-spin text-popover-foreground" />,
           close: <X className="h-3 w-3" />,
         }}
         toastOptions={{
           style: {
-            background: '#0a0a0a',
-            color: '#fafafa',
-            border: '1px solid #262626',
+            background: 'hsl(var(--popover))',
+            color: 'hsl(var(--popover-foreground))',
+            border: '1px solid hsl(var(--border))',
             borderRadius: '6px',
             boxShadow: 'none',
             fontSize: '12.5px',
