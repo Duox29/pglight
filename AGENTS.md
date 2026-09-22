@@ -47,6 +47,9 @@ Gate before finishing any change: `./scripts/check.sh` (gofmt, vet, test, build,
   fails with `ERR_REQUIRE_ESM`). Frontend
 change ⇒ `cd web && npm run build` so the local `dist/` stays fresh (`dist/`
 is git-ignored: rebuild it, never commit it).
+- **Frontend test layout:** all Vitest tests (`*.test.*`/`*.spec.*`) live in
+  `web/src/test/`. Keep shared test setup/helpers there as well; do not place
+  test files beside production components, hooks, libraries, or shortcuts.
 
 ## 2. Backend rules (Go)
 

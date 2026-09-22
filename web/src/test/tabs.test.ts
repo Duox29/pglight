@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { erdConnectionIdFor, isWorkspaceView, pkOf, slimTab, splitOptions } from './tabs'
+import { erdConnectionIdFor, isWorkspaceView, pkOf, slimTab, splitOptions } from '../lib/tabs'
 import type { SavedConnection, SessionInfo, Tab, TableTabT } from '../types'
 
 const q = (id: string): Tab => ({

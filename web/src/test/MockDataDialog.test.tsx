@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { renderUi } from '../test/utils'
-import { MockDataDialog } from './MockDataDialog'
+import { renderUi } from './utils'
+import { MockDataDialog } from '../components/MockDataDialog'
 
 const meta = {
   columns: [

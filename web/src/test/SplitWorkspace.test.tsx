@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen } from '@testing-library/react'
-import { renderUi } from '../test/utils'
-import { SplitWorkspace } from './SplitWorkspace'
+import { renderUi } from './utils'
+import { SplitWorkspace } from '../components/SplitWorkspace'
 import type { Tab } from '../types'
 
 const tab = (id: string, title: string): Tab => ({

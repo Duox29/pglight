@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CommandProvider } from '@/shortcuts/ShortcutProvider'
-import { KeyboardShortcutsPanel } from './KeyboardShortcutsPanel'
+import { KeyboardShortcutsPanel } from '../components/KeyboardShortcutsPanel'
 
 afterEach(() => {
   const fetchMock = vi.mocked(globalThis.fetch)

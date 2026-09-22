@@ -33,13 +33,18 @@ export function SearchPalette(props: {
   onOpenTable: (schema: string, table: string) => void
 }) {
   const [term, setTerm] = useState('')
-  const [dbHits, setDbHits] = useState<Hit[]>([])
+  const [dbResults, setDbResults] = useState<{ session: string; hits: Hit[] }>({ session: '', hits: [] })
   const [selected, setSelected] = useState(0)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const seq = useRef(0)
   const commands = useCommand()
 
   useEffect(() => () => clearTimeout(timer.current), [])
+
+  useEffect(() => {
+    ++seq.current
+    clearTimeout(timer.current)
+  }, [props.session])
 
   const commandHits = useMemo<CommandHit[]>(() => {
     const needle = term.trim().toLowerCase()
@@ -50,27 +55,27 @@ export function SearchPalette(props: {
 
   const hits = useMemo<PaletteHit[]>(() => [
     ...commandHits,
-    ...dbHits.map((hit) => ({ type: 'database' as const, hit })),
-  ], [commandHits, dbHits])
+    ...(dbResults.session === props.session ? dbResults.hits : []).map((hit) => ({ type: 'database' as const, hit })),
+  ], [commandHits, dbResults, props.session])
 
   const onChange = (value: string) => {
+    const n = ++seq.current
     setTerm(value)
     setSelected(0)
     clearTimeout(timer.current)
     if (value.trim().length < 2 || !props.session) {
-      setDbHits([])
+      setDbResults({ session: props.session, hits: [] })
       return
     }
-    const n = ++seq.current
     const query = value.trim()
     const sid = props.session
     timer.current = setTimeout(async () => {
       try {
         const response = await api<Hit[] | { error?: string }>(q(sid, `/api/search?q=${encodeURIComponent(query)}`))
         if (seq.current !== n) return
-        setDbHits(Array.isArray(response) ? response.filter((hit) => hit.kind !== 'function') : [])
+        setDbResults({ session: sid, hits: Array.isArray(response) ? response.filter((hit) => hit.kind !== 'function') : [] })
       } catch {
-        if (seq.current === n) setDbHits([])
+        if (seq.current === n) setDbResults({ session: sid, hits: [] })
       }
     }, 200)
   }

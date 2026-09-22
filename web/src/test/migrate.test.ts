@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { migrateShortcutSettings } from './migrate'
+import { migrateShortcutSettings } from '../shortcuts/migrate'
 
 describe('shortcut settings migration', () => {
   it('renames the legacy search command and caps bindings', () => {

@@ -35,6 +35,10 @@ import { useAppearance } from '@/hooks/useAppearance'
 type FlowNode = ErdTableNodeT
 type FlowEdge = ErdRelationEdgeT
 
+export function erdCanvasKey(tab: Pick<ErdTabT, 'sessionId' | 'schema'>, data: ErdDataDto | null) {
+  return `${tab.sessionId}:${tab.schema}:${data?.nodes?.length ?? -1}:${data?.edges?.length ?? -1}:${(data?.nodes ?? []).join(',')}`
+}
+
 const nodeTypes = { erdTable: ErdTableNode }
 const edgeTypes = { erdRelation: ErdRelationEdge }
 const FIT = { padding: 0.18, maxZoom: 1 } as const
@@ -447,10 +451,10 @@ export function ErdView(props: {
   onOpenTable: (schema: string, table: string) => void
 }) {
   // Provider per tab so fitView/selection hooks are scoped. Inner canvas is
-  // keyed by schema + payload shape so a reload/schema switch constructs fresh
+  // keyed by session + schema + payload shape so a reload/schema switch constructs fresh
   // flow state — no reset effects, StrictMode-safe.
   const data = props.tab.data as ErdDataDto | null
-  const innerKey = `${props.tab.schema}:${data?.nodes?.length ?? -1}:${data?.edges?.length ?? -1}:${(data?.nodes ?? []).join(',')}`
+  const innerKey = erdCanvasKey(props.tab, data)
   return (
     <ReactFlowProvider>
       <div className="h-full min-h-[420px]">

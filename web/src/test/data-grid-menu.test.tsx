@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen } from '@testing-library/react'
-import { renderUi } from '../../test/utils'
-import { DataGrid } from './data-grid'
+import { renderUi } from './utils'
+import { DataGrid } from '../components/ui/data-grid'
 
 // NOTE: jsdom + Radix ContextMenu only opens the first menu per test file, so
 // this file holds exactly one menu-opening test (selection-only tests live in

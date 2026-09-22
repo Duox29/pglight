@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { renderUi } from '../../test/utils'
-import { SearchSelect, type SearchSelectOption } from './search-select'
+import { renderUi } from './utils'
+import { SearchSelect, type SearchSelectOption } from '../components/ui/search-select'
 
 const options: SearchSelectOption[] = [
   { value: '0', label: 'public.companies.id' },

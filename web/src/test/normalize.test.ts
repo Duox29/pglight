@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { matchesShortcut } from './matcher'
-import { normalizeShortcut, shortcutFromEvent, toCodeMirrorKey } from './normalize'
-import { isReservedShortcut } from './reserved'
+import { matchesShortcut } from '../shortcuts/matcher'
+import { normalizeShortcut, shortcutFromEvent, toCodeMirrorKey } from '../shortcuts/normalize'
+import { isReservedShortcut } from '../shortcuts/reserved'
 
 const originalPlatform = navigator.platform
 

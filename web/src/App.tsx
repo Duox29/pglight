@@ -371,6 +371,7 @@ export default function App() {
             onCloseSplit={split.closeSplit}
             renderPane={(t) => (
               <TabContent
+                key={t?.id ?? 'empty'}
                 tab={t}
                 connected={connected}
                 running={running}

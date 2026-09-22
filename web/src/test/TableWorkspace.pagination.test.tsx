@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
-import { renderUi } from '../test/utils'
-import { TableWorkspace } from './TableWorkspace'
-import type { DialogsApi } from './dialogs'
+import { renderUi } from './utils'
+import { TableWorkspace } from '../components/TableWorkspace'
+import type { DialogsApi } from '../components/dialogs'
 import type { TableTabT } from '@/types'
 
 function tab(result: TableTabT['result']): TableTabT {

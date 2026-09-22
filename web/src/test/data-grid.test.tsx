@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fireEvent, screen } from '@testing-library/react'
-import { renderUi } from '../../test/utils'
-import { DataGrid } from './data-grid'
+import { renderUi } from './utils'
+import { DataGrid } from '../components/ui/data-grid'
 
 const data = {
   columns: ['id', 'name'],

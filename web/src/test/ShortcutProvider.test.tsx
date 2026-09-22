@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CommandProvider, useCommand, useCommandRegistration } from './ShortcutProvider'
+import { CommandProvider, useCommand, useCommandRegistration } from '../shortcuts/ShortcutProvider'
 
 function Harness({ onRun }: { onRun: () => void }) {
   const command = useCommand()

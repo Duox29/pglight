@@ -425,13 +425,13 @@ Resolved findings:
 
 - **[P1] Table pagination ignored `has_more`.** `TableWorkspace` now honors the
   backend signal, with regression coverage in
-  `web/src/components/TableWorkspace.pagination.test.tsx`.
+  `web/src/test/TableWorkspace.pagination.test.tsx`.
 - **[P1] Table loads had a stale-response race.** Per-tab page and metadata
   request sequences now discard late responses, covered by
-  `web/src/hooks/useTableOps.race.test.ts`.
+  `web/src/test/useTableOps.race.test.ts`.
 - **[P1] Duplicate result rows shared a selection key.** Grid selection now
   includes the row index when no primary key is available, covered by
-  `web/src/hooks/useGridSelection.test.ts`.
+  `web/src/test/useGridSelection.test.ts`.
 - **[P2] Some query-stream failures broke the response contract.** `rows.Values()`
   and `rows.Err()` failures now include `in_txn`, covered by
   `internal/api/query_contract_test.go`.
@@ -475,7 +475,8 @@ badge + searchable source), `ConnectionBar` (header wiring), `DataGrid`
 (render + row menu), `TabStrip`/`SplitWorkspace`/`useSplit` (split UX),
 `useGridSelection` (single/toggle/range keys, refresh reset),
 `useTableOps.race` + `TableWorkspace.pagination` (`has_more`, stale-response
-token), and `lib/tabs` (slim/restore).
+token), `TabContent`/`SearchPalette`/`ErdView` race regressions, and `lib/tabs`
+(slim/restore). All frontend tests live under `web/src/test/`.
 
 ```sh
 go test -count=1 ./test/        # full suite

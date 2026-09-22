@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { toast } from 'sonner'
-import { useSplit } from './useSplit'
+import { useSplit } from '../hooks/useSplit'
 import type { Tab } from '../types'
 
 vi.mock('sonner', () => ({

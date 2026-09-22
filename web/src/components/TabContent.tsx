@@ -21,6 +21,18 @@ import type { HistoryEntry, SideView, Snippet, Tab } from '../types'
 import type { ConnFields } from './ConnectionBar'
 import type { SavedConnection, SessionInfo } from '../types'
 
+const erdRequestSeq = new Map<string, number>()
+
+function nextErdRequest(tabId: string) {
+  const token = (erdRequestSeq.get(tabId) ?? 0) + 1
+  erdRequestSeq.set(tabId, token)
+  return token
+}
+
+function isCurrentErdRequest(tabId: string, token: number) {
+  return erdRequestSeq.get(tabId) === token
+}
+
 export interface TabContentProps {
   tab: Tab | null
   connected: boolean
@@ -72,7 +84,7 @@ export interface TabContentProps {
    pure delegation from one tab to its feature view. Owns no state; every
    action arrives via props as hook APIs bound in App. Feature views stay
    presentational and never import each other. */
-export function TabContent(p: TabContentProps) {
+function TabContentInner(p: TabContentProps) {
   const { tab } = p
   if (tab == null) {
     return <div className="text-muted-foreground">{p.connected ? 'Open a table or run a query.' : 'Connect to a database to begin.'}</div>
@@ -301,26 +313,32 @@ export function TabContent(p: TabContentProps) {
         connectionId={erdConnectionIdFor(p.sessions, p.savedConnections, tab)}
         schemas={p.explorer.schemas.map((s) => s.schema)}
         onSchema={(s) => {
+          const token = nextErdRequest(tab.id)
           p.updateTab(tab.id, (x) => (x.kind === 'erd' ? { ...x, schema: s, title: `ERD ${s}`, data: null } : x))
           api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(tab.sessionId, `/api/erd?schema=${encodeURIComponent(s)}`))
             .then((j) => {
+              if (!isCurrentErdRequest(tab.id, token)) return
               p.updateTab(tab.id, (x) => (x.kind === 'erd' ? { ...x, data: j } : x))
             })
             .catch((e: unknown) => {
+              if (!isCurrentErdRequest(tab.id, token)) return
               p.updateTab(tab.id, (x) => (x.kind === 'erd' ? { ...x, data: null } : x))
               toast.error(e instanceof Error ? e.message : String(e))
             })
         }}
-        onReload={() =>
-          api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(tab.sessionId, `/api/erd?schema=${encodeURIComponent(tab.schema)}`))
+        onReload={() => {
+          const token = nextErdRequest(tab.id)
+          void api<NonNullable<Extract<Tab, { kind: 'erd' }>['data']>>(q(tab.sessionId, `/api/erd?schema=${encodeURIComponent(tab.schema)}`))
             .then((j) => {
+              if (!isCurrentErdRequest(tab.id, token)) return
               p.updateTab(tab.id, (x) => (x.kind === 'erd' ? { ...x, data: j } : x))
             })
             .catch((e: unknown) => {
+              if (!isCurrentErdRequest(tab.id, token)) return
               p.updateTab(tab.id, (x) => (x.kind === 'erd' ? { ...x, data: null } : x))
               toast.error(e instanceof Error ? e.message : String(e))
             })
-        }
+        }}
         onOpenTable={(schema, table) => p.openTable(schema, table, tab.sessionId)}
       />
     )
@@ -346,4 +364,9 @@ export function TabContent(p: TabContentProps) {
     )
   }
   return <DocsView />
+}
+
+/** Remount tab-local feature state when the pane switches to another tab. */
+export function TabContent(p: TabContentProps) {
+  return <TabContentInner key={p.tab?.id ?? 'empty'} {...p} />
 }

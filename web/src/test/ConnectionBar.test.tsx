@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { renderUi } from '../test/utils'
-import { ConnectionBar } from './ConnectionBar'
+import { renderUi } from './utils'
+import { ConnectionBar } from '../components/ConnectionBar'
 import type { SideView } from '@/types'
 
 function props(over: Partial<React.ComponentProps<typeof ConnectionBar>> = {}) {

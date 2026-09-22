@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { useGridSelection } from './useGridSelection'
+import { useGridSelection } from '../hooks/useGridSelection'
 
 describe('useGridSelection duplicate rows', () => {
   it('keeps identical rows independently selectable by index', () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen } from '@testing-library/react'
-import { renderUi } from '../test/utils'
-import { TabStrip } from './TabStrip'
+import { renderUi } from './utils'
+import { TabStrip } from '../components/TabStrip'
 import type { SessionInfo, Tab } from '../types'
 
 // NOTE: jsdom + Radix ContextMenu only opens the first menu per test file, so

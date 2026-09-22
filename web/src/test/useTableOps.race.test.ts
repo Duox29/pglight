@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { useTableOps } from './useTableOps'
+import { useTableOps } from '../hooks/useTableOps'
 import type { QueryResult } from '../lib/api'
 import type { Tab } from '../types'
 

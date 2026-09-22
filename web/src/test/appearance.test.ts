@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { applyAppearance, DEFAULT_APPEARANCE, normalizeAppearance, presetAppearance } from './appearance'
+import { applyAppearance, DEFAULT_APPEARANCE, normalizeAppearance, presetAppearance } from '../lib/appearance'
 
 describe('appearance settings', () => {
   beforeEach(() => {

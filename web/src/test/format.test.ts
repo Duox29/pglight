@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatSqlText } from './format'
+import { formatSqlText } from '../lib/format'
 
 describe('formatSqlText', () => {
   it('preserves the line ending after a line comment', () => {
