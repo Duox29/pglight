@@ -268,7 +268,7 @@ const SECTIONS: Section[] = [
           <Ul>
             <Li><K>Run</K> starts execution. The square button cancels the running query of that tab. With several concurrent runs, use the Workspace Activity view to cancel a specific backend.</Li>
             <Li>The transaction cluster of that tab session, plus the <K>open transaction</K> or <K>no transaction</K> badge. See Transactions.</Li>
-            <Li><K>Explain</K> runs <K>EXPLAIN ANALYZE</K> with buffers. It explains the selected SQL, or the whole script when nothing is selected, and the text plan includes timing data.</Li>
+            <Li><K>Explain</K> runs read-only <K>EXPLAIN (FORMAT JSON)</K>. It never executes the selected SQL; use the query editor explicitly for <K>EXPLAIN ANALYZE</K>.</Li>
             <Li>The limit picker offers <K>200 rows, 1000 rows,</K> and <K>no limit</K>. The <K>Export</K> menu of the first result offers <K>CSV, JSON,</K> and <K>INSERTs</K>.</Li>
             <Li><K>Clear</K> removes results, plans, and errors. The meta line shows row count and duration.</Li>
           </Ul>
@@ -298,7 +298,7 @@ const SECTIONS: Section[] = [
           <Ul>
             <Li><K>Run</K> bắt đầu chạy. Nút vuông hủy query đang chạy của tab đó. Với nhiều query chạy đồng thời, dùng view Activity trong Workspace để hủy một backend cụ thể.</Li>
             <Li>Cụm transaction của session gắn với tab, kèm badge <K>open transaction</K> hoặc <K>no transaction</K>. Xem mục Transactions.</Li>
-            <Li><K>Explain</K> chạy <K>EXPLAIN ANALYZE</K> kèm buffers. Nó explain phần SQL đang bôi đen, hoặc toàn bộ script nếu không chọn gì; text plan gồm timing.</Li>
+            <Li><K>Explain</K> chạy <K>EXPLAIN (FORMAT JSON)</K> chỉ đọc. Nó không thực thi SQL đang chọn; muốn dùng <K>EXPLAIN ANALYZE</K> thì chạy rõ ràng trong query editor.</Li>
             <Li>Ô limit gồm <K>200 rows, 1000 rows</K> và <K>no limit</K>. Menu <K>Export</K> của result đầu gồm <K>CSV, JSON</K> và <K>INSERTs</K>.</Li>
             <Li><K>Clear</K> xóa results, plan và lỗi. Dòng meta hiển thị số dòng và thời gian chạy.</Li>
           </Ul>
@@ -902,7 +902,7 @@ const SECTIONS: Section[] = [
           </Ul>
           <H>Security and privacy</H>
           <Ul>
-            <Li><K>Allow LAN access</K> applies immediately and lets other devices on the same network send requests to pglight. Authentication is not enabled yet, so keep it off on untrusted networks.</Li>
+            <Li><K>Allow LAN access</K> applies immediately. Remote peers must use the per-process bootstrap token shown in the authenticated browser URL; the token is exchanged for an HttpOnly cookie. Keep LAN access off on untrusted networks and use HTTPS through a reverse proxy when confidentiality is required.</Li>
             <Li><K>Persist query history</K> controls server-side history writes. <K>Restore result snapshots</K> keeps up to 50 rows per query tab across reloads without re-running SQL. Retention is 1–365 days.</Li>
             <Li><K>Clear history</K> removes server history. <K>Clear all local data</K> removes saved tabs, snapshots, preferences, and history, then reloads while keeping live sessions connected.</Li>
           </Ul>
@@ -920,7 +920,7 @@ const SECTIONS: Section[] = [
           </Ul>
           <H>Bảo mật và riêng tư</H>
           <Ul>
-            <Li><K>Allow LAN access</K> áp dụng ngay và cho phép thiết bị cùng mạng gửi request đến pglight. Chưa có authentication, vì vậy nên tắt khi dùng mạng không tin cậy.</Li>
+            <Li><K>Allow LAN access</K> áp dụng ngay. Peer từ xa phải dùng bootstrap token của process trong browser URL đã xác thực; token được đổi thành cookie HttpOnly. Không bật LAN trên mạng không tin cậy; nếu cần bảo mật đường truyền, dùng HTTPS qua reverse proxy.</Li>
             <Li><K>Persist query history</K> điều khiển việc ghi history phía server. <K>Restore result snapshots</K> giữ tối đa 50 dòng mỗi query tab sau khi reload mà không chạy lại SQL. Retention từ 1–365 ngày.</Li>
             <Li><K>Clear history</K> xóa history phía server. <K>Clear all local data</K> xóa tabs, snapshots, preferences và history đã lưu rồi reload, nhưng giữ các session đang kết nối.</Li>
           </Ul>
@@ -1027,7 +1027,7 @@ const SECTIONS: Section[] = [
           <Ul>
             <Li>The server refuses UPDATE and DELETE without a WHERE clause. Cell edits require a primary key. NULL primary key values block the edit.</Li>
             <Li>Maintenance permits <K>vacuum, vacuum_full, analyze,</K> and <K>reindex</K> only, and refuses them inside an open transaction.</Li>
-            <Li>Import is capped at 20,000 rows in batches of 500 and runs atomically. Identifiers are sanitized with <K>pgx.Identifier</K>. Values use <K>$n</K> parameters. The <K>/api/table-data</K> filter and order form the one exception, with identifier sanitize plus a sort-direction list.</Li>
+            <Li>Import is capped at 20,000 rows in batches of 500 and runs atomically. Identifiers are sanitized with <K>pgx.Identifier</K>, values use <K>$n</K> parameters, and table filters accept only an allow-listed column/operator/value form joined with <K>AND</K>.</Li>
             <Li>Result sets are capped at 1,000 rows. Explorer queries use LIMIT. Contexts last 5-30 seconds, 120 seconds for maintenance and import.</Li>
             <Li>Success responses keep existing shapes and only gain fields. Errors use <K>{'{error}'}</K>. Query-like responses include <K>in_txn</K>.</Li>
           </Ul>
@@ -1038,7 +1038,7 @@ const SECTIONS: Section[] = [
           <Ul>
             <Li>Server từ chối UPDATE và DELETE không có mệnh đề WHERE. Sửa cell cần primary key. Giá trị primary key NULL sẽ chặn sửa.</Li>
             <Li>Maintenance chỉ cho <K>vacuum, vacuum_full, analyze</K> và <K>reindex</K>, và từ chối trong transaction đang mở.</Li>
-            <Li>Import giới hạn 20.000 dòng theo batch 500 và chạy nguyên tử. Identifier được sanitize bằng <K>pgx.Identifier</K>. Giá trị dùng tham số <K>$n</K>. Filter và order của <K>/api/table-data</K> là ngoại lệ duy nhất, với sanitize identifier kèm danh sách hướng sort.</Li>
+            <Li>Import giới hạn 20.000 dòng theo batch 500 và chạy nguyên tử. Identifier được sanitize bằng <K>pgx.Identifier</K>, giá trị dùng tham số <K>$n</K>, và filter bảng chỉ nhận dạng column/operator/value được allow-list, nối bằng <K>AND</K>.</Li>
             <Li>Result sets giới hạn 1.000 dòng. Query explorer dùng LIMIT. Context 5-30 giây, 120 giây cho maintenance và import.</Li>
             <Li>Response thành công giữ shape hiện có và chỉ thêm field. Lỗi dùng <K>{'{error}'}</K>. Response dạng query gồm <K>in_txn</K>.</Li>
           </Ul>

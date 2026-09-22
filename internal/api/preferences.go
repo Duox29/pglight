@@ -122,7 +122,7 @@ func (h *Handler) Preferences(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"preferences": data})
 	case http.MethodPost:
 		var patch map[string]any
-		if json.NewDecoder(r.Body).Decode(&patch) != nil {
+		if decodeBody(r, &patch) != nil {
 			writeJSON(w, 400, map[string]string{"error": "invalid json"})
 			return
 		}

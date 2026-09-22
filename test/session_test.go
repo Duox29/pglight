@@ -2,6 +2,7 @@ package test
 
 import (
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -112,13 +113,13 @@ func TestSessionsHappy(t *testing.T) {
 
 func TestDisconnectHappyAndEdge(t *testing.T) {
 	h, sid := newHandler(t)
-	code, body := callGET(t, h.Disconnect, withSID(sid, "/api/disconnect"))
+	code, body := callMethod(t, h.Disconnect, http.MethodDelete, withSID(sid, "/api/disconnect"), "")
 	requireStatus(t, body, code, 200)
 	if h.Mgr.Alive(sid) {
 		t.Fatal("session still alive after disconnect")
 	}
 	// edge: disconnecting an unknown session is still ok:true (idempotent)
-	code, body = callGET(t, h.Disconnect, "/api/disconnect?session_id=ghost-xyz")
+	code, body = callMethod(t, h.Disconnect, http.MethodDelete, "/api/disconnect?session_id=ghost-xyz", "")
 	requireStatus(t, body, code, 200)
 	if !strings.Contains(body, `"ok":true`) {
 		t.Fatalf("expected ok:true, got %s", body)

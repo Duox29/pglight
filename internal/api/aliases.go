@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"regexp"
 	"sort"
@@ -70,7 +69,7 @@ func (h *Handler) Aliases(w http.ResponseWriter, r *http.Request) {
 			Trigger   string `json:"trigger"`
 			Expansion string `json:"expansion"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := decodeBody(r, &req); err != nil {
 			writeJSON(w, 400, map[string]string{"error": "invalid json"})
 			return
 		}

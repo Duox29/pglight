@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -167,7 +166,7 @@ func (h *Handler) Vault(w http.ResponseWriter, r *http.Request) {
 			CurrentPassword string `json:"current_password"`
 			NewPassword     string `json:"new_password"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := decodeBody(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 			return
 		}

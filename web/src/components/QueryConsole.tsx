@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Play, FileDown, RefreshCw, Sparkles, Square, Star, Trash2, Wand2, LocateFixed } from 'lucide-react'
 import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
@@ -40,7 +40,15 @@ interface Props {
 export function QueryConsole(p: Props) {
   const { tab: t } = p
   const commands = useCommand()
-  const [sort, setSort] = useState<{ column: number; direction: 'asc' | 'desc' } | null>(null)
+  type SortState = { column: number; direction: 'asc' | 'desc' }
+  const [sortByResult, setSortByResult] = useState<Record<number, SortState>>({})
+  const sortedRows = useMemo(
+    () => (t.results ?? []).map((res, index) => {
+      const sort = sortByResult[index]
+      return sort == null ? res.rows : sortGridRows(res.rows, sort, res.types)
+    }),
+    [sortByResult, t.results],
+  )
   const editorHandle = useRef<SqlEditorHandle | null>(null)
   // Error line: jump caret + blink 3×, then keep a steady tint until the
   // next run/clear/tab switch. flashTick re-fires the blink when the same
@@ -123,7 +131,7 @@ export function QueryConsole(p: Props) {
           onTxn={p.onTxn}
         />
         {/* QUERY: plan + shape the statement */}
-        <Tip content="Explain Analyze the selected SQL, or the whole script when nothing is selected">
+        <Tip content="Read-only EXPLAIN for the selected SQL, or the whole script when nothing is selected">
           <span className="inline-flex">
             <Button size="sm" variant="ghost" onClick={explainSelected} disabled={p.running}>
               Explain
@@ -224,10 +232,18 @@ export function QueryConsole(p: Props) {
                 ) : (
                   <>
                     <DataGrid
-                      data={{ columns: res.columns, types: res.types, rows: sort == null ? res.rows : sortGridRows(res.rows, sort, res.types) }}
-                      sort={sort}
+                      data={{ columns: res.columns, types: res.types, rows: sortedRows[ri] ?? res.rows }}
+                      sort={sortByResult[ri] ?? null}
                       onSort={(i) => {
-                        setSort((prev) => (prev?.column === i ? { column: i, direction: prev.direction === 'asc' ? 'desc' : 'asc' } : { column: i, direction: 'asc' }))
+                        setSortByResult((prev) => {
+                          const current = prev[ri]
+                          return {
+                            ...prev,
+                            [ri]: current?.column === i
+                              ? { column: i, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+                              : { column: i, direction: 'asc' },
+                          }
+                        })
                       }}
                       selectable
                     />

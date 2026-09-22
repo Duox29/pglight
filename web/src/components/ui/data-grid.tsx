@@ -79,8 +79,14 @@ export function compareGridValues(a: unknown, b: unknown, type?: string): number
 
 /** Sort grid rows by column using the column's Postgres type. NULLs always last. */
 export function sortGridRows(rows: unknown[][], sort: { column: number; direction: 'asc' | 'desc' }, types?: string[]): unknown[][] {
-  const cmp = (a: unknown[], b: unknown[]) => compareGridValues(a[sort.column], b[sort.column], types?.[sort.column])
-  return [...rows].sort((a, b) => (sort.direction === 'asc' ? cmp(a, b) : -cmp(a, b)))
+  const cmp = (a: unknown[], b: unknown[]) => {
+    const av = a[sort.column]
+    const bv = b[sort.column]
+    if (av == null || bv == null) return compareGridValues(av, bv, types?.[sort.column])
+    const result = compareGridValues(av, bv, types?.[sort.column])
+    return sort.direction === 'asc' ? result : -result
+  }
+  return [...rows].sort(cmp)
 }
 /** Prebuilt result grid: sticky header, truncated cells, NULL styling. */
 export function DataGrid({

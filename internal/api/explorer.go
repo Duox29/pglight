@@ -607,7 +607,7 @@ func (h *Handler) ERD(w http.ResponseWriter, r *http.Request) {
 			Layout       any    `json:"layout"`
 			Viewport     any    `json:"viewport"`
 		}
-		if json.NewDecoder(r.Body).Decode(&req) != nil {
+		if decodeBody(r, &req) != nil {
 			writeJSON(w, 400, map[string]string{"error": "invalid json"})
 			return
 		}

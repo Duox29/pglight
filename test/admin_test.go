@@ -2,6 +2,7 @@ package test
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -190,13 +191,13 @@ func TestMaintenance(t *testing.T) {
 func TestCancel(t *testing.T) {
 	h, sid := newHandler(t)
 	// happy: cancelling a bogus pid returns ok:false but 200
-	code, body := callGET(t, h.Cancel, withSID(sid, "/api/cancel?pid=0"))
+	code, body := callMethod(t, h.Cancel, http.MethodPost, withSID(sid, "/api/cancel?pid=0"), "")
 	requireStatus(t, body, code, 200)
 	requireDeep(t, body, "cancel", decodeObj(t, body), map[string]any{"ok": false})
 	// edge: kill=1 variant also 200
-	code, body = callGET(t, h.Cancel, withSID(sid, "/api/cancel?pid=0&kill=1"))
+	code, body = callMethod(t, h.Cancel, http.MethodPost, withSID(sid, "/api/cancel?pid=0&kill=1"), "")
 	requireStatus(t, body, code, 200)
 	// fail: no session
-	code, body = callGET(t, h.Cancel, "/api/cancel?pid=0")
+	code, body = callMethod(t, h.Cancel, http.MethodPost, "/api/cancel?pid=0", "")
 	requireErrContains(t, body, code, 401, "not connected")
 }

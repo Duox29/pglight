@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -137,7 +136,7 @@ func (h *Handler) Maintenance(w http.ResponseWriter, r *http.Request) {
 		Table   string `json:"table"`
 		Op      string `json:"op"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBody(r, &req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "invalid json"})
 		return
 	}
@@ -186,6 +185,10 @@ func (h *Handler) Maintenance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	q, _, ok := h.q(r)
 	if !ok {
 		writeJSON(w, 401, map[string]string{"error": "not connected"})

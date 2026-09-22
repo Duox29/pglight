@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -25,7 +24,7 @@ func (h *Handler) Snippets(w http.ResponseWriter, r *http.Request) {
 			Name string `json:"name"`
 			SQL  string `json:"sql"`
 		}
-		if json.NewDecoder(r.Body).Decode(&req) != nil {
+		if decodeBody(r, &req) != nil {
 			writeJSON(w, 400, map[string]string{"error": "invalid json"})
 			return
 		}
@@ -73,7 +72,7 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 			MS  int64  `json:"ms"`
 			N   int64  `json:"n"`
 		}
-		if json.NewDecoder(r.Body).Decode(&req) != nil {
+		if decodeBody(r, &req) != nil {
 			writeJSON(w, 400, map[string]string{"error": "invalid json"})
 			return
 		}

@@ -197,18 +197,9 @@ func TestExplainHappy(t *testing.T) {
 	p0, _ := plans[0].(map[string]any)
 	plan, _ := p0["Plan"].(map[string]any)
 	requireDeep(t, body, "Plan.Node Type", plan["Node Type"], "Result")
-	code, body = callPOST(t, h.Explain, "/api/explain",
-		fmt.Sprintf(`{"session_id":%q,"sql":"SELECT 1","analyze":true}`, sid))
-	requireStatus(t, body, code, 200)
-	if err := json.Unmarshal([]byte(body), &plans); err != nil || len(plans) != 1 {
-		t.Fatalf("explain analyze must return 1-element plan array: %s", body)
-	}
-	p0, _ = plans[0].(map[string]any)
-	plan, _ = p0["Plan"].(map[string]any)
-	requireDeep(t, body, "analyze.Actual Rows", plan["Actual Rows"], 1)
-	// Execution Time sits next to Plan, not inside it (PG JSON shape)
-	if _, ok := p0["Execution Time"]; !ok {
-		t.Fatalf("analyze lacks Execution Time: %s", body)
+	// Explain is deliberately read-only now: execution fields must be absent.
+	if _, ok := p0["Execution Time"]; ok {
+		t.Fatalf("read-only explain unexpectedly executed: %s", body)
 	}
 }
 

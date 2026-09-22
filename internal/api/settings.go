@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -11,6 +12,16 @@ import (
 
 	"pglight/internal/logging"
 )
+
+// NewAccessToken creates the per-process credential used for authenticated
+// remote LAN access. The token is intentionally not persisted.
+func NewAccessToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate LAN access token: %w", err)
+	}
+	return fmt.Sprintf("%x", b), nil
+}
 
 const ServerSettingsPath = "data/server.json"
 
@@ -89,12 +100,49 @@ func (h *Handler) setServerConfig(cfg ServerSettings) {
 // restart; when disabled, non-loopback peers receive a 403 response.
 func (h *Handler) LANAccess(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !h.currentServerConfig().AllowLANAccess && !isLoopbackPeer(r.RemoteAddr) {
+		// The bootstrap token is carried once in the URL; keep it out of
+		// referrers and caches while the SPA exchanges it for a cookie.
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		remote := !isLoopbackPeer(r.RemoteAddr)
+		cfg := h.currentServerConfig()
+		if !cfg.AllowLANAccess && remote {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "LAN access disabled"})
+			return
+		}
+		if cfg.AllowLANAccess && remote && h.AccessToken != "" && !h.validRemoteToken(w, r) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="pglight"`)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "LAN authentication required"})
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (h *Handler) validRemoteToken(w http.ResponseWriter, r *http.Request) bool {
+	candidate := r.Header.Get("X-PGLight-Token")
+	if candidate == "" {
+		if c, err := r.Cookie("pglight_auth"); err == nil {
+			candidate = c.Value
+		}
+	}
+	if candidate == "" {
+		candidate = r.URL.Query().Get("token")
+	}
+	if candidate == "" || candidate != h.AccessToken {
+		return false
+	}
+	if r.URL.Query().Get("token") != "" {
+		w.Header().Set("Cache-Control", "no-store")
+		http.SetCookie(w, &http.Cookie{
+			Name:     "pglight_auth",
+			Value:    h.AccessToken,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+			MaxAge:   24 * 60 * 60,
+		})
+	}
+	return true
 }
 
 func isLoopbackPeer(remoteAddr string) bool {
@@ -135,7 +183,7 @@ func (h *Handler) Settings(w http.ResponseWriter, r *http.Request) {
 			Logging  *logging.Config `json:"logging"`
 			Security *ServerSettings `json:"security"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := decodeBody(r, &req); err != nil {
 			writeJSON(w, 400, map[string]string{"error": "invalid json"})
 			return
 		}

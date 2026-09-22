@@ -31,6 +31,7 @@ type Handler struct {
 	UserID             string
 	ServerConfig       ServerSettings
 	ServerSettingsPath string
+	AccessToken        string
 	serverConfigMu     sync.RWMutex
 	vaultMu            sync.RWMutex
 	vaultKey           []byte
@@ -352,6 +353,12 @@ func queryErrorStatus(err error, fallback int) int {
 // no row-count limit; the byte budget still applies to every result so a
 // large cell/result cannot exhaust server or browser memory.
 func collectQueryRows(rows pgx.Rows, maxRows int) ([]string, []string, [][]any, pgconn.CommandTag, error) {
+	return collectQueryRowsBudget(rows, maxRows, nil)
+}
+
+// collectQueryRowsBudget materializes a bounded JSON result. When budget is
+// non-nil, all statements in one request share the same byte budget.
+func collectQueryRowsBudget(rows pgx.Rows, maxRows int, budget *int64) ([]string, []string, [][]any, pgconn.CommandTag, error) {
 	fields := rows.FieldDescriptions()
 	cols := make([]string, len(fields))
 	types := make([]string, len(fields))
@@ -360,7 +367,7 @@ func collectQueryRows(rows pgx.Rows, maxRows int) ([]string, []string, [][]any, 
 		types[i] = strconv.Itoa(int(f.DataTypeOID))
 	}
 	data := [][]any{}
-	resultBytes := 0
+	resultBytes := int64(0)
 	for rows.Next() {
 		if maxRows > 0 && len(data) >= maxRows {
 			break
@@ -379,8 +386,12 @@ func collectQueryRows(rows pgx.Rows, maxRows int) ([]string, []string, [][]any, 
 		if err != nil {
 			return nil, nil, nil, pgconn.CommandTag{}, err
 		}
-		resultBytes += len(encoded) + 1
-		if resultBytes > maxQueryResultBytes {
+		encodedBytes := int64(len(encoded) + 1)
+		resultBytes += encodedBytes
+		if budget != nil {
+			*budget += encodedBytes
+		}
+		if (budget != nil && *budget > maxQueryResultBytes) || (budget == nil && resultBytes > maxQueryResultBytes) {
 			return nil, nil, nil, pgconn.CommandTag{}, &queryResultTooLargeError{maxBytes: maxQueryResultBytes}
 		}
 		data = append(data, row)
@@ -392,10 +403,14 @@ func collectQueryRows(rows pgx.Rows, maxRows int) ([]string, []string, [][]any, 
 }
 
 func (h *Handler) execQuery(w http.ResponseWriter, r *http.Request, qq db.Querier, sid string, sql string, loc *stmtLoc, total int64, visibleLimit ...int) {
+	h.execQueryArgs(w, r, qq, sid, sql, nil, loc, total, visibleLimit...)
+}
+
+func (h *Handler) execQueryArgs(w http.ResponseWriter, r *http.Request, qq db.Querier, sid string, sql string, args []any, loc *stmtLoc, total int64, visibleLimit ...int) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
-	rows, err := qq.Query(ctx, sql)
+	rows, err := qq.Query(ctx, sql, args...)
 	if err != nil {
 		writeJSON(w, queryErrorStatus(err, http.StatusBadRequest), queryErrBody(h, sid, loc, sql, err))
 		return

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -36,7 +35,7 @@ func (h *Handler) Connect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req connectReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBody(r, &req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "invalid json"})
 		return
 	}
@@ -103,6 +102,10 @@ func (h *Handler) Sessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Disconnect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete && r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	sid := r.URL.Query().Get("session_id")
 	h.Mgr.Close(sid)
 	globalComplete.Invalidate(sid)
@@ -120,7 +123,7 @@ func (h *Handler) Txn(w http.ResponseWriter, r *http.Request) {
 		Session string `json:"session_id"`
 		Action  string `json:"action"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBody(r, &req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "invalid json"})
 		return
 	}

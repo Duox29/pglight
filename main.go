@@ -14,6 +14,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"pglight/internal/api"
 	"pglight/internal/db"
@@ -70,6 +71,11 @@ func main() {
 		log.Fatal("initialize app user: ", err)
 	}
 	h := &api.Handler{Mgr: mgr, Log: appLog, Store: appStore, UserID: userID}
+	accessToken, err := api.NewAccessToken()
+	if err != nil {
+		log.Fatal("generate LAN access token: ", err)
+	}
+	h.AccessToken = accessToken
 	serverSettings, err := api.LoadServerSettings(api.ServerSettingsPath)
 	if err != nil {
 		log.Printf("warning: could not load server settings: %v; using defaults", err)
@@ -142,18 +148,31 @@ func main() {
 	}
 
 	appURL := "http://127.0.0.1:" + strconv.Itoa(port)
+	browserURL := appURL
 	if serverSettings.AllowLANAccess {
-		log.Printf("pglight listening on %s (LAN access enabled)", appURL)
+		browserURL += "?token=" + accessToken
+		if options.noBrowser {
+			log.Printf("pglight listening on %s (LAN access enabled; open the authenticated browser URL: %s)", appURL, browserURL)
+		} else {
+			log.Printf("pglight listening on %s (LAN access enabled; authenticated browser URL opened)", appURL)
+		}
 	} else {
 		log.Println("pglight listening on " + appURL + " (LAN requests blocked)")
 	}
 	if !options.noBrowser {
-		if err := openBrowser(appURL); err != nil {
+		if err := openBrowser(browserURL); err != nil {
 			log.Printf("warning: could not open browser: %v", err)
 		}
 	}
 
-	server := &http.Server{Handler: logging.Middleware(appLog, h.LANAccess(mux))}
+	server := &http.Server{
+		Handler:           logging.Middleware(appLog, h.LANAccess(mux)),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		WriteTimeout:      2 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20,
+	}
 	log.Fatal(server.Serve(listener))
 }
 

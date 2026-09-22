@@ -37,7 +37,12 @@ type Manager struct {
 	txs      map[string]*txEntry
 	seen     map[string]time.Time
 	metas    map[string]ConnMeta
-	txnLocks map[string]*sync.Mutex
+	txnLocks map[string]*txnLockEntry
+}
+
+type txnLockEntry struct {
+	mu   sync.Mutex
+	refs int
 }
 
 // txEntry is one open explicit transaction: the pinned connection, the pgx
@@ -84,7 +89,7 @@ func New() *Manager {
 		txs:      make(map[string]*txEntry),
 		seen:     make(map[string]time.Time),
 		metas:    make(map[string]ConnMeta),
-		txnLocks: make(map[string]*sync.Mutex),
+		txnLocks: make(map[string]*txnLockEntry),
 	}
 }
 
@@ -95,18 +100,29 @@ func (m *Manager) touch(id string) {
 	m.mu.Unlock()
 }
 
-// txnLock serializes lifecycle operations for one session without holding the
-// global Manager mutex across PostgreSQL I/O. It prevents Begin/Commit/Rollback/
-// Close from racing each other while unrelated sessions remain concurrent.
-func (m *Manager) txnLock(id string) *sync.Mutex {
+// lockTxn serializes lifecycle operations for one session without holding the
+// global Manager mutex across PostgreSQL I/O. Entries are reference-counted so
+// session churn does not retain one mutex forever, while a waiter that already
+// acquired the entry remains synchronized with the current owner.
+func (m *Manager) lockTxn(id string) func() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if l, ok := m.txnLocks[id]; ok {
-		return l
+	e, ok := m.txnLocks[id]
+	if !ok {
+		e = &txnLockEntry{}
+		m.txnLocks[id] = e
 	}
-	l := &sync.Mutex{}
-	m.txnLocks[id] = l
-	return l
+	e.refs++
+	m.mu.Unlock()
+	e.mu.Lock()
+	return func() {
+		e.mu.Unlock()
+		m.mu.Lock()
+		e.refs--
+		if e.refs == 0 && m.txnLocks[id] == e {
+			delete(m.txnLocks, id)
+		}
+		m.mu.Unlock()
+	}
 }
 
 // validSSLModes is the full meaningful PostgreSQL set. Unknown values fall
@@ -224,16 +240,19 @@ func (m *Manager) Add(id, connStr string) error {
 // sending libpq's keepalives keywords as pgx runtime parameters makes
 // PostgreSQL treat them as unknown GUCs and reject the startup packet.
 func (m *Manager) AddWithOptions(id, connStr string, opts ConnOptions) error {
-	lock := m.txnLock(id)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock := m.lockTxn(id)
+	defer unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	cfg, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
 		return err
 	}
+	connectTimeout := 5 * time.Second
+	if cfg.ConnConfig.ConnectTimeout > 0 {
+		connectTimeout = cfg.ConnConfig.ConnectTimeout + time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+	defer cancel()
 	if opts.Keepalive > 0 {
 		dialer := &net.Dialer{KeepAlive: time.Duration(opts.Keepalive) * time.Second}
 		dialer.Timeout = cfg.ConnConfig.ConnectTimeout
@@ -248,8 +267,11 @@ func (m *Manager) AddWithOptions(id, connStr string, opts ConnOptions) error {
 	// Tag every backend of this pool so /api/activity (and the console
 	// Cancel button) can attribute running queries to this session.
 	app := "pglight:" + id
-	if len(app) > 60 {
-		app = app[len(app)-60:]
+	if custom := strings.TrimSpace(opts.ApplicationName); custom != "" {
+		app += " " + custom
+	}
+	if len(app) > 63 {
+		app = app[:63]
 	}
 	if cfg.ConnConfig.RuntimeParams == nil {
 		cfg.ConnConfig.RuntimeParams = map[string]string{}
@@ -316,9 +338,8 @@ func (m *Manager) Get(id string) (*pgxpool.Pool, bool) {
 }
 
 func (m *Manager) Close(id string) {
-	lock := m.txnLock(id)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock := m.lockTxn(id)
+	defer unlock()
 
 	m.mu.Lock()
 	entry := m.txs[id]
@@ -430,9 +451,8 @@ func (m *Manager) Snapshot(id string) (pool *pgxpool.Pool, hasPool, inTxn bool) 
 
 // Begin starts an explicit transaction for the session.
 func (m *Manager) Begin(ctx context.Context, id string) error {
-	lock := m.txnLock(id)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock := m.lockTxn(id)
+	defer unlock()
 
 	m.mu.RLock()
 	pool, ok := m.pools[id]
@@ -473,9 +493,8 @@ func (m *Manager) Begin(ctx context.Context, id string) error {
 // connection. Lock order is always txnLock → e.mu → m.mu (never m.mu → e.mu
 // while holding m.mu), so the sweeper cannot deadlock against it.
 func (m *Manager) Commit(ctx context.Context, id string) error {
-	lock := m.txnLock(id)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock := m.lockTxn(id)
+	defer unlock()
 
 	m.mu.RLock()
 	e, ok := m.txs[id]
@@ -503,9 +522,8 @@ func (m *Manager) Commit(ctx context.Context, id string) error {
 // Like Commit, it waits for in-flight txn work (or a held lease) before
 // rolling back. Same lock order as Commit.
 func (m *Manager) Rollback(ctx context.Context, id string) error {
-	lock := m.txnLock(id)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock := m.lockTxn(id)
+	defer unlock()
 
 	m.mu.RLock()
 	e, ok := m.txs[id]

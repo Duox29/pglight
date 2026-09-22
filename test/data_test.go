@@ -62,6 +62,8 @@ func TestTableDataFailEdge(t *testing.T) {
 	// edge: unknown direction collapses to ASC
 	code, body = callGET(t, h.TableData, withSID(sid, "/api/table-data?schema=public&table="+tbl+"&order=id+SIDEWAYS"))
 	requireStatus(t, body, code, 200)
+	code, body = callGET(t, h.TableData, withSID(sid, "/api/table-data?schema=public&table="+tbl+"&filter=id+%3E+1+OR+1%3D1"))
+	requireErrContains(t, body, code, 400, "unsupported filter")
 }
 
 // --- /api/search ---
@@ -233,6 +235,26 @@ func TestBatchDeleteAtomic(t *testing.T) {
 	requireErrContains(t, body, code, 400, "table required")
 	code, body = callPOST(t, h.BatchDelete, "/api/rows-delete", `{"table":"x","where":[{"id":1}]}`)
 	requireErrContains(t, body, code, 401, "not connected")
+}
+
+func TestExplicitTxnRowOperationsRollbackOnlyFailedOperation(t *testing.T) {
+	h, sid := newHandler(t)
+	tbl := tempTable(t)
+	execSQL(t, h, sid, fmt.Sprintf(`CREATE TABLE %s (id int PRIMARY KEY, v text)`, tbl))
+	defer execSQL(t, h, sid, fmt.Sprintf(`DROP TABLE %s`, tbl))
+	execSQL(t, h, sid, fmt.Sprintf(`INSERT INTO %s VALUES (1,'a'),(2,'b'),(3,'c')`, tbl))
+
+	_, _ = callPOST(t, h.Txn, "/api/txn", postBody(sid, `"action":"begin"`))
+	code, body := callPOST(t, h.RowOp, "/api/row", fmt.Sprintf(`{"session_id":%q,"schema":"public","table":%q,"op":"update","values":{"v":"changed"},"where":{"v":"missing"},"single":true}`, sid, tbl))
+	requireErrContains(t, body, code, 409, "stale data")
+	code, body = callPOST(t, h.BatchDelete, "/api/rows-delete", fmt.Sprintf(`{"session_id":%q,"schema":"public","table":%q,"where":[{"id":1},{"id":999}]}`, sid, tbl))
+	requireErrContains(t, body, code, 409, "expected exactly 1")
+	_, _ = callPOST(t, h.Txn, "/api/txn", postBody(sid, `"action":"commit"`))
+
+	rows := queryRows(t, h, sid, fmt.Sprintf(`SELECT id,v FROM %s ORDER BY id`, tbl))
+	if len(rows) != 3 || fmt.Sprint(rows[0][1]) != "a" {
+		t.Fatalf("failed explicit-txn operations changed committed data: %v", rows)
+	}
 }
 
 // --- /api/import ---

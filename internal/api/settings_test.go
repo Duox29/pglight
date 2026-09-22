@@ -133,3 +133,41 @@ func TestLANAccessFiltersRemotePeers(t *testing.T) {
 		t.Fatalf("remote LAN status = %d, want 204", remoteAllowed.Code)
 	}
 }
+
+func TestLANAccessRequiresTokenForRemotePeers(t *testing.T) {
+	token, err := NewAccessToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{AccessToken: token, ServerConfig: ServerSettings{AllowLANAccess: true}}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	filtered := h.LANAccess(next)
+
+	remote := httptest.NewRequest(http.MethodGet, "/", nil)
+	remote.RemoteAddr = "192.168.1.20:54321"
+	blocked := httptest.NewRecorder()
+	filtered.ServeHTTP(blocked, remote)
+	if blocked.Code != http.StatusUnauthorized {
+		t.Fatalf("remote without token status = %d, want 401", blocked.Code)
+	}
+
+	withToken := httptest.NewRequest(http.MethodGet, "/?token="+token, nil)
+	withToken.RemoteAddr = remote.RemoteAddr
+	authorized := httptest.NewRecorder()
+	filtered.ServeHTTP(authorized, withToken)
+	if authorized.Code != http.StatusNoContent {
+		t.Fatalf("remote with token status = %d, want 204", authorized.Code)
+	}
+	if authorized.Header().Get("Set-Cookie") == "" {
+		t.Fatal("token bootstrap did not set authentication cookie")
+	}
+
+	cookieReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	cookieReq.RemoteAddr = remote.RemoteAddr
+	cookieReq.Header.Set("Cookie", authorized.Header().Get("Set-Cookie"))
+	cookieAllowed := httptest.NewRecorder()
+	filtered.ServeHTTP(cookieAllowed, cookieReq)
+	if cookieAllowed.Code != http.StatusNoContent {
+		t.Fatalf("remote cookie status = %d, want 204", cookieAllowed.Code)
+	}
+}

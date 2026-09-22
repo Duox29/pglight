@@ -140,7 +140,7 @@ export const apiClient = {
       body: JSON.stringify(b),
     }),
   listSessions: () => api<{ sessions: SessionInfo[] }>(`/api/sessions`),
-  disconnect: (session: string) => api('/api/disconnect?session_id=' + encodeURIComponent(session)),
+  disconnect: (session: string) => api('/api/disconnect?session_id=' + encodeURIComponent(session), { method: 'DELETE' }),
   txn: (session: string, action: string) =>
     api<{ ok?: boolean; in_txn?: boolean; error?: string }>('/api/txn', {
       method: 'POST',
@@ -236,7 +236,7 @@ export const apiClient = {
       body: JSON.stringify(p),
     }),
   cancel: (session: string, pid: number, kill?: boolean) =>
-    api<{ ok?: boolean; error?: string }>(`/api/cancel?session_id=${encodeURIComponent(session)}&pid=${pid}${kill ? '&kill=1' : ''}`),
+    api<{ ok?: boolean; error?: string }>(`/api/cancel?session_id=${encodeURIComponent(session)}&pid=${pid}${kill ? '&kill=1' : ''}`, { method: 'POST' }),
   getSettings: () => api<{ logging: LoggingConfig; security: SecurityConfig }>(`/api/settings`),
   saveSettings: (logging?: LoggingConfig, security?: SecurityConfig) =>
     api<{ logging: LoggingConfig; security: SecurityConfig; error?: string }>(`/api/settings`, {

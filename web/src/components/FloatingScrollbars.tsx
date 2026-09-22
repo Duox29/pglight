@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { scrollbarConfig } from '@/lib/scrollbar'
 
 const LAYER_ATTRIBUTE = 'data-pglight-scrollbar-layer'
-const VIEWPORT_SELECTOR = '[data-radix-scroll-area-viewport]'
+const SCROLLABLE_SELECTOR = '[data-pglight-scroll-container], [data-pglight-scrollable]'
 const MIN_THUMB_SIZE = 18
 
 type Axis = 'vertical' | 'horizontal'
@@ -94,11 +94,11 @@ function updateEntry(entry: ScrollEntry) {
 }
 
 function isIgnored(element: HTMLElement) {
-  return Boolean(element.closest(`[${LAYER_ATTRIBUTE}]`) || element.matches(VIEWPORT_SELECTOR))
+  return Boolean(element.closest(`[${LAYER_ATTRIBUTE}]`))
 }
 
 function getScrollableElements() {
-  return Array.from(document.body.querySelectorAll('*')).filter(
+  return Array.from(document.body.querySelectorAll(SCROLLABLE_SELECTOR)).filter(
     (node): node is HTMLElement => node instanceof HTMLElement && !isIgnored(node)
       && (isScrollable(node, 'vertical') || isScrollable(node, 'horizontal')),
   )

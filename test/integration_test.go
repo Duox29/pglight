@@ -186,7 +186,7 @@ func TestIntegrationSessionLifecycle(t *testing.T) {
 	}
 
 	// disconnect then reuse: the session is gone (401 + {error} contract)
-	code, body = iget(t, base+"/api/disconnect?session_id="+sid)
+	code, body = ipost(t, base+"/api/disconnect?session_id="+sid, "")
 	requireStatus(t, body, code, 200)
 	code, body = iquery(t, base, sid, "SELECT 1")
 	requireErrContains(t, body, code, 401, "not connected")

@@ -17,7 +17,7 @@ import { CredentialManager, type ProfileMetadata } from './CredentialManager'
 import { KeyboardShortcutsPanel } from './KeyboardShortcutsPanel'
 import { AliasesPanel } from './AliasesPanel'
 import { LogsPanel } from './LogsPanel'
-import { api, q } from '@/lib/api'
+import { api, apiClient, q } from '@/lib/api'
 import { QUICK_ACCESS_VIEWS, WORKSPACE_VIEW_META, WORKSPACE_VIEWS } from '@/lib/workspace'
 
 interface Props {
@@ -249,7 +249,7 @@ function ActivityView({ rows, session, dialogs }: { rows: ActivityRow[]; session
       })
       if (!ok) return
     }
-    await api(q(session, `/api/cancel?pid=${pid}${kill ? '&kill=1' : ''}`))
+    await apiClient.cancel(session, pid, kill)
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-1.5">

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -54,7 +53,7 @@ func (h *Handler) AlterTable(w http.ResponseWriter, r *http.Request) {
 		When       string   `json:"when"`
 		UpdateOf   []string `json:"update_of"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBody(r, &req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "invalid json"})
 		return
 	}

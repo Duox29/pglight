@@ -40,8 +40,15 @@ func (h *Handler) TableData(w http.ResponseWriter, r *http.Request) {
 	}
 	qt := pgx.Identifier{schema, table}.Sanitize()
 	where := ""
+	var filterArgs []any
 	if filter != "" {
-		where = " WHERE " + filter
+		filterSQL, args, err := safeTableFilter(filter)
+		if err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		where = " WHERE " + filterSQL
+		filterArgs = args
 	}
 	if order != "" {
 		parts := strings.Split(order, ",")
@@ -68,7 +75,118 @@ func (h *Handler) TableData(w http.ResponseWriter, r *http.Request) {
 	// endpoint to one database round-trip.
 	fetchLimit := limit + 1
 	sql := fmt.Sprintf("SELECT * FROM %s%s LIMIT %d OFFSET %d", qt, where, fetchLimit, offset)
-	h.execQuery(w, r, qq, sid, sql, nil, -1, limit)
+	h.execQueryArgs(w, r, qq, sid, sql, filterArgs, nil, -1, limit)
+}
+
+func safeTableFilter(input string) (string, []any, error) {
+	parts, err := splitFilterAnd(input)
+	if err != nil {
+		return "", nil, err
+	}
+	clauses := make([]string, 0, len(parts))
+	args := make([]any, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		upper := strings.ToUpper(part)
+		matched := false
+		for _, op := range []string{" IS NOT NULL", " IS NULL", " ILIKE ", " LIKE ", " >= ", " <= ", " <> ", " != ", " = ", " > ", " < "} {
+			if idx := strings.Index(upper, op); idx >= 0 {
+				left := strings.TrimSpace(part[:idx])
+				right := strings.TrimSpace(part[idx+len(op):])
+				if left == "" || !validFilterIdentifier(left) {
+					return "", nil, fmt.Errorf("invalid filter column")
+				}
+				column := pgx.Identifier{left}.Sanitize()
+				if strings.TrimSpace(op) == "IS NULL" || strings.TrimSpace(op) == "IS NOT NULL" {
+					if right != "" {
+						return "", nil, fmt.Errorf("IS NULL filters do not take a value")
+					}
+					clauses = append(clauses, column+strings.TrimSpace(op))
+					matched = true
+					break
+				}
+				value, valueErr := parseFilterValue(right)
+				if valueErr != nil {
+					return "", nil, valueErr
+				}
+				args = append(args, value)
+				clauses = append(clauses, fmt.Sprintf("%s %s $%d", column, strings.TrimSpace(op), len(args)))
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return "", nil, fmt.Errorf("unsupported filter; use column operator value joined with AND")
+		}
+	}
+	if len(clauses) == 0 {
+		return "", nil, fmt.Errorf("filter is empty")
+	}
+	return strings.Join(clauses, " AND "), args, nil
+}
+
+func splitFilterAnd(input string) ([]string, error) {
+	var out []string
+	start := 0
+	inQuote := false
+	for i := 0; i < len(input); i++ {
+		if input[i] == '\'' {
+			if inQuote && i+1 < len(input) && input[i+1] == '\'' {
+				i++
+				continue
+			}
+			inQuote = !inQuote
+			continue
+		}
+		if !inQuote && i+3 <= len(input) && strings.EqualFold(input[i:i+3], "and") && (i == 0 || input[i-1] == ' ' || input[i-1] == '\t') && (i+3 == len(input) || input[i+3] == ' ' || input[i+3] == '\t') {
+			out = append(out, input[start:i])
+			i += 2
+			start = i + 1
+		}
+	}
+	if inQuote {
+		return nil, fmt.Errorf("unterminated filter string")
+	}
+	out = append(out, input[start:])
+	return out, nil
+}
+
+func validFilterIdentifier(s string) bool {
+	if s == "" || !(s[0] == '_' || s[0] >= 'a' && s[0] <= 'z' || s[0] >= 'A' && s[0] <= 'Z') {
+		return false
+	}
+	for _, c := range s[1:] {
+		if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '$') {
+			return false
+		}
+	}
+	return true
+}
+
+func parseFilterValue(s string) (any, error) {
+	if s == "" {
+		return nil, fmt.Errorf("filter value is required")
+	}
+	if strings.EqualFold(s, "true") {
+		return true, nil
+	}
+	if strings.EqualFold(s, "false") {
+		return false, nil
+	}
+	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return i, nil
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return f, nil
+	}
+	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
+		value := s[1 : len(s)-1]
+		if strings.Contains(value, "\\") {
+			return nil, fmt.Errorf("backslash escapes are not supported in table filters")
+		}
+		return strings.ReplaceAll(value, "''", "'"), nil
+	}
+	return nil, fmt.Errorf("unsupported filter value")
 }
 
 func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
@@ -226,12 +344,13 @@ func (h *Handler) RowOp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := sessionFromBody(req.Session, r)
-	qq, ok := h.Mgr.Q(id)
+	qqRaw, release, inTxn, pool, ok := h.Mgr.AcquireLease(id)
 	if id == "" || !ok {
 		writeJSON(w, 401, map[string]string{"error": "not connected"})
 		return
 	}
-	qq = logging.Wrap(qq, h.Log, id)
+	defer release()
+	qq := logging.Wrap(qqRaw, h.Log, id)
 	if req.Schema == "" {
 		req.Schema = "public"
 	}
@@ -264,6 +383,23 @@ func (h *Handler) RowOp(w http.ResponseWriter, r *http.Request) {
 		}
 	default:
 		writeJSON(w, 400, map[string]string{"error": "unknown op"})
+		return
+	}
+	if req.Single && req.Op != "insert" && inTxn {
+		affected, execErr := execSingleRowInTxn(ctx, qq, sql, args)
+		if execErr != nil {
+			code := 400
+			if _, conflict := execErr.(*rowCountError); conflict {
+				code = 409
+			}
+			writeJSON(w, code, map[string]string{"error": execErr.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"rows_affected": affected, "in_txn": true})
+		return
+	}
+	if !inTxn && pool == nil {
+		writeJSON(w, 401, map[string]string{"error": "not connected"})
 		return
 	}
 	affected, execErr := h.execSingleRow(ctx, id, qq, sql, args, req.Single && req.Op != "insert")
@@ -314,12 +450,13 @@ func (h *Handler) BatchDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
-	qq, ok := h.Mgr.Q(id)
+	qqRaw, release, inTxn, pool, ok := h.Mgr.AcquireLease(id)
 	if !ok {
 		writeJSON(w, 401, map[string]string{"error": "not connected"})
 		return
 	}
-	qq = logging.Wrap(qq, h.Log, id)
+	defer release()
+	qq := logging.Wrap(qqRaw, h.Log, id)
 	udts, err := colUDTs(ctx, qq, req.Schema, req.Table)
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
@@ -337,24 +474,33 @@ func (h *Handler) BatchDelete(w http.ResponseWriter, r *http.Request) {
 		stmts[i], argSets[i] = s, a
 	}
 	var deleted int64
-	if h.Mgr.InTxn(id) {
+	if inTxn {
+		if _, err := qq.Exec(ctx, "SAVEPOINT pglight_rowop"); err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
 		for i := range stmts {
 			n, derr := execCount(ctx, qq, stmts[i], argSets[i])
 			if derr != nil {
+				rollbackRowOpSavepoint(ctx, qq)
 				writeJSON(w, 400, map[string]string{"error": derr.Error()})
 				return
 			}
 			if n != 1 {
-				writeJSON(w, 409, map[string]string{"error": fmt.Sprintf("row %d matched %d rows, expected exactly 1 — rolling back your transaction is recommended", i, n)})
+				rollbackRowOpSavepoint(ctx, qq)
+				writeJSON(w, 409, map[string]string{"error": fmt.Sprintf("row %d matched %d rows, expected exactly 1 — rolling back this operation", i, n)})
 				return
 			}
 			deleted += n
 		}
+		if _, err := qq.Exec(ctx, "RELEASE SAVEPOINT pglight_rowop"); err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
 		writeJSON(w, 200, map[string]any{"deleted": deleted, "in_txn": true})
 		return
 	}
-	pool, hasPool := h.Mgr.Get(id)
-	if !hasPool {
+	if pool == nil {
 		writeJSON(w, 401, map[string]string{"error": "not connected"})
 		return
 	}
@@ -443,6 +589,35 @@ func (h *Handler) execSingleRow(ctx context.Context, id string, qq db.Querier, s
 		return 0, err
 	}
 	return n, nil
+}
+
+// execSingleRowInTxn makes a single-row operation atomic without aborting the
+// user's surrounding transaction. A failed PostgreSQL statement can put the
+// transaction into the aborted state, so rollback-to-savepoint is required on
+// SQL errors as well as row-count mismatches.
+func execSingleRowInTxn(ctx context.Context, q db.Querier, sql string, args []any) (int64, error) {
+	if _, err := q.Exec(ctx, "SAVEPOINT pglight_rowop"); err != nil {
+		return 0, err
+	}
+	n, err := execCount(ctx, q, sql, args)
+	if err != nil {
+		rollbackRowOpSavepoint(ctx, q)
+		return 0, err
+	}
+	if n != 1 {
+		rollbackRowOpSavepoint(ctx, q)
+		return n, &rowCountError{n: n}
+	}
+	if _, err := q.Exec(ctx, "RELEASE SAVEPOINT pglight_rowop"); err != nil {
+		rollbackRowOpSavepoint(ctx, q)
+		return 0, err
+	}
+	return n, nil
+}
+
+func rollbackRowOpSavepoint(ctx context.Context, q db.Querier) {
+	_, _ = q.Exec(ctx, "ROLLBACK TO SAVEPOINT pglight_rowop")
+	_, _ = q.Exec(ctx, "RELEASE SAVEPOINT pglight_rowop")
 }
 
 func buildInsert(qt string, values map[string]any, udts map[string]string) (string, []any) {

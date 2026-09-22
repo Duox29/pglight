@@ -35,6 +35,11 @@ import { useCommand, useCommandRegistration } from './shortcuts/ShortcutProvider
    SplitWorkspace; feature components stay presentational (props in,
    callbacks out). */
 export default function App() {
+	useEffect(() => {
+		if (window.location.search.includes('token=')) {
+			window.history.replaceState({}, document.title, window.location.pathname + window.location.hash)
+		}
+	}, [])
   const [dlg, setDlg] = useState<PendingDialog | null>(null)
   const dialogs = useMemo(() => createDialogs(setDlg), [])
   const [quickAccess, setQuickAccess] = useAppPreference<SideView[]>('workspace.quickAccess', DEFAULT_QUICK_ACCESS)

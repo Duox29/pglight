@@ -31,6 +31,46 @@ type ConnectionOptions struct {
 	UnixSocket      string `json:"unix_socket"`
 }
 
+type ConnectionImportItem struct {
+	Name        string
+	Host        string
+	Port        int
+	User        string
+	DBName      string
+	SSLMode     string
+	Password    string
+	FolderID    string
+	Environment string
+	Color       string
+	Description string
+	Favorite    bool
+	Default     bool
+	Tags        []string
+	Options     ConnectionOptions
+}
+
+type ConnectionSave struct {
+	ID            string
+	Name          string
+	Host          string
+	Port          int
+	User          string
+	DBName        string
+	SSLMode       string
+	Password      string
+	SavePassword  bool
+	ClearPassword bool
+	DuplicateFrom string
+	FolderID      string
+	Environment   string
+	Color         string
+	Description   string
+	Favorite      bool
+	Default       bool
+	Tags          []string
+	Options       ConnectionOptions
+}
+
 func (s *Store) ListConnections(ctx context.Context, userID string) ([]ConnectionProfile, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT c.id,c.name,c.host,c.port,c.username,c.dbname,c.sslmode,c.created_at,c.updated_at,COALESCE(c.last_used_at,''),EXISTS(SELECT 1 FROM connection_secrets x WHERE x.user_id=c.user_id AND x.connection_id=c.id),COALESCE(c.folder_id,''),COALESCE(c.environment,''),COALESCE(c.color,''),COALESCE(c.description,''),c.is_favorite,c.is_default FROM connection_profiles c WHERE c.user_id=? ORDER BY c.is_default DESC,c.is_favorite DESC,COALESCE(c.last_used_at,c.updated_at) DESC,c.name`, userID)
 	if err != nil {
@@ -93,6 +133,74 @@ func (s *Store) UpsertConnection(ctx context.Context, userID, name, host string,
 	return x, err
 }
 
+// SaveConnectionProfile applies profile, secret, metadata, and options in one
+// SQLite transaction so a later validation/encryption failure cannot leave a
+// partially updated profile behind.
+func (s *Store) SaveConnectionProfile(ctx context.Context, userID string, item ConnectionSave, key []byte) (ConnectionProfile, error) {
+	if err := validateConnectionOptions(item.Options); err != nil {
+		return ConnectionProfile{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ConnectionProfile{}, err
+	}
+	defer tx.Rollback()
+	id := strings.TrimSpace(item.ID)
+	if id != "" {
+		res, err := tx.ExecContext(ctx, `UPDATE connection_profiles SET name=?,host=?,port=?,username=?,dbname=?,sslmode=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND id=?`, item.Name, item.Host, item.Port, item.User, item.DBName, item.SSLMode, userID, id)
+		if err != nil {
+			return ConnectionProfile{}, fmt.Errorf("update connection: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil || n == 0 {
+			if err != nil {
+				return ConnectionProfile{}, err
+			}
+			return ConnectionProfile{}, sql.ErrNoRows
+		}
+	} else {
+		id = uuid.NewString()
+		if _, err := tx.ExecContext(ctx, `INSERT INTO connection_profiles(id,user_id,name,host,port,username,dbname,sslmode) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,name) DO UPDATE SET host=excluded.host,port=excluded.port,username=excluded.username,dbname=excluded.dbname,sslmode=excluded.sslmode,updated_at=CURRENT_TIMESTAMP`, id, userID, item.Name, item.Host, item.Port, item.User, item.DBName, item.SSLMode); err != nil {
+			return ConnectionProfile{}, fmt.Errorf("upsert connection: %w", err)
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM connection_profiles WHERE user_id=? AND name=?`, userID, item.Name).Scan(&id); err != nil {
+			return ConnectionProfile{}, err
+		}
+	}
+	if item.ClearPassword {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM connection_secrets WHERE user_id=? AND connection_id=?`, userID, id); err != nil {
+			return ConnectionProfile{}, err
+		}
+	}
+	if source := strings.TrimSpace(item.DuplicateFrom); source != "" {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO connection_secrets(user_id,connection_id,nonce,ciphertext) SELECT user_id,?,nonce,ciphertext FROM connection_secrets WHERE user_id=? AND connection_id=? ON CONFLICT(connection_id) DO UPDATE SET user_id=excluded.user_id,nonce=excluded.nonce,ciphertext=excluded.ciphertext,updated_at=CURRENT_TIMESTAMP`, id, userID, source); err != nil {
+			return ConnectionProfile{}, err
+		}
+	}
+	if item.SavePassword {
+		if len(key) == 0 {
+			return ConnectionProfile{}, errors.New("vault is locked; unlock it before saving a password")
+		}
+		nonce, ciphertext, err := seal(key, []byte(item.Password))
+		if err != nil {
+			return ConnectionProfile{}, fmt.Errorf("encrypt connection secret: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO connection_secrets(user_id,connection_id,nonce,ciphertext) VALUES(?,?,?,?) ON CONFLICT(connection_id) DO UPDATE SET user_id=excluded.user_id,nonce=excluded.nonce,ciphertext=excluded.ciphertext,updated_at=CURRENT_TIMESTAMP`, userID, id, nonce, ciphertext); err != nil {
+			return ConnectionProfile{}, err
+		}
+	}
+	if err := updateConnectionMetadataTx(ctx, tx, userID, id, item.FolderID, item.Environment, item.Color, item.Description, item.Favorite, item.Default, item.Tags); err != nil {
+		return ConnectionProfile{}, err
+	}
+	if _, err := tx.ExecContext(ctx, connectionOptionsSQL, userID, id, item.Options.ConnectTimeout, item.Options.Keepalive, strings.TrimSpace(item.Options.ApplicationName), strings.TrimSpace(item.Options.SearchPath), strings.TrimSpace(item.Options.SSLRootCert), strings.TrimSpace(item.Options.SSLCert), strings.TrimSpace(item.Options.SSLKey), strings.TrimSpace(item.Options.UnixSocket)); err != nil {
+		return ConnectionProfile{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ConnectionProfile{}, err
+	}
+	return s.GetConnection(ctx, userID, id)
+}
+
 // UpdateConnectionMetadata updates the profile-manager metadata in one transaction.
 func (s *Store) UpdateConnectionMetadata(ctx context.Context, userID, id, folderID, environment, color, description string, favorite, makeDefault bool, tags []string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -100,6 +208,13 @@ func (s *Store) UpdateConnectionMetadata(ctx context.Context, userID, id, folder
 		return err
 	}
 	defer tx.Rollback()
+	if err := updateConnectionMetadataTx(ctx, tx, userID, id, folderID, environment, color, description, favorite, makeDefault, tags); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func updateConnectionMetadataTx(ctx context.Context, tx *sql.Tx, userID, id, folderID, environment, color, description string, favorite, makeDefault bool, tags []string) error {
 	if strings.TrimSpace(folderID) != "" {
 		var exists bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM connection_folders WHERE user_id=? AND id=?)`, userID, strings.TrimSpace(folderID)).Scan(&exists); err != nil {
@@ -110,7 +225,7 @@ func (s *Store) UpdateConnectionMetadata(ctx context.Context, userID, id, folder
 		}
 	}
 	if makeDefault {
-		if _, err = tx.ExecContext(ctx, `UPDATE connection_profiles SET is_default=0 WHERE user_id=?`, userID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE connection_profiles SET is_default=0 WHERE user_id=?`, userID); err != nil {
 			return err
 		}
 	}
@@ -142,7 +257,7 @@ func (s *Store) UpdateConnectionMetadata(ctx context.Context, userID, id, folder
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Store) loadConnectionTags(ctx context.Context, userID string, x *ConnectionProfile) error {
@@ -178,8 +293,62 @@ func (s *Store) UpdateConnectionOptions(ctx context.Context, userID, id string, 
 	if o.ConnectTimeout < 0 || o.ConnectTimeout > 300 || o.Keepalive < 0 || o.Keepalive > 86400 {
 		return fmt.Errorf("invalid connection timeout or keepalive")
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO connection_options(user_id,profile_id,connect_timeout,keepalive,application_name,search_path,sslrootcert,sslcert,sslkey,unix_socket) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(profile_id) DO UPDATE SET user_id=excluded.user_id,connect_timeout=excluded.connect_timeout,keepalive=excluded.keepalive,application_name=excluded.application_name,search_path=excluded.search_path,sslrootcert=excluded.sslrootcert,sslcert=excluded.sslcert,sslkey=excluded.sslkey,unix_socket=excluded.unix_socket`, userID, id, o.ConnectTimeout, o.Keepalive, strings.TrimSpace(o.ApplicationName), strings.TrimSpace(o.SearchPath), strings.TrimSpace(o.SSLRootCert), strings.TrimSpace(o.SSLCert), strings.TrimSpace(o.SSLKey), strings.TrimSpace(o.UnixSocket))
+	_, err := s.db.ExecContext(ctx, connectionOptionsSQL, userID, id, o.ConnectTimeout, o.Keepalive, strings.TrimSpace(o.ApplicationName), strings.TrimSpace(o.SearchPath), strings.TrimSpace(o.SSLRootCert), strings.TrimSpace(o.SSLCert), strings.TrimSpace(o.SSLKey), strings.TrimSpace(o.UnixSocket))
 	return err
+}
+
+const connectionOptionsSQL = `INSERT INTO connection_options(user_id,profile_id,connect_timeout,keepalive,application_name,search_path,sslrootcert,sslcert,sslkey,unix_socket) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(profile_id) DO UPDATE SET user_id=excluded.user_id,connect_timeout=excluded.connect_timeout,keepalive=excluded.keepalive,application_name=excluded.application_name,search_path=excluded.search_path,sslrootcert=excluded.sslrootcert,sslcert=excluded.sslcert,sslkey=excluded.sslkey,unix_socket=excluded.unix_socket`
+
+func validateConnectionOptions(o ConnectionOptions) error {
+	if o.ConnectTimeout < 0 || o.ConnectTimeout > 300 || o.Keepalive < 0 || o.Keepalive > 86400 {
+		return fmt.Errorf("invalid connection timeout or keepalive")
+	}
+	return nil
+}
+
+// ImportConnectionProfiles persists the complete import as one SQLite
+// transaction. Any invalid profile, metadata, option, or secret rolls back
+// every profile in the batch.
+func (s *Store) ImportConnectionProfiles(ctx context.Context, userID string, items []ConnectionImportItem, key []byte) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	for _, item := range items {
+		if err := validateConnectionOptions(item.Options); err != nil {
+			return 0, err
+		}
+		id := uuid.NewString()
+		if _, err := tx.ExecContext(ctx, `INSERT INTO connection_profiles(id,user_id,name,host,port,username,dbname,sslmode) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,name) DO UPDATE SET host=excluded.host,port=excluded.port,username=excluded.username,dbname=excluded.dbname,sslmode=excluded.sslmode,updated_at=CURRENT_TIMESTAMP`, id, userID, item.Name, item.Host, item.Port, item.User, item.DBName, item.SSLMode); err != nil {
+			return 0, fmt.Errorf("upsert connection: %w", err)
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM connection_profiles WHERE user_id=? AND name=?`, userID, item.Name).Scan(&id); err != nil {
+			return 0, err
+		}
+		if err := updateConnectionMetadataTx(ctx, tx, userID, id, item.FolderID, item.Environment, item.Color, item.Description, item.Favorite, item.Default, item.Tags); err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx, connectionOptionsSQL, userID, id, item.Options.ConnectTimeout, item.Options.Keepalive, strings.TrimSpace(item.Options.ApplicationName), strings.TrimSpace(item.Options.SearchPath), strings.TrimSpace(item.Options.SSLRootCert), strings.TrimSpace(item.Options.SSLCert), strings.TrimSpace(item.Options.SSLKey), strings.TrimSpace(item.Options.UnixSocket)); err != nil {
+			return 0, err
+		}
+		if item.Password != "" {
+			if len(key) == 0 {
+				return 0, errors.New("vault is locked; unlock it before importing passwords")
+			}
+			nonce, ciphertext, err := seal(key, []byte(item.Password))
+			if err != nil {
+				return 0, fmt.Errorf("encrypt connection secret: %w", err)
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO connection_secrets(user_id,connection_id,nonce,ciphertext) VALUES(?,?,?,?) ON CONFLICT(connection_id) DO UPDATE SET user_id=excluded.user_id,nonce=excluded.nonce,ciphertext=excluded.ciphertext,updated_at=CURRENT_TIMESTAMP`, userID, id, nonce, ciphertext); err != nil {
+				return 0, err
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(items), nil
 }
 
 func nullableText(v string) any {

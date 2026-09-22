@@ -98,6 +98,11 @@ export function TableWorkspace(p: Props) {
   const startImport = () => fileRef.current?.click()
 
   const handleFile = async (file: File) => {
+    const maxImportFileBytes = 16 * 1024 * 1024
+    if (file.size > maxImportFileBytes) {
+      toast.error('File is too large (maximum 16 MiB)')
+      return
+    }
     const text = await file.text()
     const name = file.name.toLowerCase()
     const rows = parseCSV(text, name.endsWith('.tsv') ? '\t' : undefined)
@@ -130,7 +135,7 @@ export function TableWorkspace(p: Props) {
     }
     const ok = await p.dialogs.confirm({
       title: 'Import CSV',
-      description: `Import ${data.length} rows into ${t.schema}.${t.table} (${cols.join(', ')})?`,
+      description: `Import ${data.length} rows into ${t.schema}.${t.table} (${cols.join(', ')})?${useHeader && cols.length < header.length ? ` ${header.length - cols.length} unmatched CSV column(s) will be ignored.` : ''}`,
       confirmText: 'Import',
     })
     if (!ok) return

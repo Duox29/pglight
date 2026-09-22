@@ -60,7 +60,7 @@ Backend (`internal/db`, `internal/api`):
 Frontend (`web/`):
 - [x] UX hierarchy pass: header reduces visual competition (search-first + configurable Quick Access buttons, with Connections/Settings as defaults + utility menu for Workspace/Docs); query toolbar grouped Primary/Query/Result/Utility with Run dominant and Explain in a dropdown; connection management lives in the persisted Workspace → Connections tab with vault lock state; Explorer tiers schema > muted-uppercase group > object, Tables open by default, Lucide-only icons with subtle type colors, filter match counts; tabs show active dot/dirty state, middle-click close, DB badges; DataGrid is type-aware (OID-based numeric right-align, bool, JSON, type tooltips, zebra rows, Lucide sort icons); table workspace has a real identity header with Data | Structure (Columns/Constraints/Triggers) | SQL | Indexes | Stats; side-panel tools moved into one persisted Workspace tab with a single navigation bar and Quick Access configuration …
 - [x] Table workspace with sections **Data | Structure (Columns/Constraints/Triggers) | SQL (DDL) | Indexes | Stats**. DDL uses server definition + reconstructed fallback. Columns tab edits via `POST /api/alter-table`: add/drop/rename column, change type (smart-suggest input, custom enums accepted), toggle nullable, set/drop default, rename table; Constraints tab adds/drops CHECK|UNIQUE|PK|FK|EXCLUDE; Indexes tab creates (unique, btree|hash|gin|gist|spgist|brin, multi-key ASC/DESC, expression keys, INCLUDE, partial WHERE, live SQL preview)/renames/drops; Triggers tab creates (BEFORE|AFTER|INSTEAD OF, INSERT|UPDATE|DELETE|TRUNCATE, ROW|STATEMENT, function, UPDATE OF cols, WHEN)/enables/disables/drops with status badge (`GET /api/triggers` now also returns `enabled` O|D|R|A).
-- [x] Query console upgrades: txn controls live inside each tab's own toolbar (per-tab session: `user@host/dbname` label, autocommit toggle, Begin/Commit/Rollback, open/no-transaction badge) — no separate global bar, so switching tabs can never act on the wrong session; Format button, Save-snippet, multi-result rendering (one grid per statement), per-result CSV/INSERT export. Statement timeout 120s (`queryTimeout` in `internal/api/handlers.go`, console paths only). Cancel button (■): matches the tab's pool via `application_name=pglight:<session>` (`Manager.Add`) against active backends, SQL text only disambiguates concurrent runs; unique hit → `GET /api/cancel`, else toast pointing to Dashboard.
+- [x] Query console upgrades: txn controls live inside each tab's own toolbar (per-tab session: `user@host/dbname` label, autocommit toggle, Begin/Commit/Rollback, open/no-transaction badge) — no separate global bar, so switching tabs can never act on the wrong session; Format button, Save-snippet, multi-result rendering (one grid per statement), per-result CSV/INSERT export. Statement timeout 120s (`queryTimeout` in `internal/api/handlers.go`, console paths only). Cancel button (■): matches the tab's pool via `application_name=pglight:<session>` (`Manager.Add`) against active backends, SQL text only disambiguates concurrent runs; unique hit → `POST /api/cancel`, else toast pointing to Dashboard.
 - [x] Global search palette (Ctrl+K / button): jump to table/column, open data.
 - [x] Session survive-restart: per-session credentials (`session-conns`), boot 1:1 reconnect so tabs keep their own DB (dead sessions badged, never collapsed onto another DB), global 401 hook + 30s/focus heartbeat with one-shot auto-retry, per-session Reconnect / Reconnect-all in Connections, tab ids remapped on reconnect.
 - [x] Workspace tab: History | Snippets | Aliases | Server | Activity | Locks | Stats | Connections | Appearance | Settings | Shortcuts | Logs, with one navigation bar; Quick Access uses a per-section toggle list for Connection Bar visibility (Connections/Settings by default, while respecting user changes) and database views retain auto-refresh for Activity/Locks. Connections provides a compact Simple form plus an Advanced mode for optional profile metadata and PostgreSQL options; connection fields expose contextual tooltips. Appearance is a peer workspace view with app-wide Dark/Light themes, Dark/Light/Ocean presets, live custom color pickers for background/text/panel/accent/border, CSS-token synchronization across the UI and SQL editor, and persisted reload-safe preferences.
@@ -113,15 +113,15 @@ or erase history/snippets/backups outside the vault tables.
 ```
 POST /api/connect           {host,port,user,password,dbname,sslmode} → {session_id,info,tls_warn}
 GET  /api/sessions          → {sessions: [{id,host,port,user,dbname,sslmode,in_txn,connected_at}]} (display info only, no passwords)
-GET  /api/disconnect?session_id=
+DELETE /api/disconnect?session_id=
 POST /api/txn              {session_id, action}
 GET  /api/databases?session_id= | GET /api/schemas?session_id= | GET /api/tables?session_id=&schema=
 GET  /api/objects?session_id=&schema= (views/matviews/foreign/functions/sequences/types)
 GET  /api/columns?session_id=&schema=&table= | GET /api/ddl?session_id=&schema=&table=
 GET  /api/table-data?session_id=&schema=&table=&limit=&offset=&filter=&order= → {columns,types,rows,total,has_more,in_txn}
 POST /api/query             {session_id,sql,limit} (multi-statement → {results[]}; see below)
-POST /api/explain           {session_id,sql} → EXPLAIN ANALYZE (JSON, buffers)
-GET  /api/activity?session_id= | GET /api/cancel?session_id=&pid=[&kill=1]
+POST /api/explain           {session_id,sql} → read-only EXPLAIN (JSON)
+GET  /api/activity?session_id= | POST /api/cancel?session_id=&pid=[&kill=1]
 POST /api/row               {session_id,schema,table,op,values,where[,single]} (`single:true` verifies exactly 1 affected row, 409 otherwise)
 POST /api/rows-delete       {session_id,schema,table,where[]} → {deleted} — atomic bulk delete (one txn; every entry must match exactly 1 row)
 GET  /api/server-info?session_id=
@@ -146,7 +146,7 @@ POST /api/alter-table       {session_id,schema,table,op,…} — columns: add_co
 Object tabs (functions/sequences/types): view definition + properties; edits run through `POST /api/query` with quoted identifiers — sequence ALTER (increment/min/max/cache/restart/cycle), function CREATE OR REPLACE, enum ADD VALUE, sequence/type RENAME, DROP (functions resolved via `regprocedure`, all overloads confirmed). No new backend endpoint.
 Multi-statement: `POST /api/query` returns `{results[]}` when >1 statement; console limits 200/1000/5000/10000 rows or no limit; no-limit results guarded at 64 MiB with an actionable 413 error; large grids virtualize DOM rows.
 GET  /api/settings          → {logging: {enabled,level,log_http,log_query,slow_ms,max_entries}, security: {allow_lan_access,effective_mode,restart_required}}
-POST /api/settings          {logging?: {...}, security?: {allow_lan_access}} (logging persisted to data/logging.json; LAN bind setting persisted to data/server.json and applied live)
+POST /api/settings          {logging?: {...}, security?: {allow_lan_access}} (logging persisted to data/logging.json; LAN setting persisted to data/server.json and applied live; remote LAN requests require the per-process bootstrap token)
 GET  /api/logs?limit=&level=&category= → {entries[]} (newest first; /api/logs not self-logged)
 DELETE /api/logs            clear the ring buffer
 GET  /api/aliases           → {aliases: [{trigger,expansion,detail?,builtin}]} (builtins merged with user overrides; global, no session/PG)
@@ -301,7 +301,7 @@ with level/category filters, auto-refresh, clear) +
 master-password vault lifecycle, test/connect/reconnect, active sessions and
 locked-vault manual-password fallback), `Explorer` (databases → schemas →
 tables/views/matviews/foreign/functions/sequences/types + server objects),
-`QueryConsole` (multi-result, Explain Analyze text plan for whole or selected SQL, formatter, per-result
+`QueryConsole` (multi-result, read-only Explain plan for whole or selected SQL, formatter, per-result
 CSV/JSON/INSERT export), `TableWorkspace` (Data/Columns/DDL/Indexes/
 Constraints/Triggers/Stats sub-tabs, cell edit/duplicate/delete, CSV import,
 Generate mock data (`MockDataDialog`: Simple zero-config vs Advanced

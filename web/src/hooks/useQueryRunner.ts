@@ -118,7 +118,7 @@ export function useQueryRunner(deps: QueryRunnerDeps) {
           (r) => r.state === 'active' && !String(r.query ?? '').includes('pg_stat_activity'),
         )
         // Own pool first (exact when a single backend runs there).
-        const own = live.filter((r) => String(r.app ?? '') === `pglight:${sid}`)
+        const own = live.filter((r) => String(r.app ?? '').startsWith(`pglight:${sid}`))
         const pick = (pool: Record<string, unknown>[]): Record<string, unknown> | null => {
           if (!pool.length) return null
           if (pool.length === 1) return pool[0]

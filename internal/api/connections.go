@@ -152,59 +152,34 @@ func (h *Handler) Connections(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "vault is locked; unlock it before saving a password"})
 			return
 		}
-		var x store.ConnectionProfile
-		var err error
-		if strings.TrimSpace(req.ID) != "" {
-			x, err = h.Store.UpdateConnection(r.Context(), h.UserID, strings.TrimSpace(req.ID), req.Name, req.Host, req.Port, req.User, req.DBName, req.SSLMode)
-		} else {
-			x, err = h.Store.UpsertConnection(r.Context(), h.UserID, req.Name, req.Host, req.Port, req.User, req.DBName, req.SSLMode)
-		}
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if req.ClearPassword {
-			if err := h.Store.DeleteConnectionSecret(r.Context(), h.UserID, x.ID); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-				return
-			}
-			x.HasPassword = false
-		}
-		if strings.TrimSpace(req.DuplicateFrom) != "" {
-			copied, copyErr := h.Store.CopyConnectionSecret(r.Context(), h.UserID, strings.TrimSpace(req.DuplicateFrom), x.ID)
-			if copyErr != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": copyErr.Error()})
-				return
-			}
-			x.HasPassword = copied
-		}
+		var key []byte
 		if req.SavePassword {
-			key := h.copyVaultKey()
+			key = h.copyVaultKey()
 			if len(key) == 0 {
 				writeJSON(w, http.StatusConflict, map[string]string{"error": "vault is locked; unlock it before saving a password"})
 				return
 			}
-			err = h.Store.SetConnectionSecret(r.Context(), h.UserID, x.ID, key, req.Password)
-			for i := range key {
-				key[i] = 0
-			}
-			if err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-				return
-			}
-			x.HasPassword = true
+			defer func() {
+				for i := range key {
+					key[i] = 0
+				}
+			}()
 		}
-		if err := h.Store.UpdateConnectionMetadata(r.Context(), h.UserID, x.ID, req.FolderID, req.Environment, req.Color, req.Description, req.Favorite, req.Default, req.Tags); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if err := h.Store.UpdateConnectionOptions(r.Context(), h.UserID, x.ID, store.ConnectionOptions{ConnectTimeout: req.ConnectTimeout, Keepalive: req.Keepalive, ApplicationName: req.ApplicationName, SearchPath: req.SearchPath, SSLRootCert: req.SSLRootCert, SSLCert: req.SSLCert, SSLKey: req.SSLKey, UnixSocket: req.UnixSocket}); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		x, err = h.Store.GetConnection(r.Context(), h.UserID, x.ID)
+		x, err := h.Store.SaveConnectionProfile(r.Context(), h.UserID, store.ConnectionSave{
+			ID: strings.TrimSpace(req.ID), Name: req.Name, Host: req.Host, Port: req.Port, User: req.User, DBName: req.DBName, SSLMode: req.SSLMode,
+			Password: req.Password, SavePassword: req.SavePassword, ClearPassword: req.ClearPassword, DuplicateFrom: strings.TrimSpace(req.DuplicateFrom),
+			FolderID: req.FolderID, Environment: req.Environment, Color: req.Color, Description: req.Description, Favorite: req.Favorite, Default: req.Default, Tags: req.Tags,
+			Options: store.ConnectionOptions{ConnectTimeout: req.ConnectTimeout, Keepalive: req.Keepalive, ApplicationName: req.ApplicationName, SearchPath: req.SearchPath, SSLRootCert: req.SSLRootCert, SSLCert: req.SSLCert, SSLKey: req.SSLKey, UnixSocket: req.UnixSocket},
+		}, key)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			code := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "invalid connection timeout") || strings.Contains(err.Error(), "folder") || strings.Contains(err.Error(), "tag") {
+				code = http.StatusBadRequest
+			}
+			if strings.Contains(err.Error(), "vault is locked") {
+				code = http.StatusConflict
+			}
+			writeJSON(w, code, map[string]string{"error": err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"connection": connectionJSON(x)})
@@ -374,7 +349,8 @@ func (h *Handler) ConnectionImport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid profile export"})
 		return
 	}
-	imported := 0
+	items := make([]store.ConnectionImportItem, 0, len(file.Connections))
+	needsVault := false
 	for _, item := range file.Connections {
 		if strings.TrimSpace(item.Name) == "" || strings.TrimSpace(item.Host) == "" || strings.TrimSpace(item.User) == "" || strings.TrimSpace(item.DBName) == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "profile name,host,user,dbname are required"})
@@ -383,35 +359,39 @@ func (h *Handler) ConnectionImport(w http.ResponseWriter, r *http.Request) {
 		if item.Port <= 0 {
 			item.Port = 5432
 		}
-		x, err := h.Store.UpsertConnection(r.Context(), h.UserID, item.Name, item.Host, item.Port, item.User, item.DBName, db.NormalizeSSLMode(item.SSLMode))
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if err := h.Store.UpdateConnectionMetadata(r.Context(), h.UserID, x.ID, item.FolderID, item.Environment, item.Color, item.Description, item.Favorite, item.Default, item.Tags); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if err := h.Store.UpdateConnectionOptions(r.Context(), h.UserID, x.ID, item.Options); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
 		if item.Password != "" {
-			key := h.copyVaultKey()
-			if len(key) == 0 {
-				writeJSON(w, http.StatusConflict, map[string]string{"error": "vault is locked; unlock it before importing passwords"})
-				return
-			}
-			err = h.Store.SetConnectionSecret(r.Context(), h.UserID, x.ID, key, item.Password)
+			needsVault = true
+		}
+		items = append(items, store.ConnectionImportItem{
+			Name: item.Name, Host: item.Host, Port: item.Port, User: item.User, DBName: item.DBName,
+			SSLMode: db.NormalizeSSLMode(item.SSLMode), Password: item.Password, FolderID: item.FolderID,
+			Environment: item.Environment, Color: item.Color, Description: item.Description,
+			Favorite: item.Favorite, Default: item.Default, Tags: item.Tags, Options: item.Options,
+		})
+	}
+	var key []byte
+	if needsVault {
+		key = h.copyVaultKey()
+		if len(key) == 0 {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "vault is locked; unlock it before importing passwords"})
+			return
+		}
+		defer func() {
 			for i := range key {
 				key[i] = 0
 			}
-			if err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-				return
-			}
+		}()
+	}
+	imported, err := h.Store.ImportConnectionProfiles(r.Context(), h.UserID, items, key)
+	if err != nil {
+		if strings.Contains(err.Error(), "vault is locked") {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		} else if strings.Contains(err.Error(), "invalid connection timeout") || strings.Contains(err.Error(), "folder") || strings.Contains(err.Error(), "tag") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		} else {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
-		imported++
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "imported": imported})
 }
