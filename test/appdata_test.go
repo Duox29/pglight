@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"pglight/internal/api"
@@ -262,6 +263,55 @@ func TestCompleteSnapshot(t *testing.T) {
 	// fail: no session
 	code, body = callGET(t, h.Complete, "/api/complete")
 	requireErrContains(t, body, code, 401, "not connected")
+}
+
+func TestCompleteCompositeForeignKeysArePairedAndSchemaScoped(t *testing.T) {
+	h, sid := newHandler(t)
+	prefix := fmt.Sprintf("pglight_fk_%d", sidSeq.Add(1))
+	aSchema, bSchema := prefix+"_a", prefix+"_b"
+	defer execSQL(t, h, sid, fmt.Sprintf("DROP SCHEMA %s, %s CASCADE", aSchema, bSchema))
+	execSQL(t, h, sid, fmt.Sprintf(`
+		CREATE SCHEMA %s;
+		CREATE SCHEMA %s;
+		CREATE TABLE %s.parent (x int, y int, PRIMARY KEY (x,y));
+		CREATE TABLE %s.parent (x int, y int, PRIMARY KEY (x,y));
+		CREATE TABLE %s.child (a int, b int,
+			CONSTRAINT same_fk FOREIGN KEY (a,b) REFERENCES %s.parent (x,y));
+		CREATE TABLE %s.child (a int, b int,
+			CONSTRAINT same_fk FOREIGN KEY (a,b) REFERENCES %s.parent (x,y));`,
+		aSchema, bSchema, aSchema, bSchema, aSchema, aSchema, bSchema, bSchema))
+
+	code, body := callGET(t, h.Complete, withSID(sid, "/api/complete?refresh=1"))
+	requireStatus(t, body, code, 200)
+	snap := decodeObj(t, body)
+	rows, _ := snap["fks"].([]any)
+	want := map[string]bool{
+		aSchema + ".child.a→" + aSchema + ".parent.x": true,
+		aSchema + ".child.b→" + aSchema + ".parent.y": true,
+		bSchema + ".child.a→" + bSchema + ".parent.x": true,
+		bSchema + ".child.b→" + bSchema + ".parent.y": true,
+	}
+	var own []any
+	for _, raw := range rows {
+		fk, _ := raw.(map[string]any)
+		if strings.HasPrefix(fmt.Sprint(fk["src"]), prefix+"_") {
+			own = append(own, raw)
+		}
+	}
+	if len(own) != len(want) {
+		t.Fatalf("expected exactly %d FK edges, got %d: %s", len(want), len(own), body)
+	}
+	for _, raw := range own {
+		fk, _ := raw.(map[string]any)
+		key := fmt.Sprintf("%s→%s", fk["src"], fk["dst"])
+		if !want[key] {
+			t.Fatalf("unexpected or mispaired FK %s: %s", key, body)
+		}
+		delete(want, key)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing FK edges: %v", want)
+	}
 }
 
 func TestCompleteETag(t *testing.T) {

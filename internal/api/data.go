@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -176,8 +177,9 @@ func parseFilterValue(s string) (any, error) {
 	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
 		return i, nil
 	}
-	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		return f, nil
+	var n pgtype.Numeric
+	if err := n.Scan(s); err == nil {
+		return n, nil
 	}
 	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
 		value := s[1 : len(s)-1]
@@ -709,6 +711,9 @@ var intRe = regexp.MustCompile(`^[+-]?\d+$`)
 // numeric values arrive after the string wire format) become int64/Numeric.
 func coerceVal(v any, udt string) any {
 	s, ok := v.(string)
+	if n, number := v.(json.Number); number {
+		s, ok = n.String(), true
+	}
 	if !ok {
 		return v
 	}

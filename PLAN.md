@@ -423,6 +423,29 @@ Verification completed against the Docker PostgreSQL 14 fixture:
 
 Resolved findings:
 
+- **[P1] Vault status polling and unlock backoff were ineffective.** Vault
+  status checks no longer refresh the idle timer, and failed unlock/change
+  attempts are rejected before the next Argon2 operation during backoff.
+  Regression coverage is in `internal/api/vault_test.go`.
+- **[P1] Limited query results could never report `has_more`.** Single,
+  `WITH`, and multi-statement query results now fetch one sentinel row and
+  expose an explicit `has_more` boolean; exact-limit results report false.
+  Coverage is in `test/query_test.go`.
+- **[P1] Decimal write/filter values could round through `float64`.** JSON
+  decimals remain textual until type-aware PostgreSQL coercion, and filter
+  decimals use `pgtype.Numeric`; coverage is in `test/data_test.go` and
+  `internal/api/query_contract_test.go`.
+- **[P1] Completion FK edges cross-matched schemas/composite columns.** FK
+  completion now uses catalog constraint OIDs and ordinality pairing, with a
+  composite/schema-scoped fixture in `test/appdata_test.go`.
+- **[P2] Table DDL reconstruction dropped PostgreSQL type modifiers.** DDL
+  now uses catalog `format_type` and attribute definitions for lengths,
+  precision, arrays, identity/generated columns, collations, and defaults;
+  `test/explorer_test.go` covers the representative types.
+- **[P2] JSON bodies accepted trailing values.** `decodeBody` now requires
+  exactly one JSON value. Transaction cleanup rollback contexts are also
+  bounded per transaction, covered by `internal/db/manager_test.go`.
+
 - **[P1] Table pagination ignored `has_more`.** `TableWorkspace` now honors the
   backend signal, with regression coverage in
   `web/src/test/TableWorkspace.pagination.test.tsx`.

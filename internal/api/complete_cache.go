@@ -153,14 +153,22 @@ func fetchCompleteSnapshot(ctx context.Context, qq db.Querier) (*CompleteSnapsho
 		return nil, err
 	}
 	_, erows, err := queryJSON(qq, fctx, `
-		SELECT tc.table_schema||'.'||tc.table_name||'.'||kcu.column_name,
-		       ccu.table_schema||'.'||ccu.table_name||'.'||ccu.column_name
-		FROM information_schema.table_constraints tc
-		JOIN information_schema.key_column_usage kcu
-		  ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
-		JOIN information_schema.constraint_column_usage ccu
-		  ON ccu.constraint_name = tc.constraint_name
-		WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema NOT LIKE 'pg\_%' LIMIT 500`)
+		SELECT src_ns.nspname||'.'||src.relname||'.'||src_col.attname,
+		       dst_ns.nspname||'.'||dst.relname||'.'||dst_col.attname
+		FROM pg_constraint con
+		JOIN pg_class src ON src.oid = con.conrelid
+		JOIN pg_namespace src_ns ON src_ns.oid = src.relnamespace
+		JOIN pg_class dst ON dst.oid = con.confrelid
+		JOIN pg_namespace dst_ns ON dst_ns.oid = dst.relnamespace
+		JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS sk(attnum, ord) ON true
+		JOIN LATERAL unnest(con.confkey) WITH ORDINALITY AS tk(attnum, ord) ON tk.ord = sk.ord
+		JOIN pg_attribute src_col ON src_col.attrelid = src.oid AND src_col.attnum = sk.attnum
+		JOIN pg_attribute dst_col ON dst_col.attrelid = dst.oid AND dst_col.attnum = tk.attnum
+		WHERE con.contype = 'f'
+		  AND src_ns.nspname NOT IN ('pg_catalog','information_schema')
+		  AND src_ns.nspname NOT LIKE 'pg\_%'
+		ORDER BY src_ns.nspname, src.relname, con.oid, sk.ord
+		LIMIT 500`)
 	if err != nil {
 		return nil, err
 	}

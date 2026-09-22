@@ -17,14 +17,10 @@ const (
 	vaultMaxBackoff      = 30 * time.Second
 )
 
-func (h *Handler) vaultUnlocked() bool {
+func (h *Handler) isVaultUnlocked() bool {
 	h.vaultMu.Lock()
 	defer h.vaultMu.Unlock()
-	if len(h.vaultKey) == 0 {
-		return false
-	}
-	h.armVaultTimerLocked()
-	return true
+	return len(h.vaultKey) > 0
 }
 
 func (h *Handler) copyVaultKey() []byte {
@@ -35,6 +31,21 @@ func (h *Handler) copyVaultKey() []byte {
 	}
 	h.armVaultTimerLocked()
 	return append([]byte(nil), h.vaultKey...)
+}
+
+func (h *Handler) vaultRetryWait() time.Duration {
+	h.vaultFailMu.Lock()
+	defer h.vaultFailMu.Unlock()
+	f, ok := h.vaultFailures[h.UserID]
+	if !ok {
+		return 0
+	}
+	wait := time.Until(f.retryAt)
+	if wait <= 0 {
+		delete(h.vaultFailures, h.UserID)
+		return 0
+	}
+	return wait
 }
 
 func (h *Handler) setVaultKey(key []byte) {
@@ -154,7 +165,7 @@ func (h *Handler) Vault(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"exists":            err == nil,
-			"unlocked":          h.vaultUnlocked(),
+			"unlocked":          h.isVaultUnlocked(),
 			"version":           version,
 			"auto_lock_seconds": int(vaultIdleTimeout / time.Second),
 		})
@@ -208,6 +219,10 @@ func (h *Handler) Vault(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 				return
 			}
+			if wait := h.vaultRetryWait(); wait > 0 {
+				vaultRetryResponse(w, wait)
+				return
+			}
 			key, err := store.UnlockVault(record, req.MasterPassword)
 			if err != nil {
 				wait, count := h.recordVaultFailure()
@@ -230,6 +245,10 @@ func (h *Handler) Vault(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := validMasterPassword(req.NewPassword); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if wait := h.vaultRetryWait(); wait > 0 {
+				vaultRetryResponse(w, wait)
 				return
 			}
 			if err := h.Store.ChangeVaultMaster(r.Context(), h.UserID, req.CurrentPassword, req.NewPassword); err != nil {

@@ -518,7 +518,7 @@ func topLevelResultKeyword(sql string) bool {
 // Non-SELECTs and no-limit (0) pass through untouched.
 func wrapSelect(sql string, limit int) string {
 	if limit > 0 && isSingleSelect(sql) {
-		return fmt.Sprintf("SELECT * FROM (%s) AS _q LIMIT %d", strings.TrimSuffix(sql, ";"), limit)
+		return fmt.Sprintf("SELECT * FROM (%s) AS _q LIMIT %d", strings.TrimSuffix(sql, ";"), limit+1)
 	}
 	return sql
 }
@@ -547,9 +547,12 @@ func (h *Handler) runSingle(r *http.Request, qq db.Querier, sql string, limit in
 		"duration_ms":   time.Since(start).Milliseconds(),
 		"statement":     sql,
 	}
-	if limit > 0 && len(data) > limit {
-		out["has_more"] = true
-		out["rows"] = data[:limit]
+	if limit > 0 {
+		hasMore := len(data) > limit
+		out["has_more"] = hasMore
+		if hasMore {
+			out["rows"] = data[:limit]
+		}
 	}
 	return out, nil
 }

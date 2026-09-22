@@ -129,7 +129,7 @@ func (h *Handler) Connections(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": folderErr.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"connections": out, "folders": folders, "vault_unlocked": h.vaultUnlocked()})
+		writeJSON(w, http.StatusOK, map[string]any{"connections": out, "folders": folders, "vault_unlocked": h.isVaultUnlocked()})
 	case http.MethodPost:
 		var req connectionRequest
 		if err := decodeBody(r, &req); err != nil {
@@ -148,7 +148,7 @@ func (h *Handler) Connections(w http.ResponseWriter, r *http.Request) {
 		if req.Port <= 0 {
 			req.Port = 5432
 		}
-		if req.SavePassword && !h.vaultUnlocked() {
+		if req.SavePassword && !h.isVaultUnlocked() {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "vault is locked; unlock it before saving a password"})
 			return
 		}

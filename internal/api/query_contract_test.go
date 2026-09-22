@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"pglight/internal/db"
@@ -13,6 +14,21 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+func TestParseFilterValuePreservesDecimalPrecision(t *testing.T) {
+	got, err := parseFilterValue("123456789012.123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, ok := got.(pgtype.Numeric)
+	if !ok {
+		t.Fatalf("decimal filter became %T, want pgtype.Numeric", got)
+	}
+	value, err := n.Value()
+	if err != nil || value != "123456789012.123456" {
+		t.Fatalf("decimal filter lost precision: value=%v err=%v", value, err)
+	}
+}
 
 type contractRows struct {
 	valuesErr error
@@ -54,5 +70,15 @@ func TestExecQueryStreamErrorIncludesTxnState(t *testing.T) {
 	}
 	if body["in_txn"] != false {
 		t.Fatalf("stream errors must include in_txn=false, body=%s", w.Body.String())
+	}
+}
+
+func TestDecodeBodyRejectsTrailingJSON(t *testing.T) {
+	r := httptest.NewRequest("POST", "/", strings.NewReader(`{"ok":true}{"second":true}`))
+	var body struct {
+		OK bool `json:"ok"`
+	}
+	if err := decodeBody(r, &body); err == nil {
+		t.Fatal("decodeBody accepted trailing JSON")
 	}
 }

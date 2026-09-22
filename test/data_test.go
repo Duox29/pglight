@@ -106,8 +106,9 @@ func TestRowOpBigintRoundTrip(t *testing.T) {
 	defer execSQL(t, h, sid, fmt.Sprintf(`DROP TABLE %s`, tbl))
 	const big = "9223372036854775807"
 
+	const precise = "123456789012.123456"
 	code, body := callPOST(t, h.RowOp, "/api/row",
-		fmt.Sprintf(`{"session_id":%q,"schema":"public","table":%q,"op":"insert","values":{"id":%s,"v":"3.140000","note":"__NULL__"}}`, sid, tbl, big))
+		fmt.Sprintf(`{"session_id":%q,"schema":"public","table":%q,"op":"insert","values":{"id":%s,"v":%s,"note":"__NULL__"}}`, sid, tbl, big, precise))
 	requireStatus(t, body, code, 200)
 	requireDeep(t, body, "insert", decodeObj(t, body), map[string]any{"rows_affected": 1, "in_txn": false})
 	// Exact numerics cross the wire as strings (JS-safe): verify through the
@@ -116,7 +117,7 @@ func TestRowOpBigintRoundTrip(t *testing.T) {
 	code, body = callPOST(t, h.Query, "/api/query",
 		fmt.Sprintf(`{"session_id":%q,"sql":"SELECT id, v, note FROM %s"}`, sid, tbl))
 	requireStatus(t, body, code, 200)
-	for _, want := range []string{`"` + big + `"`, `"3.140000"`, `"__NULL__"`} {
+	for _, want := range []string{`"` + big + `"`, `"` + precise + `"`, `"__NULL__"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("wire value %s missing in %s", want, body)
 		}
@@ -132,7 +133,7 @@ func TestRowOpBigintRoundTrip(t *testing.T) {
 	}
 	// numeric(18,6) keeps its scale: compare the text rendering.
 	ntxt := queryRows(t, h, sid, fmt.Sprintf(`SELECT v::text FROM %s`, tbl))
-	if len(ntxt) != 1 || fmt.Sprint(ntxt[0][0]) != "3.140000" {
+	if len(ntxt) != 1 || fmt.Sprint(ntxt[0][0]) != precise {
 		t.Fatalf("numeric corrupted: %v", ntxt)
 	}
 	if data[0][2] != "__NULL__" {

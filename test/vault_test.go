@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestVaultLifecycleAndSecretAtRest(t *testing.T) {
@@ -44,6 +45,8 @@ func TestVaultLifecycleAndSecretAtRest(t *testing.T) {
 	requireErrContains(t, body, code, 409, "vault is locked")
 	code, body = callPOST(t, h.Vault, "/api/vault", `{"action":"unlock","master_password":"wrong password"}`)
 	requireErrContains(t, body, code, 401, "invalid master password")
+	// Failed unlocks impose a short server-side backoff before the next KDF.
+	time.Sleep(300 * time.Millisecond)
 	code, body = callPOST(t, h.Vault, "/api/vault", `{"action":"unlock","master_password":"correct horse battery staple"}`)
 	requireStatus(t, body, code, 200)
 	// Destructive vault reset is intentionally an offline CLI operation, not

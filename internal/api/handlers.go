@@ -109,12 +109,23 @@ func decodeBody(r *http.Request, v any) error {
 	}
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
-	return dec.Decode(v)
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("trailing JSON data")
+		}
+		return fmt.Errorf("trailing JSON data: %w", err)
+	}
+	return nil
 }
 
 // numVal converts a decoded JSON number to the most exact Go value: integral
-// numbers become int64 (exact through pgx), decimals stay float64 unless the
-// caller coerces them against a known column type. Non-numbers pass through.
+// numbers become int64 (exact through pgx), while decimal json.Number values
+// stay textual until the caller coerces them against a known column type.
+// Non-numbers pass through.
 func numVal(v any) any {
 	n, ok := v.(json.Number)
 	if !ok {
@@ -123,10 +134,7 @@ func numVal(v any) any {
 	if i, err := n.Int64(); err == nil && json.Number(strconv.FormatInt(i, 10)) == n {
 		return i
 	}
-	if f, err := n.Float64(); err == nil {
-		return f
-	}
-	return string(n)
+	return n
 }
 
 // numVals maps numVal over a slice (import rows) or a map (row ops).

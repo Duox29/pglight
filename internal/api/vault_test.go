@@ -78,3 +78,38 @@ func TestVaultStatusReportsVersionAndLockState(t *testing.T) {
 		t.Fatalf("unexpected status: %+v", body)
 	}
 }
+
+func TestVaultStatusDoesNotTouchIdleTimer(t *testing.T) {
+	h := vaultTestHandler(t)
+	h.setVaultKey([]byte("test-key"))
+	defer h.lockVault()
+
+	before := h.vaultEpoch
+	if !h.isVaultUnlocked() {
+		t.Fatal("vault should be unlocked")
+	}
+	if got := h.vaultEpoch; got != before {
+		t.Fatalf("status check refreshed vault idle epoch: before=%d after=%d", before, got)
+	}
+}
+
+func TestVaultBackoffSkipsUnlockWork(t *testing.T) {
+	h := vaultTestHandler(t)
+	if w := vaultPost(t, h, `{"action":"setup","master_password":"old-password"}`); w.Code != http.StatusOK {
+		t.Fatalf("setup status=%d body=%s", w.Code, w.Body.String())
+	}
+	if w := vaultPost(t, h, `{"action":"lock"}`); w.Code != http.StatusOK {
+		t.Fatalf("lock status=%d", w.Code)
+	}
+	if w := vaultPost(t, h, `{"action":"unlock","master_password":"wrong-password"}`); w.Code != http.StatusUnauthorized {
+		t.Fatalf("first wrong password status=%d", w.Code)
+	}
+	// The second request is inside the first failure's backoff window. A
+	// correct password must still be rejected without running Argon2.
+	if w := vaultPost(t, h, `{"action":"unlock","master_password":"old-password"}`); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("backoff status=%d body=%s", w.Code, w.Body.String())
+	}
+	if h.isVaultUnlocked() {
+		t.Fatal("rate-limited unlock must not unlock the vault")
+	}
+}

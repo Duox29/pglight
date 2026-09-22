@@ -60,6 +60,37 @@ func TestQueryHappyLimitWrapper(t *testing.T) {
 	requireStatus(t, body, code, 200)
 	requireColumns(t, body, []string{"n"})
 	requireRows(t, body, [][]any{{1}, {2}})
+	requireDeep(t, body, "has_more", decodeObj(t, body)["has_more"], true)
+}
+
+func TestQueryHasMoreLimitBoundaries(t *testing.T) {
+	h, sid := newHandler(t)
+	for _, tc := range []struct {
+		name string
+		sql  string
+		want bool
+	}{
+		{name: "exact", sql: "SELECT generate_series(1,2) AS n", want: false},
+		{name: "short", sql: "SELECT 1 AS n", want: false},
+		{name: "with", sql: "WITH x AS (SELECT generate_series(1,3) AS n) SELECT n FROM x ORDER BY n", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, body := callPOST(t, h.Query, "/api/query", qBody(sid, tc.sql, 2))
+			requireStatus(t, body, code, 200)
+			requireDeep(t, body, "has_more", decodeObj(t, body)["has_more"], tc.want)
+		})
+	}
+
+	code, body := callPOST(t, h.Query, "/api/query", qBody(sid, "SELECT generate_series(1,3) AS n; SELECT 1 AS one", 2))
+	requireStatus(t, body, code, 200)
+	results, _ := decodeObj(t, body)["results"].([]any)
+	if len(results) != 2 {
+		t.Fatalf("expected two results, got %s", body)
+	}
+	first, _ := results[0].(map[string]any)
+	second, _ := results[1].(map[string]any)
+	requireDeep(t, body, "multi first has_more", first["has_more"], true)
+	requireDeep(t, body, "multi second has_more", second["has_more"], false)
 }
 
 func TestQueryLargeResultLimits(t *testing.T) {

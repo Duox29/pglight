@@ -59,6 +59,12 @@ type txEntry struct {
 	lastUse time.Time
 }
 
+const txnCleanupTimeout = 5 * time.Second
+
+func txnCleanupContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), txnCleanupTimeout)
+}
+
 func (e *txEntry) touch() { e.lastUse = time.Now() }
 
 // isDone reports lifecycle state without taking e.mu (atomic, race-free).
@@ -296,7 +302,9 @@ func (m *Manager) AddWithOptions(id, connStr string, opts ConnOptions) error {
 	if oldEntry != nil {
 		oldEntry.mu.Lock()
 		if !oldEntry.done.Load() {
-			_ = oldEntry.tx.Rollback(context.Background())
+			rollbackCtx, cancel := txnCleanupContext()
+			_ = oldEntry.tx.Rollback(rollbackCtx)
+			cancel()
 			oldEntry.done.Store(true)
 		}
 		oldEntry.mu.Unlock()
@@ -354,7 +362,9 @@ func (m *Manager) Close(id string) {
 		// Wait for any in-flight txn operation before tearing down.
 		entry.mu.Lock()
 		if !entry.done.Load() {
-			_ = entry.tx.Rollback(context.Background())
+			rollbackCtx, cancel := txnCleanupContext()
+			_ = entry.tx.Rollback(rollbackCtx)
+			cancel()
 			entry.done.Store(true)
 		}
 		entry.mu.Unlock()
@@ -776,10 +786,11 @@ func (m *Manager) SweepAbandonedTxns(ttl time.Duration) []string {
 		}
 	}
 	var rolled []string
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 	for _, id := range stale {
-		if err := m.Rollback(ctx, id); err == nil {
+		ctx, cancel := txnCleanupContext()
+		err := m.Rollback(ctx, id)
+		cancel()
+		if err == nil {
 			rolled = append(rolled, id)
 		}
 	}
