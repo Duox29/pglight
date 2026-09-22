@@ -25,7 +25,11 @@ export interface SplitWorkspaceProps {
 }
 
 function paneOverflowClass(tab: Tab | null) {
-  return tab?.kind === 'workspace' ? 'overflow-hidden' : 'overflow-auto'
+  // Feature views own their data-region scroll. Keeping the pane itself
+  // clipped prevents a second page-level scrollbar and lets flex-1/min-h-0
+  // regions consume the remaining viewport height.
+  // Docs remains a long-form document and intentionally owns the pane scroll.
+  return tab?.kind === 'docs' ? 'overflow-auto' : 'overflow-hidden'
 }
 
 /* Two-pane (max 2) workspace layout. Single pane when secondary is null;

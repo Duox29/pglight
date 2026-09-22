@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './table'
 import { EmptyNote } from './feedback'
@@ -90,6 +90,8 @@ export function DataGrid({
   onCellClick,
   cellClassName,
   selectable,
+  renderCell,
+  containerClassName,
 }: {
   data: GridData | null | undefined
   onSort?: (colIndex: number) => void
@@ -100,6 +102,10 @@ export function DataGrid({
   /** Opt-in row selection + right-click menu (single/bulk select, copy/export).
       Off by default so read-only panels (logs, stats, browser) stay plain. */
   selectable?: boolean
+  /** Render custom content for a cell, e.g. row actions. */
+  renderCell?: (value: unknown, row: unknown[], rowIndex: number, columnIndex: number) => ReactNode
+  /** Extra classes for the scroll owner. Use flex-1 min-h-0 in constrained panes. */
+  containerClassName?: string
 }) {
   const resultRows = data?.rows
   const pageRows = resultRows ?? []
@@ -157,7 +163,10 @@ export function DataGrid({
   }
 
   const grid = (
-    <Table containerRef={virtualized ? viewportRef : undefined} containerClassName={virtualized ? 'max-h-[min(60vh,640px)]' : undefined}>
+    <Table
+      containerRef={virtualized ? viewportRef : undefined}
+      containerClassName={containerClassName ?? (virtualized ? 'max-h-[min(60vh,640px)]' : undefined)}
+    >
       <TableHeader className="sticky top-0 z-10 bg-card">
         <TableRow
           className="hover:bg-transparent"
@@ -205,6 +214,7 @@ export function DataGrid({
             >
               {r.map((c, ci) => {
                 const t = data.types?.[ci]
+                const custom = renderCell?.(c, r, ri, ci)
                 const json = c != null && isJsonType(c, t)
                 const full = c == null ? 'NULL' : json ? String(c).slice(0, 2000) : String(c).slice(0, 500)
                 const cell = (
@@ -229,7 +239,7 @@ export function DataGrid({
                     }
                     className={`${c == null ? 'italic text-muted-foreground' : ''} ${cellClassName?.(c) ?? ''} ${selectable ? '' : onCellClick ? 'cursor-pointer' : ''} ${isNumericType(t) ? 'text-right font-mono' : ''} ${isBoolType(t) ? 'text-center' : ''} ${json ? 'font-mono text-[11px]' : ''}`}
                   >
-                    {c == null ? 'NULL' : isBoolType(t) ? (c === true || c === 't' || c === 'true' ? 'true' : c === false || c === 'f' || c === 'false' ? 'false' : String(c)) : String(c).slice(0, 300)}
+                    {custom ?? (c == null ? 'NULL' : isBoolType(t) ? (c === true || c === 't' || c === 'true' ? 'true' : c === false || c === 'f' || c === 'false' ? 'false' : String(c)) : String(c).slice(0, 300))}
                   </TableCell>
                 )
                 return full.length > 40 ? (

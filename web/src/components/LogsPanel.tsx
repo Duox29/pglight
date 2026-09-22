@@ -50,7 +50,7 @@ export function LogsPanel() {
   }
 
   return (
-    <Card className="p-2.5">
+    <Card className="flex min-h-0 flex-1 flex-col p-2.5">
       <div className="mb-2 flex items-center gap-1.5">
         <span className="text-[12px] font-semibold">Recent logs</span>
         <span className="flex-1" />
@@ -101,6 +101,7 @@ export function LogsPanel() {
               e.duration_ms ?? '',
             ]),
           }}
+          containerClassName="min-h-0 max-h-full flex-1"
         />
       ) : (
         <EmptyNote text="No entries — run a query or lower the level to debug" />

@@ -5,6 +5,7 @@ import { Button } from './ui/button'
 import { Tip } from './ui/tooltip'
 import { Card } from './ui/card'
 import { EmptyNote, ErrorText } from './ui/feedback'
+import { ScrollArea } from './ui/scroll-area'
 import { apiClient, type CompletionAlias } from '@/lib/api'
 import { refreshAliases } from '@/lib/aliases'
 import type { DialogsApi } from './dialogs'
@@ -128,7 +129,7 @@ export function AliasesPanel({ dialogs }: { dialogs: DialogsApi }) {
   }
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex h-full min-h-0 flex-col gap-1.5">
       <div className="flex items-center justify-between">
         <p className="text-[11px] text-muted-foreground">Short triggers expand on prefix match — e.g. ssf → SELECT * FROM.</p>
         <div className="flex shrink-0 gap-1">
@@ -149,45 +150,49 @@ export function AliasesPanel({ dialogs }: { dialogs: DialogsApi }) {
         </div>
       </div>
       <ErrorText message={error} />
-      {!aliases.length && !error ? (
-        <EmptyNote text="Loading…" />
-      ) : (
-        aliases.map((a) => (
-          <Card key={a.trigger} className="p-2">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 text-[12px]">
-                  <b className="font-mono">{a.trigger}</b>
-                  {a.builtin ? (
-                    <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">builtin</span>
-                  ) : (
-                    <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">custom</span>
-                  )}
+      <ScrollArea className="min-h-0 flex-1 pr-1">
+        <div className="space-y-1.5">
+          {!aliases.length && !error ? (
+            <EmptyNote text="Loading…" />
+          ) : (
+            aliases.map((a) => (
+              <Card key={a.trigger} className="p-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 text-[12px]">
+                      <b className="font-mono">{a.trigger}</b>
+                      {a.builtin ? (
+                        <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">builtin</span>
+                      ) : (
+                        <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">custom</span>
+                      )}
+                    </div>
+                    <pre className="mt-1 max-h-[120px] overflow-auto whitespace-pre-wrap rounded border border-input bg-background px-2 py-1 font-mono text-[11px]">{a.expansion}</pre>
+                  </div>
+                  <div className="flex shrink-0 gap-0.5">
+                    <Tip content={a.builtin ? 'Override builtin' : 'Edit alias'}>
+                      <span className="inline-flex">
+                        <Button size="sm" variant="ghost" onClick={() => editAlias(a)} aria-label={`Edit alias ${a.trigger}`}>
+                          <Pencil />
+                        </Button>
+                      </span>
+                    </Tip>
+                    {!a.builtin && (
+                      <Tip content="Delete alias">
+                        <span className="inline-flex">
+                          <Button size="sm" variant="ghost" onClick={() => deleteAlias(a.trigger)} aria-label={`Delete alias ${a.trigger}`}>
+                            <Trash2 />
+                          </Button>
+                        </span>
+                      </Tip>
+                    )}
+                  </div>
                 </div>
-                <pre className="mt-1 max-h-[120px] overflow-auto whitespace-pre-wrap rounded border border-input bg-background px-2 py-1 font-mono text-[11px]">{a.expansion}</pre>
-              </div>
-              <div className="flex shrink-0 gap-0.5">
-                <Tip content={a.builtin ? 'Override builtin' : 'Edit alias'}>
-                  <span className="inline-flex">
-                    <Button size="sm" variant="ghost" onClick={() => editAlias(a)} aria-label={`Edit alias ${a.trigger}`}>
-                      <Pencil />
-                    </Button>
-                  </span>
-                </Tip>
-                {!a.builtin && (
-                  <Tip content="Delete alias">
-                    <span className="inline-flex">
-                      <Button size="sm" variant="ghost" onClick={() => deleteAlias(a.trigger)} aria-label={`Delete alias ${a.trigger}`}>
-                        <Trash2 />
-                      </Button>
-                    </span>
-                  </Tip>
-                )}
-              </div>
-            </div>
-          </Card>
-        ))
-      )}
+              </Card>
+            ))
+          )}
+        </div>
+      </ScrollArea>
     </div>
   )
 }

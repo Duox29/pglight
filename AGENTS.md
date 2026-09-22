@@ -114,6 +114,11 @@ is git-ignored: rebuild it, never commit it).
    Add it to `ui/` in shadcn style (cva variants, Radix under the hood).
    Known drift (do not extend): a few feature components still contain raw
    buttons/inputs — migrate them to `ui/*` when touched.
+   **Prebuilt priority:** MUST use an existing prebuilt component whenever one
+   is suitable before implementing new markup or interaction primitives. If no
+   suitable prebuilt component exists, create a reusable shadcn-style component
+   in `web/src/components/ui/` (or the appropriate shared components directory)
+   and update this `AGENTS.md` with the new component and its intended reuse.
 2. **No native dialogs, ever**: no `alert/confirm/prompt` —
    - notifications → `toast.success/error/info` (Sonner; monochrome thin style
      on `<Toaster>` in `App.tsx`, don't restyle per-call),

@@ -7,7 +7,7 @@ import type { BrowserTabT } from '@/types'
 export function BrowserView(props: { tab: BrowserTabT; onReload: () => void }) {
   const { tab: t } = props
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="flex items-center gap-1.5">
         <b className="text-sm">{t.title}</b>
         <span className="flex-1" />
@@ -17,7 +17,10 @@ export function BrowserView(props: { tab: BrowserTabT; onReload: () => void }) {
       </div>
       <ErrorText message={t.error} />
       {t.rows ? (
-        <DataGrid data={{ columns: t.cols, rows: t.rows.map((r) => t.cols.map((c) => r[c])) }} />
+        <DataGrid
+          data={{ columns: t.cols, rows: t.rows.map((r) => t.cols.map((c) => r[c])) }}
+          containerClassName="min-h-0 max-h-full flex-1"
+        />
       ) : (
         <EmptyNote text={t.error ? 'Failed to load' : 'Loading…'} />
       )}

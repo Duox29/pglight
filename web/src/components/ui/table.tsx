@@ -8,7 +8,7 @@ type TableProps = React.HTMLAttributes<HTMLTableElement> & {
 }
 
 const Table = React.forwardRef<HTMLTableElement, TableProps>(({ className, containerClassName, containerRef, ...props }, ref) => (
-  <div ref={containerRef} className={cn('relative w-full overflow-auto rounded-md border', containerClassName)}>
+  <div ref={containerRef} data-pglight-scroll-container className={cn('relative min-w-0 overflow-auto rounded-md border', containerClassName)}>
     <table ref={ref} className={cn('w-full caption-bottom text-xs', className)} {...props} />
   </div>
 ))
@@ -30,7 +30,7 @@ const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTML
 TableRow.displayName = 'TableRow'
 
 const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<HTMLTableCellElement>>(({ className, ...props }, ref) => (
-  <th ref={ref} className={cn('h-8 bg-muted/60 px-2.5 text-left align-middle font-medium text-muted-foreground whitespace-nowrap max-w-[320px] overflow-hidden text-ellipsis', className)} {...props} />
+  <th ref={ref} className={cn('sticky top-0 z-10 h-8 bg-card px-2.5 text-left align-middle font-medium text-muted-foreground whitespace-nowrap max-w-[320px] overflow-hidden text-ellipsis', className)} {...props} />
 ))
 TableHead.displayName = 'TableHead'
 

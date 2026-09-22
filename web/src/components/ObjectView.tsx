@@ -67,7 +67,7 @@ export function ObjectView(props: Props) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden">
       <div className="flex items-center gap-1.5">
         <b className="text-sm">{t.title}</b>
         <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
@@ -98,7 +98,7 @@ export function ObjectView(props: Props) {
       {t.def == null && !t.error ? (
         <EmptyNote text="Loading…" />
       ) : (
-        <>
+        <div className="min-h-0 flex-1 overflow-auto">
           {entries.length > 0 && (
             <Card>
               <CardHeader>
@@ -236,7 +236,7 @@ export function ObjectView(props: Props) {
               </CardContent>
             </Card>
           )}
-        </>
+        </div>
       )}
     </div>
   )

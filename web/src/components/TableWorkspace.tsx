@@ -142,7 +142,7 @@ export function TableWorkspace(p: Props) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden">
       <div className="flex flex-wrap items-end gap-1.5">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{t.table}</div>
@@ -162,7 +162,7 @@ export function TableWorkspace(p: Props) {
         </Tabs>
       </div>
       {t.subtab === 'data' && (
-        <div className="flex flex-col gap-2">
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <Input
               className="w-[240px]"
@@ -266,8 +266,8 @@ export function TableWorkspace(p: Props) {
           {t.result ? (
             <ContextMenu>
               <ContextMenuTrigger asChild>
-                <div>
-                <Table>
+                <div className="flex min-h-0 flex-1 flex-col">
+                <Table containerClassName="min-h-0 max-h-full flex-1">
                   <TableHeader>
                     <TableRow onContextMenu={() => gridSel.setCtxCell(null)}>
                       {t.result.columns.map((c) => (
@@ -365,7 +365,7 @@ export function TableWorkspace(p: Props) {
         </div>
       )}
 
-      <Tabs value={t.subtab}>
+      <Tabs value={t.subtab} className={t.subtab === 'data' ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
         {(t.subtab === 'columns' || t.subtab === 'constraints' || t.subtab === 'triggers') && (
           <div className="flex items-center gap-1 text-[12px]" role="tablist" aria-label="Structure sections">
             {(['columns', 'constraints', 'triggers'] as TableSubtab[]).map((s) => (
@@ -381,7 +381,7 @@ export function TableWorkspace(p: Props) {
             ))}
           </div>
         )}
-        <TabsContent value="columns">
+        <TabsContent value="columns" className="min-h-0 flex-1 overflow-auto">
           <div className="mb-2 flex items-center gap-1.5">
             <span className="text-[12px] text-muted-foreground">{t.cols ? `${t.cols.length} columns` : ''} · double-click a row to edit</span>
             <span className="flex-1" />
@@ -397,7 +397,7 @@ export function TableWorkspace(p: Props) {
             </Button>
           </div>
           {t.cols ? (
-            <Table>
+            <Table containerClassName="min-h-0 max-h-full">
               <TableHeader>
                 <TableRow>
                   {['name', 'type', 'nullable', 'default', 'pk', 'comment'].map((c) => <TableHead key={c}>{c}</TableHead>)}
@@ -484,7 +484,7 @@ export function TableWorkspace(p: Props) {
             />
           )}
         </TabsContent>
-        <TabsContent value="ddl">
+        <TabsContent value="ddl" className="min-h-0 flex-1 overflow-auto">
           {t.ddl ? (
             <div className="flex flex-col gap-2">
               <div className="text-[12px] text-muted-foreground">
@@ -513,7 +513,7 @@ export function TableWorkspace(p: Props) {
             <EmptyNote text="Loading DDL…" />
           )}
         </TabsContent>
-        <TabsContent value="indexes">
+        <TabsContent value="indexes" className="min-h-0 flex-1 overflow-auto">
           <div className="mb-2 flex items-center gap-1.5">
             <span className="text-[12px] text-muted-foreground">{t.ddl ? `${t.ddl.indexes?.length ?? 0} indexes` : ''}</span>
             <span className="flex-1" />
@@ -522,7 +522,7 @@ export function TableWorkspace(p: Props) {
             </Button>
           </div>
           {t.ddl ? (
-            <Table>
+            <Table containerClassName="min-h-0 max-h-full">
               <TableHeader>
                 <TableRow>
                   <TableHead>name</TableHead>
@@ -597,7 +597,7 @@ export function TableWorkspace(p: Props) {
             />
           )}
         </TabsContent>
-        <TabsContent value="constraints">
+        <TabsContent value="constraints" className="min-h-0 flex-1 overflow-auto">
           <div className="mb-2 flex items-center gap-1.5">
             <span className="text-[12px] text-muted-foreground">{t.constraints ? `${t.constraints.length} constraints` : ''}</span>
             <span className="flex-1" />
@@ -606,7 +606,7 @@ export function TableWorkspace(p: Props) {
             </Button>
           </div>
           {t.constraints ? (
-            <Table>
+            <Table containerClassName="min-h-0 max-h-full">
               <TableHeader>
                 <TableRow>
                   <TableHead>name</TableHead>
@@ -656,7 +656,7 @@ export function TableWorkspace(p: Props) {
             />
           )}
         </TabsContent>
-        <TabsContent value="triggers">
+        <TabsContent value="triggers" className="min-h-0 flex-1 overflow-auto">
           <div className="mb-2 flex items-center gap-1.5">
             <span className="text-[12px] text-muted-foreground">{t.triggers ? `${t.triggers.length} triggers` : ''}</span>
             <span className="flex-1" />
@@ -665,7 +665,7 @@ export function TableWorkspace(p: Props) {
             </Button>
           </div>
           {t.triggers ? (
-            <Table>
+            <Table containerClassName="min-h-0 max-h-full">
               <TableHeader>
                 <TableRow>
                   {['name', 'table', 'event', 'timing', 'statement'].map((c) => <TableHead key={c}>{c}</TableHead>)}
@@ -743,7 +743,7 @@ export function TableWorkspace(p: Props) {
             />
           )}
         </TabsContent>
-        <TabsContent value="stats">
+        <TabsContent value="stats" className="min-h-0 flex-1 overflow-auto">
           {t.stats ? (
             <div className="flex flex-col gap-2">
               <Card className="p-2.5">

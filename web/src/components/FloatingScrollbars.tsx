@@ -115,16 +115,30 @@ export function FloatingScrollbars() {
     document.body.appendChild(layer)
 
     const entries = new Map<HTMLElement, ScrollEntry>()
+    const pending = new Set<ScrollEntry>()
     let frame = 0
+    let fullUpdate = true
 
     const updateAll = () => {
       frame = 0
-      for (const entry of entries.values()) updateEntry(entry)
+      if (fullUpdate) {
+        fullUpdate = false
+        pending.clear()
+        for (const entry of entries.values()) updateEntry(entry)
+        return
+      }
+      for (const entry of pending) updateEntry(entry)
+      pending.clear()
     }
 
     const scheduleUpdate = () => {
       if (frame) return
       frame = window.requestAnimationFrame(updateAll)
+    }
+
+    const scheduleEntryUpdate = (entry: ScrollEntry) => {
+      pending.add(entry)
+      scheduleUpdate()
     }
 
     const resizeObserver = typeof ResizeObserver === 'undefined'
@@ -137,7 +151,7 @@ export function FloatingScrollbars() {
         vertical: createBar(layer, 'vertical'),
         horizontal: createBar(layer, 'horizontal'),
         onScroll: () => {
-          updateEntry(entry)
+          scheduleEntryUpdate(entry)
           if (scrollbarConfig.visible === 'hover') setVisible(entry, element.matches(':hover'))
         },
         onEnter: () => {
@@ -177,6 +191,7 @@ export function FloatingScrollbars() {
       for (const element of elements) {
         if (!entries.has(element)) add(element)
       }
+      fullUpdate = true
       scheduleUpdate()
     }
 
@@ -185,12 +200,18 @@ export function FloatingScrollbars() {
         const target = record.target instanceof Element ? record.target : record.target.parentElement
         return !target || !target.closest(`[${LAYER_ATTRIBUTE}]`)
       })
-      if (relevant) sync()
+      if (relevant) {
+        // DOM churn can happen several times during a React commit. Let the
+        // browser settle before doing the one required document scan.
+        fullUpdate = true
+        scheduleUpdate()
+        window.queueMicrotask(sync)
+      }
     })
 
     sync()
     window.addEventListener('resize', sync)
-    mutationObserver.observe(document.body, { childList: true, characterData: true, subtree: true })
+    mutationObserver.observe(document.body, { childList: true, subtree: true })
 
     return () => {
       window.removeEventListener('resize', sync)

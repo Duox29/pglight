@@ -7,6 +7,7 @@ import { Tabs, TabsList, TabsTrigger } from './ui/tabs'
 import { Switch } from './ui/switch'
 import { DataGrid } from './ui/data-grid'
 import { EmptyNote, ErrorText } from './ui/feedback'
+import { Tip } from './ui/tooltip'
 import type { ConnFields } from './ConnectionBar'
 import type { HistoryEntry, SavedConnection, SessionInfo, SideView, Snippet } from '@/types'
 import type { DialogsApi } from './dialogs'
@@ -110,9 +111,9 @@ export function SidePanel(p: Props) {
           </TabsList>
         </Tabs>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col overflow-auto p-2.5">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-2.5">
         {p.view === 'history' && (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-auto">
             <Input placeholder="Filter history…" value={filter} onChange={(e) => setFilter(e.target.value)} />
             {p.history
               .filter((h) => !filter || h.sql.toLowerCase().includes(filter.toLowerCase()))
@@ -128,7 +129,7 @@ export function SidePanel(p: Props) {
           </div>
         )}
         {p.view === 'snippets' && (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-auto">
             {p.snippets.map((s, i) => (
               <Card key={i} className="cursor-pointer p-2 hover:bg-accent" onClick={() => p.onOpenSql(s.sql)}>
                 <div className="flex items-center justify-between">
@@ -155,7 +156,7 @@ export function SidePanel(p: Props) {
         {p.view === 'quick-access' && <QuickAccessView quickAccess={p.quickAccess} onChange={p.onQuickAccessChange} />}
         {p.view === 'connections' && <CredentialManager {...p.connection} dialogs={p.dialogs} />}
         {(p.view === 'server' || p.view === 'activity' || p.view === 'locks' || p.view === 'stats' || p.view === 'appearance' || p.view === 'settings' || p.view === 'shortcuts' || p.view === 'logs') && (
-          <div className="flex min-h-0 flex-1 flex-col gap-2">
+          <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
             <ErrorText message={error} />
             {p.view === 'server' && payload != null && !(payload as { error?: string }).error && <ServerView data={payload as ServerInfo} />}
             {p.view === 'activity' && payload != null && Array.isArray(payload) && (
@@ -213,7 +214,7 @@ interface ServerInfo {
 
 function ServerView({ data }: { data: ServerInfo }) {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
       <Card className="p-2.5 text-[12px]">
         <div className="flex justify-between border-b border-dashed py-1"><span className="text-muted-foreground">version</span><b className="text-right">{(data.version ?? '').split(' ').slice(0, 3).join(' ')}</b></div>
         <div className="flex justify-between border-b border-dashed py-1"><span className="text-muted-foreground">database</span><b>{data.database} ({data.db_size})</b></div>
@@ -221,7 +222,10 @@ function ServerView({ data }: { data: ServerInfo }) {
         <div className="flex justify-between py-1"><span className="text-muted-foreground">connections</span><b>{data.connections}/{data.max_connections}</b></div>
       </Card>
       <b className="text-[12px]">Settings</b>
-      <DataGrid data={{ columns: ['name', 'setting', 'unit'], rows: (data.settings ?? []).map((s) => [s.name, s.setting, s.unit]) }} />
+      <DataGrid
+        data={{ columns: ['name', 'setting', 'unit'], rows: (data.settings ?? []).map((s) => [s.name, s.setting, s.unit]) }}
+        containerClassName="min-h-0 max-h-full flex-1"
+      />
     </div>
   )
 }
@@ -248,28 +252,35 @@ function ActivityView({ rows, session, dialogs }: { rows: ActivityRow[]; session
     await api(q(session, `/api/cancel?pid=${pid}${kill ? '&kill=1' : ''}`))
   }
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex min-h-0 flex-1 flex-col gap-1.5">
       <DataGrid
         data={{
-          columns: ['pid', 'user', 'state', 'duration', 'query'],
-          rows: rows.map((r) => [r.pid, r.user, r.state, r.duration, (r.query ?? '').slice(0, 120)]),
+          columns: ['pid', 'user', 'state', 'duration', 'query', 'actions'],
+          rows: rows.map((r) => [r.pid, r.user, r.state, r.duration, (r.query ?? '').slice(0, 120), null]),
+        }}
+        containerClassName="min-h-0 max-h-full flex-1"
+        renderCell={(_value, row, _rowIndex, columnIndex) => {
+          if (columnIndex !== 5) return undefined
+          const pid = Number(row[0])
+          return (
+            <div className="flex gap-1">
+              <Tip content={`Cancel backend ${pid}`}>
+                <Button size="sm" variant="ghost" onClick={() => act(pid)} aria-label={`Cancel backend ${pid}`}>
+                  <Ban className="h-3 w-3" />
+                </Button>
+              </Tip>
+              <Tip content={`Terminate backend ${pid}`}>
+                <Button size="sm" variant="ghost" onClick={() => act(pid, true)} aria-label={`Terminate backend ${pid}`}>
+                  <Skull className="h-3 w-3" />
+                </Button>
+              </Tip>
+            </div>
+          )
         }}
         onCellClick={(v, col) => {
           if (col === 'pid' && navigator.clipboard) navigator.clipboard.writeText(String(v))
         }}
       />
-      {rows.map((r) => (
-        <div key={r.pid} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span className="font-mono">#{r.pid}</span>
-          <span className="min-w-0 flex-1 truncate">{(r.query ?? '').slice(0, 80) || '—'}</span>
-          <Button size="sm" variant="ghost" onClick={() => act(r.pid)} aria-label={`Cancel backend ${r.pid}`}>
-            <Ban className="h-3 w-3" /> cancel
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => act(r.pid, true)} aria-label={`Terminate backend ${r.pid}`}>
-            <Skull className="h-3 w-3" /> kill
-          </Button>
-        </div>
-      ))}
       {!rows.length && <EmptyNote text="No sessions" />}
     </div>
   )
@@ -288,7 +299,7 @@ interface LockRow {
 function LocksView({ rows }: { rows: LockRow[] }) {
   const blocked = rows.filter((r) => !r.granted)
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex min-h-0 flex-1 flex-col gap-1.5">
       <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
         <span className="inline-flex items-center gap-1"><span aria-hidden className="h-2 w-2 rounded-full bg-emerald-500" /> {rows.length - blocked.length} granted</span>
         <span className="inline-flex items-center gap-1"><span aria-hidden className="h-2 w-2 rounded-full bg-red-500" /> {blocked.length} waiting</span>
@@ -299,6 +310,7 @@ function LocksView({ rows }: { rows: LockRow[] }) {
           rows: rows.map((r) => [r.pid, r.user, r.locktype, r.relation, r.mode, r.granted ? 'granted' : 'waiting', (r.query ?? '').slice(0, 80)]),
         }}
         cellClassName={(v) => (v === 'waiting' ? 'font-semibold text-red-400' : v === 'granted' ? 'text-emerald-500' : undefined)}
+        containerClassName="min-h-0 max-h-full flex-1"
       />
     </div>
   )
@@ -311,7 +323,7 @@ interface StatsInfo {
 
 function StatsView({ data }: { data: StatsInfo }) {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto">
       <b className="text-[12px]">Databases</b>
       <DataGrid data={{ columns: ['name', 'backends', 'hit%', 'size'], rows: (data.databases ?? []).map((d) => [d.name, d.backends, d.hit_ratio, d.size]) }} />
       <b className="text-[12px]">Top tables</b>
