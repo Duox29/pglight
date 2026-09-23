@@ -6,7 +6,7 @@
 ## 0. Stack map
 
 - **Backend**: Go 1.26.8, `github.com/jackc/pgx/v5`. API in `internal/api/`
-  (domain files: `session|explorer|query|data|admin|alter|complete|settings|aliases`
+  (domain files: `session|explorer|query|data|admin|alter|complete|settings|aliases|backup`
   + `connections|preferences|appdata|mockdata|vault`, shared kernel in
   `handlers.go`, autocomplete cache in `complete_cache.go`), connection pool +
   explicit-txn state + operation leases in `internal/db/manager.go`, app data
@@ -14,8 +14,8 @@
   profiles/folders/tags/options, vaults/secrets, preferences, ERD layouts) in
   `internal/store/`, pure mock-data engine in `internal/mockgen/` (HTTP
   orchestration in `mockdata.go`), HTTP/query/txn logging in `internal/logging/`,
-  cancellable progress jobs in `internal/jobs/`, flat route table in `main.go`
-  (56 `/api/*` registrations; `Manager.CloseAll`
+  cancellable progress jobs and process runner in `internal/jobs/`, flat route table in `main.go`
+  (59 `/api/*` registrations; `Manager.CloseAll`
   + `os.Exit` shutdown).
 - **Frontend**: React 18 + Vite 5 + Tailwind v3 + shadcn-style prebuilt
   components (`web/src/components/ui/*`: Button, Input, Textarea, PasswordTextarea (masked multiline secrets such as SSH private keys), Badge,
@@ -247,7 +247,7 @@ backend/frontend surface:
 
 ## 6. Current function inventory (full project scan — 2026-09-21)
 
-The route table currently contains 56 registrations. Keep this inventory in
+The route table currently contains 59 registrations. Keep this inventory in
 sync when adding or removing a user-visible function:
 
 - **Sessions and connections**: `connect`, `sessions`, `disconnect`, `txn`,
@@ -261,7 +261,8 @@ sync when adding or removing a user-visible function:
   `complete`, `table-data`, `row`, `rows-delete`, `table-changes` (atomic
   staged update/insert/delete batches), `import` (JSON + streaming multipart
   CSV), `export/csv` (streaming table CSV), `maintenance`,
-  `activity`, and `cancel`.
+  `activity`, and `cancel`, plus `backup`, `restore`, and session-scoped
+  `jobs/{id}` (progress, cancellation, streamed backup download).
 - **App data and administration**: `aliases`, `snippets`, `history`,
   `preferences`, `preferences/shortcuts`, `server-info`, `stats`, `locks`,
   `roles`, `extensions`, `settings`, `logs`, and `shutdown`.

@@ -18,6 +18,7 @@ import (
 
 	"pglight/internal/api"
 	"pglight/internal/db"
+	"pglight/internal/jobs"
 	"pglight/internal/logging"
 	"pglight/internal/store"
 
@@ -70,7 +71,13 @@ func main() {
 	if err := appStore.EnsureUser(context.Background(), userID); err != nil {
 		log.Fatal("initialize app user: ", err)
 	}
-	h := &api.Handler{Mgr: mgr, Log: appLog, Store: appStore, UserID: userID}
+	jobDir, err := os.MkdirTemp("", "pglight-jobs-*")
+	if err != nil {
+		log.Fatal("create job temp directory: ", err)
+	}
+	jobManager := jobs.New(jobDir, 1)
+	defer func() { jobManager.Close(); _ = os.RemoveAll(jobDir) }()
+	h := &api.Handler{Mgr: mgr, Jobs: jobManager, Log: appLog, Store: appStore, UserID: userID}
 	accessToken, err := api.NewAccessToken()
 	if err != nil {
 		log.Fatal("generate LAN access token: ", err)
@@ -134,6 +141,9 @@ func main() {
 	mux.HandleFunc("/api/import/csv", h.ImportCSV)
 	mux.HandleFunc("/api/export/csv", h.ExportCSV)
 	mux.HandleFunc("/api/table-changes", h.TableChanges)
+	mux.HandleFunc("/api/backup", h.Backup)
+	mux.HandleFunc("/api/restore", h.Restore)
+	mux.HandleFunc("/api/jobs/", h.Job)
 	mux.HandleFunc("/api/mock-data/meta", h.MockMeta)
 	mux.HandleFunc("/api/mock-data/preview", h.MockPreview)
 	mux.HandleFunc("/api/mock-data/generate", h.MockGenerate)

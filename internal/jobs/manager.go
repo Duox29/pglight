@@ -33,6 +33,7 @@ type Snapshot struct {
 	StartedAt  *time.Time `json:"started_at,omitempty"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 	Error      string     `json:"error,omitempty"`
+	FileName   string     `json:"file_name,omitempty"`
 }
 
 type Work func(context.Context, *Progress) error
@@ -48,20 +49,22 @@ type Manager struct {
 }
 
 type entry struct {
-	id         string
-	session    string
-	typeName   string
-	mu         sync.Mutex
-	state      State
-	rows       atomic.Int64
-	bytes      atomic.Int64
-	startedAt  *time.Time
-	finishedAt *time.Time
-	errText    string
-	cancel     context.CancelFunc
-	cancelled  atomic.Bool
-	done       chan struct{}
-	tempFiles  []string
+	id           string
+	session      string
+	typeName     string
+	mu           sync.Mutex
+	state        State
+	rows         atomic.Int64
+	bytes        atomic.Int64
+	startedAt    *time.Time
+	finishedAt   *time.Time
+	errText      string
+	cancel       context.CancelFunc
+	cancelled    atomic.Bool
+	done         chan struct{}
+	tempFiles    []string
+	artifactPath string
+	fileName     string
 }
 
 type Progress struct {
@@ -190,7 +193,7 @@ func (m *Manager) lookup(sessionID, id string) (*entry, error) {
 func (j *entry) snapshot() Snapshot {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	return Snapshot{ID: j.id, Type: j.typeName, State: j.state, Rows: j.rows.Load(), Bytes: j.bytes.Load(), StartedAt: j.startedAt, FinishedAt: j.finishedAt, Error: j.errText}
+	return Snapshot{ID: j.id, Type: j.typeName, State: j.state, Rows: j.rows.Load(), Bytes: j.bytes.Load(), StartedAt: j.startedAt, FinishedAt: j.finishedAt, Error: j.errText, FileName: j.fileName}
 }
 
 func (p *Progress) AddRows(n int64) {
@@ -202,6 +205,49 @@ func (p *Progress) AddBytes(n int64) {
 	if n > 0 {
 		p.job.bytes.Add(n)
 	}
+}
+func (p *Progress) SetBytes(n int64) {
+	if n >= 0 {
+		p.job.bytes.Store(n)
+	}
+}
+
+func (p *Progress) SetArtifact(path, name string) error {
+	if filepath.Base(name) != name || name == "." || name == ".." {
+		return fmt.Errorf("invalid artifact filename")
+	}
+	p.job.mu.Lock()
+	defer p.job.mu.Unlock()
+	tracked := false
+	for _, candidate := range p.job.tempFiles {
+		if candidate == path {
+			tracked = true
+			break
+		}
+	}
+	if !tracked {
+		return fmt.Errorf("artifact file is not owned by this job")
+	}
+	p.job.artifactPath, p.job.fileName = path, name
+	return nil
+}
+
+func (m *Manager) OpenArtifact(sessionID, id string) (*os.File, string, error) {
+	job, err := m.lookup(sessionID, id)
+	if err != nil {
+		return nil, "", err
+	}
+	job.mu.Lock()
+	path, name, state := job.artifactPath, job.fileName, job.state
+	job.mu.Unlock()
+	if state != Done || path == "" {
+		return nil, "", fmt.Errorf("job artifact is not available")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, "", err
+	}
+	return file, name, nil
 }
 
 func (p *Progress) CreateTemp(suffix string) (*os.File, error) {
@@ -229,6 +275,7 @@ func (m *Manager) RemoveTempFiles(sessionID, id string) error {
 	job.mu.Lock()
 	files := append([]string(nil), job.tempFiles...)
 	job.tempFiles = nil
+	job.artifactPath, job.fileName = "", ""
 	job.mu.Unlock()
 	var removeErr error
 	for _, path := range files {

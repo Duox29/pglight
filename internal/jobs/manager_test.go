@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"io"
 	"os"
 	"testing"
 	"time"
@@ -113,5 +114,49 @@ func TestJobSessionLimitAndFailureState(t *testing.T) {
 	close(release)
 	if _, err := m.Wait(context.Background(), "session-a", first.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCompletedArtifactCanBeStreamedAndRemoved(t *testing.T) {
+	m := New(t.TempDir(), 1)
+	defer m.Close()
+	snapshot, err := m.Start("session-a", "backup", func(ctx context.Context, progress *Progress) error {
+		file, err := progress.CreateTemp(".dump")
+		if err != nil {
+			return err
+		}
+		path := file.Name()
+		if _, err := file.WriteString("archive"); err != nil {
+			return err
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+		return progress.SetArtifact(path, "database.dump")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := m.Wait(context.Background(), "session-a", snapshot.ID)
+	if err != nil || done.FileName != "database.dump" {
+		t.Fatalf("snapshot=%+v err=%v", done, err)
+	}
+	file, name, err := m.OpenArtifact("session-a", snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if name != "database.dump" {
+		t.Fatalf("download name=%q", name)
+	}
+	contents, err := io.ReadAll(file)
+	if err != nil || string(contents) != "archive" {
+		t.Fatalf("contents=%q err=%v", contents, err)
+	}
+	if err := m.RemoveTempFiles("session-a", snapshot.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := m.OpenArtifact("session-a", snapshot.ID); err == nil {
+		t.Fatal("artifact should not open after cleanup")
 	}
 }

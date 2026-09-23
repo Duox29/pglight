@@ -208,6 +208,18 @@ export const q = (session: string, path: string) =>
   `${path}${path.includes('?') ? '&' : '?'}session_id=${encodeURIComponent(session)}`
 
 export const apiClient = {
+  backup: (p: { session_id: string; format: 'custom' | 'plain'; schema_only?: boolean; data_only?: boolean }) =>
+    api<JobSnapshot>('/api/backup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
+  restore: (p: { session_id: string; file: File; overwrite: true }) => {
+    const body = new FormData()
+    body.set('session_id', p.session_id)
+    body.set('overwrite', String(p.overwrite))
+    body.set('file', p.file)
+    return api<JobSnapshot>('/api/restore', { method: 'POST', body })
+  },
+  job: (session: string, id: string) => api<JobSnapshot>(q(session, `/api/jobs/${encodeURIComponent(id)}?`)),
+  cancelJob: (session: string, id: string) => api<{ ok?: boolean; error?: string }>(q(session, `/api/jobs/${encodeURIComponent(id)}?`), { method: 'DELETE' }),
+  downloadJob: (session: string, id: string) => apiStream(`${q(session, `/api/jobs/${encodeURIComponent(id)}?`)}&action=download`, { method: 'POST' }),
   tableChanges: (payload: TableChangesPayload) =>
     api<{ rows_affected?: number; in_txn?: boolean; error?: string }>('/api/table-changes', {
       method: 'POST',
@@ -397,6 +409,16 @@ export const apiClient = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(p),
     }),
+}
+
+export interface JobSnapshot {
+  id: string
+  type: 'backup' | 'restore' | string
+  state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
+  rows: number
+  bytes: number
+  error?: string
+  file_name?: string
 }
 
 export interface MockDataColumn {

@@ -32,13 +32,14 @@ type Querier interface {
 // through the txEntry mutex (see Q). Commit/Rollback/Close wait for any
 // in-flight txn operation to finish instead of racing it.
 type Manager struct {
-	mu       sync.RWMutex
-	pools    map[string]*pgxpool.Pool
-	txs      map[string]*txEntry
-	seen     map[string]time.Time
-	metas    map[string]ConnMeta
-	tunnels  map[string]*SSHTunnel
-	txnLocks map[string]*txnLockEntry
+	mu         sync.RWMutex
+	pools      map[string]*pgxpool.Pool
+	txs        map[string]*txEntry
+	seen       map[string]time.Time
+	metas      map[string]ConnMeta
+	processEnv map[string]map[string]string
+	tunnels    map[string]*SSHTunnel
+	txnLocks   map[string]*txnLockEntry
 }
 
 type txnLockEntry struct {
@@ -98,12 +99,13 @@ type SessionInfo struct {
 
 func New() *Manager {
 	return &Manager{
-		pools:    make(map[string]*pgxpool.Pool),
-		txs:      make(map[string]*txEntry),
-		seen:     make(map[string]time.Time),
-		metas:    make(map[string]ConnMeta),
-		tunnels:  make(map[string]*SSHTunnel),
-		txnLocks: make(map[string]*txnLockEntry),
+		pools:      make(map[string]*pgxpool.Pool),
+		txs:        make(map[string]*txEntry),
+		seen:       make(map[string]time.Time),
+		metas:      make(map[string]ConnMeta),
+		processEnv: make(map[string]map[string]string),
+		tunnels:    make(map[string]*SSHTunnel),
+		txnLocks:   make(map[string]*txnLockEntry),
 	}
 }
 
@@ -325,6 +327,13 @@ func (m *Manager) AddWithOptions(id, connStr string, opts ConnOptions) error {
 	oldEntry := m.txs[id]
 	delete(m.txs, id)
 	m.pools[id] = pool
+	sslMode := "prefer"
+	if parsed, parseErr := url.Parse(connStr); parseErr == nil && parsed.Query().Get("sslmode") != "" {
+		sslMode = NormalizeSSLMode(parsed.Query().Get("sslmode"))
+	} else if cfg.ConnConfig.TLSConfig == nil {
+		sslMode = "disable"
+	}
+	m.processEnv[id] = processEnvironment(cfg.ConnConfig, opts, sslMode)
 	if tunnel != nil {
 		m.tunnels[id] = tunnel
 	} else {
@@ -396,6 +405,7 @@ func (m *Manager) Close(id string) {
 	delete(m.tunnels, id)
 	delete(m.seen, id)
 	delete(m.metas, id)
+	delete(m.processEnv, id)
 	m.mu.Unlock()
 
 	if entry != nil {
@@ -444,6 +454,55 @@ func (m *Manager) SetMeta(id string, meta ConnMeta) {
 		meta.ConnectedAt = time.Now()
 	}
 	m.metas[id] = meta
+	if env, ok := m.processEnv[id]; ok && meta.SSLMode != "" {
+		env["PGSSLMODE"] = NormalizeSSLMode(meta.SSLMode)
+	}
+}
+
+// ProcessEnv returns connection variables for trusted child tools such as
+// pg_dump. Passwords remain out of command arguments and are never serialized.
+func (m *Manager) ProcessEnv(id string) (map[string]string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, ok := m.pools[id]; !ok {
+		return nil, false
+	}
+	env, ok := m.processEnv[id]
+	if !ok {
+		return nil, false
+	}
+	copyEnv := make(map[string]string, len(env))
+	for key, value := range env {
+		copyEnv[key] = value
+	}
+	return copyEnv, true
+}
+
+func processEnvironment(cfg *pgx.ConnConfig, opts ConnOptions, sslMode string) map[string]string {
+	env := map[string]string{
+		"PGHOST":     cfg.Host,
+		"PGPORT":     strconv.Itoa(int(cfg.Port)),
+		"PGUSER":     cfg.User,
+		"PGDATABASE": cfg.Database,
+		"PGPASSWORD": cfg.Password,
+		"PGSSLMODE":  NormalizeSSLMode(sslMode),
+	}
+	if value := cfg.RuntimeParams["application_name"]; value != "" {
+		env["PGAPPNAME"] = value
+	}
+	if value := cfg.RuntimeParams["options"]; value != "" {
+		env["PGOPTIONS"] = value
+	}
+	if opts.SSLRootCert != "" {
+		env["PGSSLROOTCERT"] = opts.SSLRootCert
+	}
+	if opts.SSLCert != "" {
+		env["PGSSLCERT"] = opts.SSLCert
+	}
+	if opts.SSLKey != "" {
+		env["PGSSLKEY"] = opts.SSLKey
+	}
+	return env
 }
 
 // Info returns the stored meta for a session.

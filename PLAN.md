@@ -14,6 +14,7 @@ Source features surveyed: JetBrains DataGrip (explorer, consoles, diff, Explain,
 | EXPLAIN (JSON) + text plan | ✅ |
 | DDL + indexes + FKs | ✅ (OID-joined, `to_regclass` quoted names) |
 | CSV/JSON export of result | ✅ (+ INSERT export, OID exact numerics) |
+| Database backup / restore | ✅ (`pg_dump`/`pg_restore` jobs, streamed artifact download, cancellation, overwrite confirmation) |
 | Activity (pg_stat_activity) + cancel/kill | ✅ (`application_name` attribution) |
 | Autocomplete (tables/columns/keywords) | ✅ smart (context-aware, cached) |
 | Multi-statement / multi-result | ✅ (`results[]`, per-statement error locations) |
@@ -31,7 +32,7 @@ Source features surveyed: JetBrains DataGrip (explorer, consoles, diff, Explain,
 | Split workspace (2-pane) + Docs tab + shutdown | ✅ |
 | Privacy controls + TLS warnings + exact numerics | ✅ |
 | Destructive offline vault reset (`pglight.exe vault reset`) | ✅ (clears vault secrets, preserves profile metadata) |
-| Diff / schema compare, backup/restore | ❌ (planned; Phase 2) |
+| Diff / schema compare | ❌ (planned; Phase 2) |
 | SSH tunnel | ✅ (implemented; profile vault, forwarding, pinning, Connections UI) |
 | Debugger | ❌ (out of scope) |
 
@@ -60,6 +61,8 @@ Backend (`internal/db`, `internal/api`):
 - [x] `POST /api/import/csv` — multipart CSV upload (2 GiB request cap), bounded 500-row batches, matching-header mapping, atomic private txn or explicit-txn savepoint; typed client helper added.
 - [x] `POST /api/export/csv` — txn-aware filtered/ordered table CSV response, streamed from PostgreSQL rows to HTTP; browsers without the File System Access API use a native form download.
 - [x] `POST /api/table-changes` — mixed staged updates/inserts/deletes in one transaction or explicit-txn savepoint; requires PK-scoped keys and original row values to detect stale edits, with rollback on any failure.
+- [x] `POST /api/backup`, `POST /api/restore`, and `/api/jobs/{id}` — cancellable `pg_dump`/`pg_restore`/`psql` jobs, session-scoped progress, bounded restore upload, streamed backup artifact download, credentials passed through child environment, explicit destructive restore confirmation.
+- [x] Backup/restore API and background jobs remain available; Connections UI is temporarily hidden until PostgreSQL client tools are provided/configured reliably and backup downloads work in supported browsers.
 
 Frontend (`web/`):
 - [x] UX hierarchy pass: header reduces visual competition (search-first + configurable Quick Access buttons, with Connections/Settings as defaults + utility menu for Workspace/Docs); query toolbar grouped Primary/Query/Result/Utility with Run dominant and Explain in a dropdown; connection management lives in the persisted Workspace → Connections tab with vault lock state; Explorer tiers schema > muted-uppercase group > object, Tables open by default, Lucide-only icons with subtle type colors, filter match counts; tabs show active dot/dirty state, middle-click close, DB badges; DataGrid is type-aware (OID-based numeric right-align, bool, JSON, type tooltips, zebra rows, Lucide sort icons); table workspace has a real identity header with Data | Structure (Columns/Constraints/Triggers) | SQL | Indexes | Stats; side-panel tools moved into one persisted Workspace tab with a single navigation bar and Quick Access configuration …
@@ -80,7 +83,7 @@ Frontend (`web/`):
 - [x] SSH tunnel for saved PostgreSQL profiles (see the implemented flow below).
 - [ ] Read-only connection mode, enforced by the backend session rather than only disabling UI actions.
 - [ ] Schema diff between databases/sessions with a reviewable migration script preview.
-- [ ] `pg_dump`/`pg_restore` backup and restore with progress, cancellation, and explicit overwrite/target confirmation.
+- [x] `pg_dump`/`pg_restore` backup and restore with progress, cancellation, and explicit overwrite/target confirmation.
 - [x] Data editor staged edits + Apply/Discard and SQL preview, atomic mixed update/insert/delete batches, original-value concurrency checks.
 - [ ] Data editor JSON cell editor, column filters/sort UI, duplicate row, fill-down, clipboard paste staging.
 - [ ] Visual EXPLAIN (plan tree/graph, buffers/timing where available), plan compare.

@@ -13,6 +13,7 @@ import { EmptyNote, ErrorText } from './ui/feedback'
 import type { ConnFields } from './ConnectionBar'
 import type { DialogsApi } from './dialogs'
 import type { SavedConnection, SessionInfo } from '@/types'
+import { apiClient } from '@/lib/api'
 
 export interface ProfileMetadata {
   folder_id: string
@@ -305,7 +306,6 @@ export function CredentialManager(p: Props) {
 
   const visible = p.saved.filter((c) => !filter || `${c.name} ${c.host} ${c.dbname} ${c.user} ${c.environment ?? ''} ${c.options?.ssh_host ?? ''} ${c.options?.ssh_user ?? ''} ${(c.tags ?? []).join(' ')}`.toLowerCase().includes(filter.toLowerCase()))
   const deadCount = Object.keys(p.deadIds).length
-
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-auto p-3">
       <div>
@@ -327,7 +327,6 @@ export function CredentialManager(p: Props) {
         </div>
         {p.vault.exists && <div className="mt-2 border-t pt-2 text-[11px] text-muted-foreground">Forgot the master password? Close pglight, then run <code>pglight.exe vault reset</code> to remove saved database and SSH credentials while keeping profiles.</div>}
       </Card>
-
       <div className="grid shrink-0 min-h-0 gap-3 lg:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1.2fr)]">
         <Card className="min-h-[240px] p-2">
           <div className="mb-2 flex items-center gap-1.5">

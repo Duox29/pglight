@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"pglight/internal/db"
+	"pglight/internal/jobs"
 	"pglight/internal/logging"
 	"pglight/internal/store"
 
@@ -26,6 +27,7 @@ import (
 
 type Handler struct {
 	Mgr                *db.Manager
+	Jobs               *jobs.Manager
 	Log                *logging.Logger
 	Store              *store.Store
 	UserID             string

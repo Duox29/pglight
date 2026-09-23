@@ -399,6 +399,15 @@ const SECTIONS: Section[] = [
     },
   },
   {
+    id: 'backup-restore',
+    title: { en: 'Database backup and restore (temporarily hidden)', vi: 'Sao lưu và khôi phục cơ sở dữ liệu (tạm ẩn)' },
+    group: { en: 'Connections', vi: 'Kết nối' },
+    body: {
+      en: <P>Backup and restore are temporarily hidden while pglight's PostgreSQL client-tool setup and browser-compatible backup downloads are being finalized.</P>,
+      vi: <P>Tính năng sao lưu và khôi phục tạm thời được ẩn trong lúc hoàn thiện việc cung cấp PostgreSQL client tools và tải file backup tương thích với trình duyệt.</P>,
+    },
+  },
+  {
     id: 'mock-data',
     title: { en: 'Generate mock data', vi: 'Tạo mock data' },
     group: { en: 'Tables', vi: 'Bảng' },
