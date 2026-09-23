@@ -5,6 +5,7 @@ export interface ErdViewport {
   x: number
   y: number
   zoom: number
+  display?: { focusDepth: string; focusEnabled: boolean; hideColumns: boolean; keysOnly: boolean }
 }
 
 interface ErdLayoutResponse {
@@ -26,7 +27,13 @@ function validLayout(v: unknown): v is Record<string, ErdPos> {
 function validViewport(v: unknown): v is ErdViewport {
   if (!v || typeof v !== 'object') return false
   const o = v as Record<string, unknown>
-  return typeof o.x === 'number' && Number.isFinite(o.x) &&
+  const display = o.display
+  const validDisplay = display === undefined || (!!display && typeof display === 'object' &&
+    ['1', '2', '3', 'all'].includes(String((display as Record<string, unknown>).focusDepth)) &&
+    typeof (display as Record<string, unknown>).focusEnabled === 'boolean' &&
+    typeof (display as Record<string, unknown>).hideColumns === 'boolean' &&
+    typeof (display as Record<string, unknown>).keysOnly === 'boolean')
+  return validDisplay && typeof o.x === 'number' && Number.isFinite(o.x) &&
     typeof o.y === 'number' && Number.isFinite(o.y) &&
     typeof o.zoom === 'number' && Number.isFinite(o.zoom) && o.zoom > 0
 }

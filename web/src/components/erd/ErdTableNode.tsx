@@ -16,6 +16,8 @@ export interface ErdTableNodeData extends Record<string, unknown> {
   table: ErdTable
   degree: number
   dimmed: boolean
+  hideColumns?: boolean
+  keysOnly?: boolean
   onOpenTable: (schema: string, table: string) => void
   onCopyName: (table: string) => void
   onFocusRelated: (table: string) => void
@@ -26,8 +28,9 @@ const ROW_H = 20
 
 function ErdTableNodeInner({ data, selected }: NodeProps<ErdTableNodeT>) {
   const { table, degree, dimmed } = data
-  const shown = table.columns.slice(0, ERD_MAX_COLUMNS)
-  const hidden = table.columns.length - shown.length
+  const visibleColumns = data.hideColumns ? [] : table.columns.filter((column) => !data.keysOnly || column.pk || column.fk)
+  const shown = visibleColumns.slice(0, ERD_MAX_COLUMNS)
+  const hidden = data.hideColumns ? table.columns.length : visibleColumns.length - shown.length
   const open = () => data.onOpenTable(table.schema, table.name)
 
   return (
@@ -61,7 +64,7 @@ function ErdTableNodeInner({ data, selected }: NodeProps<ErdTableNodeT>) {
             <span className="truncate text-[10px] text-muted-foreground">{table.schema}</span>
           </button>
           <div className="border-t border-border" />
-          {shown.length === 0 && (
+          {shown.length === 0 && !hidden && (
             <div className="flex h-5 items-center px-2.5 text-[11px] italic text-muted-foreground">
               no columns
             </div>
@@ -105,7 +108,7 @@ function ErdTableNodeInner({ data, selected }: NodeProps<ErdTableNodeT>) {
           ))}
           {hidden > 0 && (
             <div className="flex h-5 items-center px-2.5 text-[11px] text-muted-foreground">
-              +{hidden} more column{hidden === 1 ? '' : 's'}
+              {data.hideColumns ? `${hidden} columns hidden` : `+${hidden} more column${hidden === 1 ? '' : 's'}`}
             </div>
           )}
         </div>

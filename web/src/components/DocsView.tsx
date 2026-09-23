@@ -713,6 +713,8 @@ const SECTIONS: Section[] = [
           <Ul>
             <Li>Schema picker, <K>Reload, Fit view, Auto arrange, Reset layout</K>, table filter, and the <K>N tables and M relations</K> count. Auto-layout packs related tables by relation layers and unrelated tables into a balanced grid, then flow-packs the blocks so the canvas stays roughly square.</Li>
             <Li>The line switch applies to every edge at once: <K>Curved (bezier), Straight,</K> or <K>Orthogonal (smoothstep)</K>.</Li>
+            <Li><K>Related</K> shows tables connected to the selected node up to depth 1, 2, 3, or all. <K>Hide columns</K> collapses nodes; <K>PK/FK</K> keeps only key columns. These view settings persist with the diagram.</Li>
+            <Li><K>Export SVG</K> saves a scalable diagram, <K>Export PNG</K> saves an image, and <K>Copy</K> puts the PNG on the clipboard. Exports use the current related-table and column filters.</Li>
           </Ul>
           <H>Reading the diagram</H>
           <Ul>
@@ -736,6 +738,8 @@ const SECTIONS: Section[] = [
           <Ul>
             <Li>Chọn schema, <K>Reload, Fit view, Auto arrange, Reset layout</K>, lọc bảng và số đếm <K>N tables và M relations</K>. Auto-layout gom bảng liên quan theo tầng quan hệ, bảng rời rạc vào lưới cân bằng rồi xếp khối vừa khung.</Li>
             <Li>Cụm chuyển kiểu đường áp cho mọi cạnh cùng lúc: <K>Curved (bezier), Straight</K> hoặc <K>Orthogonal (smoothstep)</K>.</Li>
+            <Li><K>Related</K> hiển thị các bảng nối với node đã chọn theo độ sâu 1, 2, 3 hoặc tất cả. <K>Hide columns</K> thu gọn node; <K>PK/FK</K> chỉ giữ các cột khóa. Các thiết lập này được lưu cùng sơ đồ.</Li>
+            <Li><K>Export SVG</K> lưu sơ đồ vector, <K>Export PNG</K> lưu ảnh, còn <K>Copy</K> chép PNG vào clipboard. File xuất áp dụng bộ lọc bảng và cột hiện tại.</Li>
           </Ul>
           <H>Đọc sơ đồ</H>
           <Ul>

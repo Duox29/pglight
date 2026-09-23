@@ -281,8 +281,8 @@ sync when adding or removing a user-visible function:
   `useQueryRunner`, `useTableOps`, `useObjectOps`, `useGridSelection`, and
   `useStagedTableChanges`.
   Shared UI functions include SQL formatting/export, schema-cache completion,
-  ERD layout/storage, dialog promises, command registration, and shortcut
-  normalization.
+  ERD layout/storage, SVG/PNG diagram export, related-depth focus and compact
+  node views, dialog promises, command registration, and shortcut normalization.
 
 When changing one of these functions, update `PLAN.md` and the bilingual
 `DocsView` when it affects user behavior, then run the frontend build so the

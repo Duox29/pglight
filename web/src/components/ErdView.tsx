@@ -22,6 +22,7 @@ import ErdRelationEdge, { type ErdRelationEdgeT } from './erd/ErdRelationEdge'
 import { ErdToolbar } from './erd/ErdToolbar'
 import { layoutTables, type ErdPos } from './erd/erdLayout'
 import { dstHandle, mapErd, srcHandle, type ErdDataDto, type ErdLineType } from './erd/erdMapper'
+import { createErdSvg, relatedTableIds } from './erd/erdExport'
 import {
   clearErdPersistence,
   loadErdPersistence,
@@ -54,6 +55,32 @@ function copyText(text: string) {
   }
 }
 
+function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+async function svgPng(svg: string): Promise<Blob> {
+  const source = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }))
+  try {
+    const image = new window.Image()
+    await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error('Could not render the ERD image')); image.src = source })
+    const match = svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)
+    if (!match) throw new Error('Invalid ERD SVG size')
+    const canvas = document.createElement('canvas')
+    canvas.width = Number(match[1])
+    canvas.height = Number(match[2])
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Canvas is unavailable')
+    context.drawImage(image, 0, 0)
+    return await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Could not encode the ERD image')), 'image/png'))
+  } finally { URL.revokeObjectURL(source) }
+}
+
 function ErdCanvasInner(props: {
   tab: ErdTabT
   connectionId?: string
@@ -71,6 +98,10 @@ function ErdCanvasInner(props: {
   const [query, setQuery] = useState('')
   const [focusId, setFocusId] = useState<string | null>(null)
   const [line, setLine] = useState<ErdLineType>('bezier')
+  const [focusDepth, setFocusDepth] = useState('1')
+  const [focusEnabled, setFocusEnabled] = useState(false)
+  const [hideColumns, setHideColumns] = useState(false)
+  const [keysOnly, setKeysOnly] = useState(false)
   const [selected, setSelected] = useState<{ nodes: string[]; edges: string[] }>({
     nodes: [],
     edges: [],
@@ -164,6 +195,12 @@ function ErdCanvasInner(props: {
       if (cancelled) return
       persistedLayout.current = saved.layout
       persistedViewport.current = saved.viewport
+      if (saved.viewport?.display) {
+        setFocusDepth(saved.viewport.display.focusDepth)
+        setFocusEnabled(saved.viewport.display.focusEnabled)
+        setHideColumns(saved.viewport.display.hideColumns)
+        setKeysOnly(saved.viewport.display.keysOnly)
+      }
       if (Object.keys(saved.layout).length) {
         setNodes((prev) => prev.map((n) => saved.layout[n.id] ? { ...n, position: saved.layout[n.id] } : n))
       }
@@ -204,6 +241,34 @@ function ErdCanvasInner(props: {
     if (!q) return null
     return new Set(graph.tables.filter((tb) => tb.name.toLowerCase().includes(q)).map((tb) => tb.id))
   }, [query, graph])
+
+  const canFocus = selected.nodes.length === 1
+  const focusedIds = useMemo(() => focusEnabled && canFocus
+    ? relatedTableIds(selected.nodes[0], graph.relations, focusDepth === 'all' ? undefined : Number(focusDepth))
+    : null, [focusEnabled, canFocus, selected.nodes, graph.relations, focusDepth])
+  const renderNodes = useMemo(() => (focusedIds ? nodes.filter((node) => focusedIds.has(node.id)) : nodes).map((node) => ({ ...node, data: { ...node.data, hideColumns, keysOnly } })), [focusedIds, nodes, hideColumns, keysOnly])
+  const renderEdges = useMemo(() => focusedIds ? edges.filter((edge) => focusedIds.has(edge.source) && focusedIds.has(edge.target)) : edges, [focusedIds, edges])
+
+  useEffect(() => {
+    if (!persistenceLoaded || !props.connectionId) return
+    const viewport = { ...(persistedViewport.current ?? flow.getViewport()), display: { focusDepth, focusEnabled, hideColumns, keysOnly } }
+    persistedViewport.current = viewport
+    void saveErdPersistence(props.connectionId, t.schema, persistedLayout.current, viewport)
+  }, [persistenceLoaded, props.connectionId, t.schema, flow, focusDepth, focusEnabled, hideColumns, keysOnly])
+
+  const createSvg = useCallback(() => createErdSvg(graph.tables, graph.relations, Object.fromEntries(nodes.map((node) => [node.id, node.position])), {
+    title: `ERD ${t.schema}`,
+    only: focusedIds ?? undefined,
+    hideColumns,
+    keysOnly,
+    dark: appearance.mode === 'dark',
+  }), [graph, nodes, t.schema, focusedIds, hideColumns, keysOnly, appearance.mode])
+  const exportSvg = useCallback(() => downloadBlob(new Blob([createSvg()], { type: 'image/svg+xml;charset=utf-8' }), `erd-${t.schema}.svg`), [createSvg, t.schema])
+  const exportPng = useCallback(() => { void svgPng(createSvg()).then((blob) => downloadBlob(blob, `erd-${t.schema}.png`)).catch((error: unknown) => toast.error(error instanceof Error ? error.message : String(error))) }, [createSvg, t.schema])
+  const copyImage = useCallback(() => {
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') { toast.error('Image clipboard unavailable'); return }
+    void svgPng(createSvg()).then((blob) => navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])).then(() => toast.success('Diagram image copied')).catch((error: unknown) => toast.error(error instanceof Error ? error.message : String(error)))
+  }, [createSvg])
 
   // Highlight: dim unrelated nodes/edges on selection or search; never rebuild nodes.
   useEffect(() => {
@@ -266,10 +331,11 @@ function ErdCanvasInner(props: {
   const onMoveEnd = useCallback(
     (_: unknown, vp: ErdViewport) => {
       if (!persistenceLoaded || !props.connectionId) return
-      persistedViewport.current = vp
-      void saveErdPersistence(props.connectionId, t.schema, persistedLayout.current, vp)
+      const viewport = { ...vp, display: { focusDepth, focusEnabled, hideColumns, keysOnly } }
+      persistedViewport.current = viewport
+      void saveErdPersistence(props.connectionId, t.schema, persistedLayout.current, viewport)
     },
-    [persistenceLoaded, props.connectionId, t.schema],
+    [persistenceLoaded, props.connectionId, t.schema, focusDepth, focusEnabled, hideColumns, keysOnly],
   )
 
   const onResetLayout = useCallback(() => {
@@ -277,6 +343,10 @@ function ErdCanvasInner(props: {
     persistedViewport.current = null
     dragPos.current = {}
     if (props.connectionId) void clearErdPersistence(props.connectionId, t.schema)
+    setFocusDepth('1')
+    setFocusEnabled(false)
+    setHideColumns(false)
+    setKeysOnly(false)
     const pos = layoutTables(graph.tables, graph.relations, {})
     setNodes((prev) => prev.map((n) => (pos[n.id] ? { ...n, position: pos[n.id] } : n)))
     requestAnimationFrame(() => void flow.fitView({ ...FIT, duration: 200 }))
@@ -333,8 +403,20 @@ function ErdCanvasInner(props: {
           setFocusId(null)
         }}
         onQuerySubmit={focusSearch}
-        tableCount={graph.tables.length}
-        relationCount={graph.relations.length}
+        tableCount={focusedIds?.size ?? graph.tables.length}
+        relationCount={renderEdges.length}
+        focusDepth={focusDepth}
+        onFocusDepth={setFocusDepth}
+        focusEnabled={focusEnabled}
+        onFocusEnabled={setFocusEnabled}
+        canFocus={canFocus}
+        hideColumns={hideColumns}
+        onHideColumns={setHideColumns}
+        keysOnly={keysOnly}
+        onKeysOnly={setKeysOnly}
+        onExportSvg={exportSvg}
+        onExportPng={exportPng}
+        onCopyImage={copyImage}
       />
       {!graph.relations.length && (
         <div className="rounded-md border border-dashed px-3 py-1.5 text-[12px] text-muted-foreground">
@@ -343,8 +425,8 @@ function ErdCanvasInner(props: {
       )}
       <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg border bg-background">
         <ReactFlow
-          nodes={nodes}
-          edges={edges}
+          nodes={renderNodes}
+          edges={renderEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeDragStop={onNodeDragStop}

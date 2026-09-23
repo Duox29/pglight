@@ -25,7 +25,7 @@ Source features surveyed: JetBrains DataGrip (explorer, consoles, diff, Explain,
 | Global object search (Ctrl+K) | ✅ |
 | SQL format + CodeMirror editor + snippets | ✅ (sqlite-backed snippets/history) |
 | Import CSV / table export | ✅ (streaming multipart import + filtered CSV table export; bounded memory, JSON import retains 20k cap) |
-| ER diagram (FK graph) | ✅ (`@xyflow/react`, auto-layout, persisted) |
+| ER diagram (FK graph) | ✅ (`@xyflow/react`, auto-layout, persisted, SVG/PNG export, related-depth and compact-column views) |
 | Maintenance (VACUUM/ANALYZE/REINDEX) | ✅ (allow-listed, txn-refused) |
 | Roles / privileges / row security | ✅ (`/api/privileges`, previewed GRANT/REVOKE and RLS policy changes) |
 | Mock-data generator (Simple/Advanced) | ✅ (`meta`/preview≤100/generate≤20000) |
@@ -72,7 +72,7 @@ Frontend (`web/`):
 - [x] Global search palette (Ctrl+K / button): jump to table/column, open data.
 - [x] Session survive-restart: per-session credentials (`session-conns`), boot 1:1 reconnect so tabs keep their own DB (dead sessions badged, never collapsed onto another DB), global 401 hook + 30s/focus heartbeat with one-shot auto-retry, per-session Reconnect / Reconnect-all in Connections, tab ids remapped on reconnect.
 - [x] Workspace tab: History | Snippets | Aliases | Server | Activity | Locks | Stats | Connections | Appearance | Settings | Shortcuts | Logs, with one navigation bar; Quick Access uses a per-section toggle list for Connection Bar visibility (Connections/Settings by default, while respecting user changes) and database views retain auto-refresh for Activity/Locks. Connections provides a compact Simple form plus an Advanced mode for optional profile metadata and PostgreSQL options; connection fields expose contextual tooltips. Appearance is a peer workspace view with app-wide Dark/Light themes, Dark/Light/Ocean presets, live custom color pickers for background/text/panel/accent/border, CSS-token synchronization across the UI and SQL editor, and persisted reload-safe preferences.
-- [x] ERD tab per schema: SVG FK graph (click node → open table).
+- [x] ERD tab per schema: SVG FK graph (click node → open table), depth-limited relation focus, compact/PK-FK views, SVG/PNG export, image copy, persisted display settings.
 - [x] Import/export transfer: multipart CSV upload in bounded server batches; full filtered/ordered table CSV streams from PostgreSQL to a file; selection exports remain for CSV/JSON/INSERT.
 - [x] Table editor stages cell updates, row/bulk deletes, and inserts; previews SQL, supports cell/row undo and discard, then applies mixed changes atomically with original-value conflict detection.
 - [x] Grid selection flow (shared `useGridSelection`, Open Data + query `DataGrid[selectable]`): plain left-click selects exactly one row, ctrl/meta toggles, shift ranges from anchor, right-click keeps multi-selection when inside it; query grids offer Copy cell value / Copy rows / Export selected CSV|JSON.
