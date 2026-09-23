@@ -366,8 +366,8 @@ const SECTIONS: Section[] = [
           <H>To import CSV</H>
           <Ol>
             <Li>Select <K>Import CSV</K> and pick a <K>.csv, .tsv,</K> or <K>.txt</K> file. <K>.tsv</K> uses tab delimiters.</Li>
-            <Li>The header maps by column name, case insensitive, with positional fallback. Files with uneven row widths are rejected with the reported widths.</Li>
-            <Li>Confirm the dialog showing row count, target table, and columns. Server import is atomic, capped at 20,000 rows in batches of 500.</Li>
+            <Li>A matching first row is treated as a header and maps columns by name, case insensitive. Otherwise values use table column order. Uneven rows are rejected.</Li>
+            <Li>Confirm the target table and file size. CSV uploads are sent as multipart data and processed in 500-row batches; the server caps uploads at 2 GiB and rolls back failed imports.</Li>
           </Ol>
         </>
       ),
@@ -389,8 +389,8 @@ const SECTIONS: Section[] = [
           <H>Để import CSV</H>
           <Ol>
             <Li>Chọn <K>Import CSV</K> rồi chọn file <K>.csv, .tsv</K> hoặc <K>.txt</K>. File <K>.tsv</K> dùng delimiter tab.</Li>
-            <Li>Header map theo tên cột, không phân biệt hoa thường, dự phòng theo vị trí. File lệch số cột bị từ chối kèm số cột từng dòng.</Li>
-            <Li>Xác nhận hộp thoại ghi số dòng, bảng đích và cột. Import trên server mang tính nguyên tử, tối đa 20.000 dòng theo batch 500.</Li>
+            <Li>Nếu dòng đầu khớp tên cột thì dùng làm header, không phân biệt hoa thường; nếu không, dữ liệu theo thứ tự cột của bảng. Dòng không đồng đều sẽ bị từ chối.</Li>
+            <Li>Xác nhận bảng đích và dung lượng file. CSV được gửi dạng multipart và xử lý theo batch 500 dòng; server giới hạn 2 GiB và rollback khi import lỗi.</Li>
           </Ol>
         </>
       ),

@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -320,6 +322,197 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"rows_affected": total})
+}
+
+// ImportCSV accepts a multipart CSV upload and processes a bounded number of
+// records at a time. The legacy JSON endpoint remains available for callers
+// that already have row arrays in memory.
+func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "method not allowed"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<30)
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid multipart upload"})
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	id := sessionFromBody(r.FormValue("session_id"), r)
+	schema, table := r.FormValue("schema"), r.FormValue("table")
+	if schema == "" {
+		schema = "public"
+	}
+	var columns []string
+	if err := json.Unmarshal([]byte(r.FormValue("columns")), &columns); err != nil || len(columns) == 0 || table == "" {
+		writeJSON(w, 400, map[string]string{"error": "table and columns required"})
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": "file required"})
+		return
+	}
+	defer file.Close()
+	if id == "" {
+		writeJSON(w, 401, map[string]string{"error": "not connected"})
+		return
+	}
+	qqRaw, release, inTxn, pool, ok := h.Mgr.AcquireLease(id)
+	if !ok {
+		writeJSON(w, 401, map[string]string{"error": "not connected"})
+		return
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = -1
+	if delimiter := r.FormValue("delimiter"); delimiter != "" {
+		if len([]rune(delimiter)) != 1 {
+			writeJSON(w, 400, map[string]string{"error": "delimiter must be one character"})
+			return
+		}
+		reader.Comma = []rune(delimiter)[0]
+	}
+	udts, err := colUDTs(ctx, logging.Wrap(qqRaw, h.Log, id), schema, table)
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	var tx pgx.Tx
+	var target db.Querier = logging.Wrap(qqRaw, h.Log, id)
+	savepointDone := false
+	if inTxn {
+		if _, err := target.Exec(ctx, "SAVEPOINT pglight_csv_import"); err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		defer func() {
+			if !savepointDone {
+				_, _ = target.Exec(context.Background(), "ROLLBACK TO SAVEPOINT pglight_csv_import")
+				_, _ = target.Exec(context.Background(), "RELEASE SAVEPOINT pglight_csv_import")
+			}
+		}()
+	}
+	if !inTxn {
+		if pool == nil {
+			writeJSON(w, 401, map[string]string{"error": "not connected"})
+			return
+		}
+		tx, err = pool.Begin(ctx)
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		target = logging.Wrap(tx, h.Log, id)
+		defer func() {
+			if tx != nil {
+				_ = tx.Rollback(context.Background())
+			}
+		}()
+	}
+	const batchLimit = 500
+	var batch [][]any
+	var total int64
+	first, firstErr := reader.Read()
+	if firstErr != nil {
+		writeJSON(w, 400, map[string]string{"error": "CSV contains no rows"})
+		return
+	}
+	activeColumns := columns
+	header := false
+	if len(first) > 0 {
+		mappedColumns := make([]string, len(first))
+		for i, field := range first {
+			for _, column := range columns {
+				if strings.EqualFold(strings.TrimSpace(field), strings.TrimSpace(column)) {
+					mappedColumns[i] = column
+					break
+				}
+			}
+			if mappedColumns[i] == "" {
+				mappedColumns = nil
+				break
+			}
+		}
+		if mappedColumns != nil {
+			activeColumns, header = mappedColumns, true
+		}
+	}
+	conflict := r.FormValue("on_conflict_do_nothing") == "true"
+	suffix := ""
+	if conflict {
+		suffix = " ON CONFLICT DO NOTHING"
+	}
+	processRecord := func(record []string) error {
+		if len(record) != len(activeColumns) {
+			return fmt.Errorf("row width %d != columns %d", len(record), len(activeColumns))
+		}
+		row := make([]any, len(record))
+		for i := range record {
+			row[i] = record[i]
+		}
+		batch = append(batch, coerceRow(row, activeColumns, udts))
+		if len(batch) == batchLimit {
+			n, insertErr := insertRowsBatched(ctx, target, schema, table, activeColumns, batch, suffix)
+			if insertErr != nil {
+				return insertErr
+			}
+			total += n
+			batch = batch[:0]
+		}
+		return nil
+	}
+	if !header {
+		if err := processRecord(first); err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	for {
+		record, readErr := reader.Read()
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			writeJSON(w, 400, map[string]string{"error": "invalid CSV: " + readErr.Error()})
+			return
+		}
+		if err := processRecord(record); err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if len(batch) > 0 {
+		n, insertErr := insertRowsBatched(ctx, target, schema, table, activeColumns, batch, suffix)
+		if insertErr != nil {
+			writeJSON(w, 400, map[string]string{"error": insertErr.Error()})
+			return
+		}
+		total += n
+	}
+	if tx != nil {
+		if err := tx.Commit(ctx); err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		tx = nil
+	}
+	if inTxn {
+		if _, err := target.Exec(ctx, "RELEASE SAVEPOINT pglight_csv_import"); err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		savepointDone = true
+	}
+	response := map[string]any{"rows_affected": total}
+	if inTxn {
+		response["in_txn"] = true
+	}
+	writeJSON(w, 200, response)
 }
 
 func (h *Handler) RowOp(w http.ResponseWriter, r *http.Request) {

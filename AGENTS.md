@@ -63,8 +63,9 @@ is git-ignored: rebuild it, never commit it).
    - Refuse `UPDATE`/`DELETE` without `WHERE` in `/api/row`.
    - `/api/maintenance` allow-lists `vacuum|vacuum_full|analyze|reindex` only,
      and refuses inside an open txn (VACUUM can't run in a txn block).
-   - `/api/import` caps 20k rows, batches of 500, atomic (own txn unless the
-     session already has one).
+   - `/api/import` caps JSON imports at 20k rows and batches of 500; streaming
+     `/api/import/csv` accepts multipart uploads up to 2 GiB and batches 500
+     records. Both paths are atomic (own txn unless the session already has one).
 4. **SQL hygiene**: identifiers via `pgx.Identifier{}.Sanitize()`; values via
    `$n` params. No `fmt.Sprintf` interpolation of user input into SQL —
    `filter`/`order` in `/api/table-data` are the only exception and must keep
@@ -243,7 +244,7 @@ backend/frontend surface:
 
 ## 6. Current function inventory (full project scan — 2026-09-21)
 
-The route table currently contains 53 registrations. Keep this inventory in
+The route table currently contains 54 registrations. Keep this inventory in
 sync when adding or removing a user-visible function:
 
 - **Sessions and connections**: `connect`, `sessions`, `disconnect`, `txn`,
@@ -254,7 +255,8 @@ sync when adding or removing a user-visible function:
   `constraints`, `triggers`, `table-stats`, `erd`, and `search` (including
   SQLite-backed ERD layout/viewport persistence through `erd?layout=1`).
 - **Query and data**: `query` (single and multi-statement), `explain`,
-  `complete`, `table-data`, `row`, `rows-delete`, `import`, `maintenance`,
+  `complete`, `table-data`, `row`, `rows-delete`, `import` (JSON + streaming
+  multipart CSV), `maintenance`,
   `activity`, and `cancel`.
 - **App data and administration**: `aliases`, `snippets`, `history`,
   `preferences`, `preferences/shortcuts`, `server-info`, `stats`, `locks`,

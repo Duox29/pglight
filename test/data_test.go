@@ -1,7 +1,10 @@
 package test
 
 import (
+	"bytes"
 	"fmt"
+	"mime/multipart"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -318,4 +321,87 @@ func TestImportHappyFailEdge(t *testing.T) {
 	big += `]}`
 	code, body = callPOST(t, h.Import, "/api/import", big)
 	requireErrContains(t, body, code, 400, "max 20000")
+}
+
+func TestImportCSVStreamsRecordsAndPreservesQuotedValues(t *testing.T) {
+	h, sid := newHandler(t)
+	tbl := tempTable(t)
+	execSQL(t, h, sid, fmt.Sprintf(`CREATE TABLE %s (id int PRIMARY KEY, v text)`, tbl))
+	defer execSQL(t, h, sid, fmt.Sprintf(`DROP TABLE %s`, tbl))
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	_ = w.WriteField("session_id", sid)
+	_ = w.WriteField("schema", "public")
+	_ = w.WriteField("table", tbl)
+	_ = w.WriteField("columns", `["id","v"]`)
+	f, err := w.CreateFormFile("file", "rows.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.Write([]byte("1,\"first, value\"\n2,\"line one\nline two\"\n"))
+	_ = w.Close()
+	r := httptest.NewRequest("POST", "/api/import/csv", &body)
+	r.Header.Set("Content-Type", w.FormDataContentType())
+	res := httptest.NewRecorder()
+	h.ImportCSV(res, r)
+	requireStatus(t, res.Body.String(), res.Code, 200)
+	requireDeep(t, res.Body.String(), "import csv", decodeObj(t, res.Body.String()), map[string]any{"rows_affected": 2})
+	rows := queryRows(t, h, sid, fmt.Sprintf(`SELECT id,v FROM %s ORDER BY id`, tbl))
+	requireDeep(t, "", "csv values", rows, [][]any{{1, "first, value"}, {2, "line one\nline two"}})
+}
+
+func TestImportCSVMapsMatchingHeaderColumns(t *testing.T) {
+	h, sid := newHandler(t)
+	tbl := tempTable(t)
+	execSQL(t, h, sid, fmt.Sprintf(`CREATE TABLE %s (id int PRIMARY KEY, v text)`, tbl))
+	defer execSQL(t, h, sid, fmt.Sprintf(`DROP TABLE %s`, tbl))
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	_ = w.WriteField("session_id", sid)
+	_ = w.WriteField("schema", "public")
+	_ = w.WriteField("table", tbl)
+	_ = w.WriteField("columns", `["id","v"]`)
+	f, err := w.CreateFormFile("file", "rows.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.Write([]byte("V,ID\nhello,7\n"))
+	_ = w.Close()
+	r := httptest.NewRequest("POST", "/api/import/csv", &body)
+	r.Header.Set("Content-Type", w.FormDataContentType())
+	res := httptest.NewRecorder()
+	h.ImportCSV(res, r)
+	requireStatus(t, res.Body.String(), res.Code, 200)
+	requireDeep(t, "", "header mapped values", queryRows(t, h, sid, fmt.Sprintf(`SELECT id,v FROM %s ORDER BY id`, tbl)), [][]any{{7, "hello"}})
+}
+
+func TestImportCSVIsAtomicAcrossBatches(t *testing.T) {
+	h, sid := newHandler(t)
+	tbl := tempTable(t)
+	execSQL(t, h, sid, fmt.Sprintf(`CREATE TABLE %s (id int PRIMARY KEY, v text)`, tbl))
+	defer execSQL(t, h, sid, fmt.Sprintf(`DROP TABLE %s`, tbl))
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	_ = w.WriteField("session_id", sid)
+	_ = w.WriteField("schema", "public")
+	_ = w.WriteField("table", tbl)
+	_ = w.WriteField("columns", `["id","v"]`)
+	f, err := w.CreateFormFile("file", "rows.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 500; i++ {
+		_, _ = fmt.Fprintf(f, "%d,value\n", i)
+	}
+	_, _ = f.Write([]byte("1,duplicate\n"))
+	_ = w.Close()
+	r := httptest.NewRequest("POST", "/api/import/csv", &body)
+	r.Header.Set("Content-Type", w.FormDataContentType())
+	res := httptest.NewRecorder()
+	h.ImportCSV(res, r)
+	requireErrContains(t, res.Body.String(), res.Code, 400, "duplicate key")
+	if got := len(queryRows(t, h, sid, fmt.Sprintf(`SELECT * FROM %s`, tbl))); got != 0 {
+		t.Fatalf("failed streaming import left %d rows behind", got)
+	}
 }

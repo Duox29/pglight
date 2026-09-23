@@ -217,6 +217,16 @@ export const apiClient = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(p),
     }),
+  importCSV: (p: { session_id: string; schema: string; table: string; columns: string[]; file: File; delimiter?: string }) => {
+    const body = new FormData()
+    body.set('session_id', p.session_id)
+    body.set('schema', p.schema)
+    body.set('table', p.table)
+    body.set('columns', JSON.stringify(p.columns))
+    body.set('file', p.file)
+    if (p.delimiter) body.set('delimiter', p.delimiter)
+    return api<{ rows_affected?: number; in_txn?: boolean; error?: string }>('/api/import/csv', { method: 'POST', body })
+  },
   alterTable: (p: {
     session_id: string
     schema: string

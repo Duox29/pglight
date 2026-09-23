@@ -34,6 +34,7 @@ interface Props {
   onInsert: () => void
   onMaintenance: (op: string) => void
   onImport: (columns: string[], rows: unknown[][]) => void
+  onImportCSV?: (file: File, columns: string[], delimiter: string) => void
   onOpenErd: () => void
   onAlter: (p: {
     op: string
@@ -98,6 +99,21 @@ export function TableWorkspace(p: Props) {
   const startImport = () => fileRef.current?.click()
 
   const handleFile = async (file: File) => {
+    if (p.onImportCSV) {
+      const tableCols = t.result?.columns ?? []
+      if (!tableCols.length) {
+        toast.error('Table columns are unavailable')
+        return
+      }
+      const delimiter = file.name.toLowerCase().endsWith('.tsv') ? '\t' : ','
+      const ok = await p.dialogs.confirm({
+        title: 'Import CSV',
+        description: `Upload ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MiB) into ${t.schema}.${t.table}? A matching first row is treated as a header.`,
+        confirmText: 'Import',
+      })
+      if (ok) p.onImportCSV(file, tableCols, delimiter)
+      return
+    }
     const maxImportFileBytes = 16 * 1024 * 1024
     if (file.size > maxImportFileBytes) {
       toast.error('File is too large (maximum 16 MiB)')

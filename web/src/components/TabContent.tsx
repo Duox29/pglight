@@ -281,6 +281,18 @@ function TabContentInner(p: TabContentProps) {
             toast.error(e instanceof Error ? e.message : String(e))
           }
         }}
+        onImportCSV={async (file, columns, delimiter) => {
+          try {
+            const j = await apiClient.importCSV({ session_id: tab.sessionId, schema: tab.schema, table: tab.table, columns, file, delimiter })
+            if (j.error) toast.error(j.error)
+            else {
+              toast.success(`Imported ${j.rows_affected} rows`)
+              p.table.loadTablePage(tab.sessionId, tab.id, tab.schema, tab.table, tab.limit, tab.offset, tab.filter, tab.order)
+            }
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : String(e))
+          }
+        }}
         onOpenErd={() => p.openErd(tab.schema, tab.sessionId)}
         onAlter={(pl) => p.table.alterTable(tab.id, pl)}
         onRenameTable={() => p.table.renameTable(tab.id)}
