@@ -17,7 +17,7 @@
   flat route table in `main.go` (53 `/api/*` registrations; `Manager.CloseAll`
   + `os.Exit` shutdown).
 - **Frontend**: React 18 + Vite 5 + Tailwind v3 + shadcn-style prebuilt
-  components (`web/src/components/ui/*`: Button, Input, Textarea, Badge,
+  components (`web/src/components/ui/*`: Button, Input, Textarea, PasswordTextarea (masked multiline secrets such as SSH private keys), Badge,
   Card, Table, Tabs, Dialog, AlertDialog, Select, SearchSelect, Separator,
   ScrollArea, Collapsible, Switch, Resizable, ContextMenu, DropdownMenu,
   Popover, Tooltip/`Tip`, DataGrid) + CodeMirror SQL editor (`SqlEditor`,
@@ -103,12 +103,13 @@ is git-ignored: rebuild it, never commit it).
     App data lives in `internal/store/` (sqlite tables `app_users`, `snippets`,
     `query_history`, `aliases`, `connection_profiles`, `connection_folders`,
     `connection_tags`, `connection_options`, `vaults`, `connection_secrets`,
+    `connection_ssh_secrets`,
     `user_preferences`, `erd_layouts`) — never in PG target connections.
 
 ## 3. Frontend rules (React + shadcn)
 
 1. **Prebuilt UI only**: compose from `components/ui/*` (Button, Input,
-   Textarea, Badge, Card, Table, Tabs, Dialog, AlertDialog, Select,
+   Textarea, PasswordTextarea, Badge, Card, Table, Tabs, Dialog, AlertDialog, Select,
    SearchSelect, Separator, ScrollArea, Collapsible, Switch, Resizable,
    ContextMenu, DropdownMenu, Popover, Tooltip/`Tip`, DataGrid) +
    `feedback.tsx` (Skeleton/ErrorText/
@@ -201,9 +202,10 @@ backend/frontend surface:
   encrypted profile export/import, and clear-on-lock runtime keys. The only
   reset flow is offline `pglight.exe vault reset`: it requires an existing
   store, an exclusive OS lock, confirmation (or `--password-stdin --yes`),
-  and a new master password; it removes stored database credentials while
+  and a new master password; it removes stored PostgreSQL and SSH credentials while
   preserving profiles, folders, tags, and non-secret metadata. It does not
   erase history/snippets/backups or change PostgreSQL passwords.
+- SSH tunnel transport for saved profiles uses a loopback-only forward, vault-encrypted SSH credentials, SHA256 host-key pinning, and session-scoped teardown. Configuration belongs in Workspace → Connections → Advanced; PostgreSQL TLS options remain separate.
 - Explorer and schema work: databases, schemas, tables, views, materialized
   views, foreign tables, functions, sequences, types, indexes, triggers,
   constraints, table statistics, DDL, ERD (`@xyflow/react` canvas:

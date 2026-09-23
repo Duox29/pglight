@@ -11,6 +11,12 @@ export interface SessionInfo {
   tls_warn?: boolean
   profile_id?: string
   profile_name?: string
+  ssh_tunnel?: boolean
+  ssh_host?: string
+  ssh_port?: number
+  ssh_user?: string
+  ssh_auth_method?: string
+  ssh_host_key?: string
 }
 
 export interface SavedConnection {
@@ -40,6 +46,12 @@ export interface SavedConnection {
 		sslcert?: string
 		sslkey?: string
 		unix_socket?: string
+		ssh_enabled?: boolean
+		ssh_host?: string
+		ssh_port?: number
+		ssh_user?: string
+		ssh_auth_method?: string
+		ssh_host_key?: string
 	}
 }
 

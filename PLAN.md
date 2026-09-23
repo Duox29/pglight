@@ -31,8 +31,9 @@ Source features surveyed: JetBrains DataGrip (explorer, consoles, diff, Explain,
 | Split workspace (2-pane) + Docs tab + shutdown | ✅ |
 | Privacy controls + TLS warnings + exact numerics | ✅ |
 | Destructive offline vault reset (`pglight.exe vault reset`) | ✅ (clears vault secrets, preserves profile metadata) |
-| Diff / schema compare, backup/restore | ❌ (later) |
-| Debugger, SSH tunnel | ❌ (out of scope) |
+| Diff / schema compare, backup/restore | ❌ (planned; Phase 2) |
+| SSH tunnel | ✅ (implemented; profile vault, forwarding, pinning, Connections UI) |
+| Debugger | ❌ (out of scope) |
 
 ## Plan — phased
 
@@ -72,13 +73,49 @@ Frontend (`web/`):
 - [x] Row identity: cell edit uses the table's primary key from `/api/columns` and refuses when there is none (or a PK value is NULL); bulk selection keys by PK values when known, falling back to row-index-plus-content keys; pagination disables Prev at offset 0 and honors the backend `has_more` signal; query result sort is derived state with asc/desc instead of mutating tab results.
 
 ### Phase 2 — next (not in this change)
-- Visual EXPLAIN (flame/graph, buffers/timing bars), plan compare.
-- Data editor: staged edits + Apply/Rollback (like DataGrip), JSON cell editor, column filters/sort UI, duplicate row, fill-down.
-- Schema diff (DDL compare between DBs), migration script preview.
-- `pg_dump`/`pg_restore` streaming backup, MOTD log viewer (`pg_log` via `file_fdw` if available).
-- Row-level security / privilege editor (GRANT wizard), role membership editor.
-- Charts from result sets, query plan history, slow-query panel (`pg_stat_statements` when installed).
-- Multi-connection tabs (per-tab session) ✅ (sessions list + active session; explorer/txn/dashboard follow active, tabs keep their session; `switchDb` opens a new session) | SSH tunnel + SSL cert auth, read-only mode (later).
+- [x] SSH tunnel for saved PostgreSQL profiles (see the implemented flow below).
+- [ ] Read-only connection mode, enforced by the backend session rather than only disabling UI actions.
+- [ ] Schema diff between databases/sessions with a reviewable migration script preview.
+- [ ] `pg_dump`/`pg_restore` backup and restore with progress, cancellation, and explicit overwrite/target confirmation.
+- [ ] Data editor: staged edits + Apply/Rollback, JSON cell editor, column filters/sort UI, duplicate row, fill-down.
+- [ ] Visual EXPLAIN (plan tree/graph, buffers/timing where available), plan compare.
+- [ ] Row-level security / privilege editor (GRANT wizard), role membership editor.
+- [ ] Charts from result sets, query plan history, slow-query panel (`pg_stat_statements` when installed).
+- [ ] MOTD log viewer only if a supported, permission-safe source is available; do not require `file_fdw` or server-side file access by default.
+- [x] Multi-connection tabs (per-tab session): sessions list + active session; explorer/txn/dashboard follow active, tabs keep their session; `switchDb` opens a new session.
+
+### SSH tunnel — implementation plan
+
+Treat the tunnel as a transport option on the existing saved connection profile. The user continues to create, test, connect, reconnect, and organize profiles in **Workspace → Connections**; the app must not add a separate SSH workspace or parallel connection list. Keep the compact Simple form and place tunnel configuration behind the existing **Advanced** disclosure, visually grouped as **SSH tunnel** alongside (but clearly distinct from) PostgreSQL connection and TLS settings.
+
+#### Scope and behavior
+
+- [x] Support local port forwarding to a PostgreSQL host/port reachable from the SSH server. The PostgreSQL destination host may be `localhost` from the SSH server's point of view; explain this in the Advanced help text.
+- [x] Support SSH password and private-key authentication (including encrypted private keys); prompt for missing/unavailable saved credentials through existing promise-based dialogs and keep secret input masked.
+- [x] Store reusable SSH secrets only in the existing encrypted credential vault. Saved profile responses, exports without encryption, logs, errors, and browser state never contain credentials. Encrypted profile export/import includes SSH secrets only inside the encrypted envelope.
+- [x] Verify pinned SSH host-key fingerprints. First-use test shows the SHA256 fingerprint and asks for out-of-band verification before pinning; changed keys fail closed.
+- [x] Start the tunnel before PostgreSQL connect/test, route pgx through an allocated loopback endpoint, and close the listener/client on failed connect, disconnect, reconnect replacement, app shutdown, and session cleanup.
+- [x] Keep TLS-to-PostgreSQL options independent: SSH protects the route to the SSH host; PostgreSQL `sslmode` and certificate fields continue to govern PostgreSQL TLS.
+- [x] Make `Test connection` test the complete SSH → PostgreSQL path and report the failing stage without secrets. Reconnect-after-restart uses vault-unlocked credentials and supports one-time credentials when prompted.
+- [x] Distinguish live session reuse using saved profile identity so distinct routes do not collapse onto one connection.
+- [x] Update encrypted profile import/export, profile duplication/editing, vault rotation/reset behavior, session cleanup, API docs, bilingual `DocsView`, and `AGENTS.md` inventory.
+
+#### UI/UX fit
+
+- [x] In **Connections → Advanced**, add an SSH tunnel Switch. Off keeps the current form unchanged. On reveals a compact SSH section with host, port, username, auth method, and method-specific fields; PostgreSQL fields stay in their existing position.
+- [x] Use existing `Input`, `Textarea`/`PasswordTextarea`, `Select`, `Switch`, `Tip`, `Badge`, and `dialogs` patterns; use Lucide icons and theme tokens. No raw CSS or native dialogs.
+- [x] Show configured and connected SSH state with the existing `SSH` profile/session badge, show failures inline beside connection actions, and keep locked-vault state in the existing vault panel.
+- [x] Keep the Simple form and profile list uncluttered. Show `SSH` badge on tunneled profiles, search SSH host/user, preserve SSH settings on duplicate, and expose details only in Advanced/edit mode.
+- [x] Keep keyboard labels, masked secret input with a reveal control, responsive layout, and empty/locked-vault states aligned with Connections.
+
+#### Delivery sequence and acceptance
+
+1. [x] **Backend design + lifecycle:** profile metadata is in `internal/store`, SSH secrets use the encrypted vault, and the tunnel owner in `internal/db` tears down with its session. Endpoint logic remains in `internal/api/session.go` and `connections.go`.
+2. [x] **API and profile contract:** profile CRUD, duplicate, encrypted export/import, secret rotation, unknown/changed host-key rejection, pinned forwarding, listener close, and no-secret response shapes are covered by Go tests.
+3. [x] **Frontend integration:** `CredentialManager` and `lib/api.ts` use existing `App.tsx` callbacks and `useSessions`; Vitest covers Advanced fields/save and session reuse behavior.
+4. [x] **Docs and verification:** API inventory and English/Vietnamese `DocsView` updated. `./scripts/check.sh`, `go test -race ./...`, frontend Vitest on Node 24, and `npm run build` pass; direct PostgreSQL integration tests and a local in-process SSH forwarding fixture pass. `web/dist` remains ignored.
+
+Done means a saved tunnel profile survives restart without leaking secrets; tunnel and PG connection lifecycle have no orphaned listeners; host keys are verified; direct connections remain unchanged; and the full Connections flow is usable in both themes and at narrow window widths.
 
 ### Vault recovery (development)
 
@@ -105,14 +142,14 @@ Automation reads one password from stdin and requires explicit confirmation:
 ```
 
 `--store` and `--user` select an existing store/user. Reset removes stored
-database credentials only; it does not change passwords on PostgreSQL servers
+PostgreSQL and SSH credentials only; it does not change passwords on remote servers
 or erase history/snippets/backups outside the vault tables.
 
 ## API added in Phase 1
 
 ```
-POST /api/connect           {host,port,user,password,dbname,sslmode} → {session_id,info,tls_warn}
-GET  /api/sessions          → {sessions: [{id,host,port,user,dbname,sslmode,in_txn,connected_at}]} (display info only, no passwords)
+POST /api/connect           {host,port,user,password,dbname,sslmode,profile_id?} → {session_id,info,tls_warn,ssh_tunnel?}; saved profile transport options start and own the tunnel
+GET  /api/sessions          → {sessions: [{id,host,port,user,dbname,sslmode,in_txn,connected_at,ssh_tunnel}]} (display info only, no credentials)
 DELETE /api/disconnect?session_id=
 POST /api/txn              {session_id, action}
 GET  /api/databases?session_id= | GET /api/schemas?session_id= | GET /api/tables?session_id=&schema=
@@ -154,7 +191,7 @@ POST /api/aliases           {trigger,expansion} → upsert user entry (trigger: 
 DELETE /api/aliases?trigger= drop one user entry (builtin restored) · DELETE /api/aliases reset all to defaults
 GET  /api/snippets | POST /api/snippets {name,sql} | DELETE /api/snippets?name= (sqlite-backed, per user)
 GET  /api/history | POST /api/history {sql,ms?,n?} | DELETE /api/history (sqlite-backed, retention-pruned)
-GET  /api/connections[?q=&folder_id=&tag=&favorite=1] | POST /api/connections {id?,name,host,port,user,dbname,sslmode,password?,save_password?,clear_password?,folder_id?,environment?,color?,description?,favorite?,default?,tags?,connection options} | DELETE /api/connections?id= (SQLite profiles; passwords are vault-encrypted and never returned)
+GET  /api/connections[?q=&folder_id=&tag=&favorite=1] | POST /api/connections {id?,name,host,port,user,dbname,sslmode,password?,save_password?,clear_password?,folder_id?,environment?,color?,description?,favorite?,default?,tags?,PostgreSQL options,ssh_enabled?,ssh_host?,ssh_port?,ssh_user?,ssh_auth_method?,ssh_host_key?,ssh_password?/ssh_private_key?/ssh_passphrase?} | DELETE /api/connections?id= (SQLite profiles; credentials are vault-encrypted and never returned)
 GET|POST /api/connections/folders (folder/group CRUD) | GET /api/connections/export (password-free JSON) | POST /api/connections/export {encrypted,password} (encrypted JSON) | POST /api/connections/import {payload,password?}
 GET|POST /api/vault (status; actions setup|unlock|lock|change_password; versioned Argon2id + AES-GCM vault, master password never persisted; 15-minute inactivity auto-lock, browser/session-end lock, and unlock backoff)
 POST /api/connections/test {profile_id? or host,port,user,dbname,sslmode,password?} → {ok,message} (temporary PostgreSQL ping; profile secrets require an unlocked vault)

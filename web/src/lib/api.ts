@@ -12,6 +12,9 @@ export interface ConnectParams {
   sslmode: string
   session_id?: string
   profile_id?: string
+  ssh_password?: string
+  ssh_private_key?: string
+  ssh_passphrase?: string
 }
 
 export interface VaultStatus {
@@ -47,6 +50,12 @@ export interface ConnectionProfile {
     sslcert?: string
     sslkey?: string
     unix_socket?: string
+    ssh_enabled?: boolean
+    ssh_host?: string
+    ssh_port?: number
+    ssh_user?: string
+    ssh_auth_method?: string
+    ssh_host_key?: string
   }
 }
 
@@ -127,6 +136,12 @@ export interface SessionInfo {
   tls_warn?: boolean
   profile_id?: string
   profile_name?: string
+  ssh_tunnel?: boolean
+  ssh_host?: string
+  ssh_port?: number
+  ssh_user?: string
+  ssh_auth_method?: string
+  ssh_host_key?: string
 }
 
 export const q = (session: string, path: string) =>
@@ -280,7 +295,7 @@ export const apiClient = {
   addHistory: (sql: string, ms?: number, n?: number) => api('/api/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql, ms, n }) }),
   clearHistory: () => api<{ ok?: boolean; error?: string }>('/api/history', { method: 'DELETE' }),
   listConnections: (query = '') => api<{ connections: ConnectionProfile[]; folders?: { id: string; name: string; parent_id?: string }[]; vault_unlocked?: boolean }>(`/api/connections${query ? `?${query}` : ''}`),
-  saveConnection: (p: { id?: string; name: string; host: string; port: number; user: string; dbname: string; sslmode: string; password?: string; save_password?: boolean; clear_password?: boolean; duplicate_from?: string; folder_id?: string; environment?: string; color?: string; description?: string; favorite?: boolean; default?: boolean; tags?: string[]; connect_timeout?: number; keepalive?: number; application_name?: string; search_path?: string; sslrootcert?: string; sslcert?: string; sslkey?: string; unix_socket?: string }) => api<{ connection?: ConnectionProfile; error?: string }>('/api/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
+  saveConnection: (p: { id?: string; name: string; host: string; port: number; user: string; dbname: string; sslmode: string; password?: string; save_password?: boolean; clear_password?: boolean; duplicate_from?: string; folder_id?: string; environment?: string; color?: string; description?: string; favorite?: boolean; default?: boolean; tags?: string[]; connect_timeout?: number; keepalive?: number; application_name?: string; search_path?: string; sslrootcert?: string; sslcert?: string; sslkey?: string; unix_socket?: string; ssh_enabled?: boolean; ssh_host?: string; ssh_port?: number; ssh_user?: string; ssh_auth_method?: string; ssh_host_key?: string; ssh_password?: string; ssh_private_key?: string; ssh_passphrase?: string }) => api<{ connection?: ConnectionProfile; error?: string }>('/api/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
   deleteConnection: (id: string) => api<{ ok?: boolean; error?: string }>(`/api/connections?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
   saveConnectionFolder: (p: { id?: string; name: string; parent_id?: string }) => api<{ folder?: { id: string; name: string; parent_id?: string }; error?: string }>('/api/connections/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
   deleteConnectionFolder: (id: string) => api<{ ok?: boolean; error?: string }>(`/api/connections/folders?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),

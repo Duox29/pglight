@@ -1,5 +1,8 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
+import { useState } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
+import { Button } from './button'
 
 const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
   ({ className, ...props }, ref) => (
@@ -14,5 +17,15 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttribu
   ),
 )
 Textarea.displayName = 'Textarea'
+
+export function PasswordTextarea({ className, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const [visible, setVisible] = useState(false)
+  return <div className="relative">
+    <Textarea className={cn('pr-9', !visible && '[-webkit-text-security:disc]', className)} {...props} />
+    <Button type="button" size="icon" variant="ghost" className="absolute right-1 top-1 h-7 w-7" aria-label={visible ? 'Hide secret text' : 'Show secret text'} onClick={() => setVisible((value) => !value)}>
+      {visible ? <EyeOff /> : <Eye />}
+    </Button>
+  </div>
+}
 
 export { Textarea }

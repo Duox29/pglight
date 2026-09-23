@@ -62,7 +62,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	)`); err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
-	const version = 4
+	const version = 6
 	var applied int
 	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&applied); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
@@ -204,6 +204,29 @@ func (s *Store) migrate(ctx context.Context) error {
 				unix_socket TEXT NOT NULL DEFAULT ''
 			)`,
 			`INSERT OR IGNORE INTO schema_migrations(version) VALUES (4)`,
+		)
+	}
+	if applied < 5 {
+		statements = append(statements,
+			`ALTER TABLE connection_options ADD COLUMN ssh_enabled INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE connection_options ADD COLUMN ssh_host TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE connection_options ADD COLUMN ssh_port INTEGER NOT NULL DEFAULT 22`,
+			`ALTER TABLE connection_options ADD COLUMN ssh_user TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE connection_options ADD COLUMN ssh_auth_method TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE connection_options ADD COLUMN ssh_host_key TEXT NOT NULL DEFAULT ''`,
+			`INSERT OR IGNORE INTO schema_migrations(version) VALUES (5)`,
+		)
+	}
+	if applied < 6 {
+		statements = append(statements,
+			`CREATE TABLE IF NOT EXISTS connection_ssh_secrets (
+				user_id TEXT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+				connection_id TEXT PRIMARY KEY REFERENCES connection_profiles(id) ON DELETE CASCADE,
+				nonce BLOB NOT NULL,
+				ciphertext BLOB NOT NULL,
+				updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)`,
+			`INSERT OR IGNORE INTO schema_migrations(version) VALUES (6)`,
 		)
 	}
 	for _, stmt := range statements {

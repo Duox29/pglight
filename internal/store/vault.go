@@ -229,6 +229,39 @@ func (s *Store) ChangeVaultMaster(ctx context.Context, userID, oldMaster, newMas
 			return err
 		}
 	}
+	sshRows, err := tx.QueryContext(ctx, `SELECT connection_id,nonce,ciphertext FROM connection_ssh_secrets WHERE user_id=?`, userID)
+	if err != nil {
+		return err
+	}
+	var sshSecrets []secret
+	for sshRows.Next() {
+		var x secret
+		if err := sshRows.Scan(&x.id, &x.nonce, &x.ciphertext); err != nil {
+			sshRows.Close()
+			return err
+		}
+		sshSecrets = append(sshSecrets, x)
+	}
+	if err := sshRows.Err(); err != nil {
+		sshRows.Close()
+		return err
+	}
+	sshRows.Close()
+	for _, x := range sshSecrets {
+		plain, err := open(oldKey, x.nonce, x.ciphertext)
+		if err != nil {
+			zeroBytes(plain)
+			return ErrVaultInvalid
+		}
+		nonce, ciphertext, err := seal(newKey, plain)
+		zeroBytes(plain)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE connection_ssh_secrets SET nonce=?,ciphertext=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND connection_id=?`, nonce, ciphertext, userID, x.id); err != nil {
+			return err
+		}
+	}
 	if _, err = tx.ExecContext(ctx, `UPDATE vaults SET version=?,salt=?,check_nonce=?,check_ciphertext=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?`, newRecord.Version, newRecord.Salt, newRecord.CheckNonce, newRecord.CheckCiphertext, userID); err != nil {
 		return err
 	}
@@ -302,6 +335,9 @@ func (s *Store) ResetVault(ctx context.Context, userID, newMaster string) error 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM connection_secrets WHERE user_id=?`, userID); err != nil {
 		return fmt.Errorf("delete vault secrets: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM connection_ssh_secrets WHERE user_id=?`, userID); err != nil {
+		return fmt.Errorf("delete SSH vault secrets: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM vaults WHERE user_id=?`, userID); err != nil {
 		return fmt.Errorf("delete vault: %w", err)
 	}
@@ -372,6 +408,44 @@ func (s *Store) ConnectionSecret(ctx context.Context, userID, connectionID strin
 		return "", false, fmt.Errorf("decrypt connection secret: %w", err)
 	}
 	return string(plain), true, nil
+}
+
+func (s *Store) SaveSSHSecret(ctx context.Context, userID, connectionID string, value []byte, key []byte) error {
+	if len(key) == 0 {
+		return errors.New("vault is locked; unlock it before saving SSH credentials")
+	}
+	if len(value) == 0 {
+		_, err := s.db.ExecContext(ctx, `DELETE FROM connection_ssh_secrets WHERE user_id=? AND connection_id=?`, userID, connectionID)
+		return err
+	}
+	nonce, ciphertext, err := seal(key, value)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO connection_ssh_secrets(user_id,connection_id,nonce,ciphertext) VALUES(?,?,?,?) ON CONFLICT(connection_id) DO UPDATE SET user_id=excluded.user_id,nonce=excluded.nonce,ciphertext=excluded.ciphertext,updated_at=CURRENT_TIMESTAMP`, userID, connectionID, nonce, ciphertext)
+	return err
+}
+
+func (s *Store) SSHSecret(ctx context.Context, userID, connectionID string, key []byte) ([]byte, bool, error) {
+	var nonce, ciphertext []byte
+	err := s.db.QueryRowContext(ctx, `SELECT nonce,ciphertext FROM connection_ssh_secrets WHERE user_id=? AND connection_id=?`, userID, connectionID).Scan(&nonce, &ciphertext)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	plain, err := open(key, nonce, ciphertext)
+	if err != nil {
+		return nil, false, fmt.Errorf("decrypt SSH credentials: %w", err)
+	}
+	return plain, true, nil
+}
+
+func (s *Store) HasSSHSecret(ctx context.Context, userID, connectionID string) (bool, error) {
+	var exists bool
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM connection_ssh_secrets WHERE user_id=? AND connection_id=?)`, userID, connectionID).Scan(&exists)
+	return exists, err
 }
 
 func zeroBytes(b []byte) {

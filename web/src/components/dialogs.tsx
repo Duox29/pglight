@@ -12,6 +12,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
+import { PasswordTextarea, Textarea } from './ui/textarea'
 import { Tip } from './ui/tooltip'
 
 /** Promise-based popups (shadcn AlertDialog / Dialog) replacing native confirm()/prompt(). */
@@ -21,6 +22,7 @@ export interface FormField {
   label: string
   placeholder?: string
   type?: string
+  multiline?: boolean
   /** When true the field renders a NULL toggle; a nulled field resolves to null. */
   allowNull?: boolean
 }
@@ -159,13 +161,23 @@ function FormHost({ dlg }: { dlg: PendingDialog }) {
               <Tip content={f.label}>
                 <span className="truncate text-muted-foreground">{f.label}</span>
               </Tip>
-              <Input
+              {f.multiline && f.type === 'password' ? <PasswordTextarea
+                placeholder={f.placeholder}
+                disabled={!!nulls[f.key]}
+                value={nulls[f.key] ? 'NULL' : (values[f.key] ?? '')}
+                onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+              /> : f.multiline ? <Textarea
+                placeholder={f.placeholder}
+                disabled={!!nulls[f.key]}
+                value={nulls[f.key] ? 'NULL' : (values[f.key] ?? '')}
+                onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+              /> : <Input
                 type={f.type}
                 placeholder={f.placeholder}
                 disabled={!!nulls[f.key]}
                 value={nulls[f.key] ? 'NULL' : (values[f.key] ?? '')}
                 onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-              />
+              />}
               {f.allowNull ? (
                 <Tip content={nulls[f.key] ? 'Unset NULL (edit a value)' : 'Set NULL'}>
                   <Button

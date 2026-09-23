@@ -27,6 +27,15 @@ type connectReq struct {
 	SSLCert         string `json:"sslcert"`
 	SSLKey          string `json:"sslkey"`
 	UnixSocket      string `json:"unix_socket"`
+	SSHEnabled      bool   `json:"ssh_enabled"`
+	SSHHost         string `json:"ssh_host"`
+	SSHPort         int    `json:"ssh_port"`
+	SSHUser         string `json:"ssh_user"`
+	SSHAuthMethod   string `json:"ssh_auth_method"`
+	SSHHostKey      string `json:"ssh_host_key"`
+	SSHPassword     string `json:"ssh_password"`
+	SSHPrivateKey   string `json:"ssh_private_key"`
+	SSHPassphrase   string `json:"ssh_passphrase"`
 }
 
 func (h *Handler) Connect(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +59,7 @@ func (h *Handler) Connect(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		id = fmt.Sprintf("%d", time.Now().UnixNano())
 	}
-	opts := db.ConnOptions{ConnectTimeout: req.ConnectTimeout, Keepalive: req.Keepalive, ApplicationName: req.ApplicationName, SearchPath: req.SearchPath, SSLRootCert: req.SSLRootCert, SSLCert: req.SSLCert, SSLKey: req.SSLKey, UnixSocket: req.UnixSocket}
+	opts := db.ConnOptions{ConnectTimeout: req.ConnectTimeout, Keepalive: req.Keepalive, ApplicationName: req.ApplicationName, SearchPath: req.SearchPath, SSLRootCert: req.SSLRootCert, SSLCert: req.SSLCert, SSLKey: req.SSLKey, UnixSocket: req.UnixSocket, SSH: db.SSHTunnelOptions{Enabled: req.SSHEnabled, Host: req.SSHHost, Port: req.SSHPort, User: req.SSHUser, AuthMethod: req.SSHAuthMethod, HostKeySHA256: req.SSHHostKey, Password: req.SSHPassword, PrivateKey: req.SSHPrivateKey, Passphrase: req.SSHPassphrase, DestinationHost: req.Host, DestinationPort: req.Port}}
 	profileName := ""
 	if strings.TrimSpace(req.ProfileID) != "" {
 		profile, password, err := h.connectionTarget(r.Context(), strings.TrimSpace(req.ProfileID), req.Password)
@@ -58,8 +67,19 @@ func (h *Handler) Connect(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
-		req.Host, req.Port, req.User, req.Password, req.DbName, req.SSLMode = profile.Host, profile.Port, profile.Username, password, profile.DBName, profile.SSLMode
-		opts = db.ConnOptions{ConnectTimeout: profile.Options.ConnectTimeout, Keepalive: profile.Options.Keepalive, ApplicationName: profile.Options.ApplicationName, SearchPath: profile.Options.SearchPath, SSLRootCert: profile.Options.SSLRootCert, SSLCert: profile.Options.SSLCert, SSLKey: profile.Options.SSLKey, UnixSocket: profile.Options.UnixSocket}
+		req.Host, req.Port, req.User, req.Password, req.SSLMode = profile.Host, profile.Port, profile.Username, password, profile.SSLMode
+		if req.DbName == "" {
+			req.DbName = profile.DBName
+		}
+		opts = db.ConnOptions{ConnectTimeout: profile.Options.ConnectTimeout, Keepalive: profile.Options.Keepalive, ApplicationName: profile.Options.ApplicationName, SearchPath: profile.Options.SearchPath, SSLRootCert: profile.Options.SSLRootCert, SSLCert: profile.Options.SSLCert, SSLKey: profile.Options.SSLKey, UnixSocket: profile.Options.UnixSocket, SSH: db.SSHTunnelOptions{Enabled: profile.Options.SSHEnabled, Host: profile.Options.SSHHost, Port: profile.Options.SSHPort, User: profile.Options.SSHUser, AuthMethod: profile.Options.SSHAuthMethod, HostKeySHA256: profile.Options.SSHHostKey, DestinationHost: profile.Host, DestinationPort: profile.Port}}
+		if opts.SSH.Enabled {
+			sshSecret, err := h.connectionSSHCredentials(r.Context(), profile.ID, req.SSHPassword, req.SSHPrivateKey, req.SSHPassphrase)
+			if err != nil {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+				return
+			}
+			opts.SSH.Password, opts.SSH.PrivateKey, opts.SSH.Passphrase = sshSecret.Password, sshSecret.PrivateKey, sshSecret.Passphrase
+		}
 		profileName = profile.Name
 	}
 	cs := db.ConnStringWithOptions(req.Host, req.Port, req.User, req.Password, req.DbName, req.SSLMode, opts)
@@ -68,7 +88,7 @@ func (h *Handler) Connect(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
-	h.Mgr.SetMeta(id, db.ConnMeta{Host: req.Host, Port: req.Port, User: req.User, DbName: req.DbName, SSLMode: req.SSLMode, ProfileID: req.ProfileID, ProfileName: profileName})
+	h.Mgr.SetMeta(id, db.ConnMeta{Host: req.Host, Port: req.Port, User: req.User, DbName: req.DbName, SSLMode: req.SSLMode, ProfileID: req.ProfileID, ProfileName: profileName, SSHTunnel: opts.SSH.Enabled, SSHHost: opts.SSH.Host, SSHPort: opts.SSH.Port, SSHUser: opts.SSH.User, SSHAuth: opts.SSH.AuthMethod, SSHHostKey: opts.SSH.HostKeySHA256})
 	h.profileUsed(r.Context(), req.ProfileID)
 	meta, _ := h.Mgr.Info(id)
 	writeJSON(w, 200, map[string]any{"session_id": id, "info": sessionInfo(id, meta, false)})
@@ -83,10 +103,14 @@ func sessionInfo(id string, meta db.ConnMeta, inTxn bool) map[string]any {
 		"id": id, "host": meta.Host, "port": meta.Port, "user": meta.User,
 		"dbname": dbname, "sslmode": meta.SSLMode, "in_txn": inTxn,
 		"connected_at": meta.ConnectedAt.Format(time.RFC3339),
+		"ssh_tunnel":   meta.SSHTunnel,
 		"tls_warn":     db.InsecureTLS(meta.Host, meta.SSLMode),
 	}
 	if meta.ProfileID != "" || meta.ProfileName != "" {
 		out["profile_id"], out["profile_name"] = meta.ProfileID, meta.ProfileName
+	}
+	if meta.SSHTunnel {
+		out["ssh_host"], out["ssh_port"], out["ssh_user"], out["ssh_auth_method"], out["ssh_host_key"] = meta.SSHHost, meta.SSHPort, meta.SSHUser, meta.SSHAuth, meta.SSHHostKey
 	}
 	return out
 }

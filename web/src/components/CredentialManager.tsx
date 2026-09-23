@@ -2,12 +2,14 @@ import { useMemo, useState, type ReactElement } from 'react'
 import { Copy, KeyRound, Lock, LockOpen, Plus, RefreshCw, Save, ShieldCheck, Trash2, Unlock, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from './ui/button'
+import { Badge } from './ui/badge'
 import { Card } from './ui/card'
 import { Input } from './ui/input'
+import { PasswordTextarea } from './ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { Switch } from './ui/switch'
 import { Tip } from './ui/tooltip'
-import { EmptyNote } from './ui/feedback'
+import { EmptyNote, ErrorText } from './ui/feedback'
 import type { ConnFields } from './ConnectionBar'
 import type { DialogsApi } from './dialogs'
 import type { SavedConnection, SessionInfo } from '@/types'
@@ -28,6 +30,15 @@ export interface ProfileMetadata {
   sslcert: string
   sslkey: string
   unix_socket: string
+  ssh_enabled: boolean
+  ssh_host: string
+  ssh_port: number
+  ssh_user: string
+  ssh_auth_method: string
+  ssh_host_key: string
+  ssh_password: string
+  ssh_private_key: string
+  ssh_passphrase: string
 }
 
 export function isInsecureTls(host: string, sslmode: string): boolean {
@@ -50,9 +61,9 @@ interface Props {
   fields: ConnFields
   setFields: (f: ConnFields) => void
   saved: SavedConnection[]
-  onConnect: (profileId?: string) => Promise<string>
+  onConnect: (profileId?: string, sshSecrets?: { password?: string; private_key?: string; passphrase?: string }) => Promise<string>
   onTest: (profileId?: string, password?: string) => Promise<{ database?: string; version?: string; latency_ms?: number }>
-  onSave: (name: string, savePassword: boolean, clearPassword: boolean, metadata: ProfileMetadata) => Promise<void>
+  onSave: (name: string, savePassword: boolean, clearPassword: boolean, metadata: ProfileMetadata) => Promise<string | void>
   onDuplicate: (name: string) => Promise<string>
   onDelete: (id: string) => Promise<void>
   vault: { exists: boolean; unlocked: boolean }
@@ -74,22 +85,37 @@ export function CredentialManager(p: Props) {
   const [name, setName] = useState('')
   const [filter, setFilter] = useState('')
   const [advanced, setAdvanced] = useState(false)
-  const emptyMetadata = (): ProfileMetadata => ({ folder_id: '', environment: '', color: '', description: '', favorite: false, default: false, tags: [], connect_timeout: 5, keepalive: 30, application_name: '', search_path: '', sslrootcert: '', sslcert: '', sslkey: '', unix_socket: '' })
+  const [connectionError, setConnectionError] = useState('')
+  const emptyMetadata = (): ProfileMetadata => ({ folder_id: '', environment: '', color: '', description: '', favorite: false, default: false, tags: [], connect_timeout: 5, keepalive: 30, application_name: '', search_path: '', sslrootcert: '', sslcert: '', sslkey: '', unix_socket: '', ssh_enabled: false, ssh_host: '', ssh_port: 22, ssh_user: '', ssh_auth_method: 'password', ssh_host_key: '', ssh_password: '', ssh_private_key: '', ssh_passphrase: '' })
   const [metadata, setMetadata] = useState<ProfileMetadata>(emptyMetadata())
   const selected = useMemo(() => p.saved.find((x) => x.id === selectedId), [p.saved, selectedId])
 
   const choose = (c: SavedConnection) => {
+    setConnectionError('')
     setSelectedId(c.id ?? '')
     setName(c.name)
-    setMetadata({ ...emptyMetadata(), folder_id: c.folder_id ?? '', environment: c.environment ?? '', color: c.color ?? '', description: c.description ?? '', favorite: !!c.favorite, default: !!c.default, tags: c.tags ?? [], connect_timeout: c.options?.connect_timeout ?? 5, keepalive: c.options?.keepalive ?? 30, application_name: c.options?.application_name ?? '', search_path: c.options?.search_path ?? '', sslrootcert: c.options?.sslrootcert ?? '', sslcert: c.options?.sslcert ?? '', sslkey: c.options?.sslkey ?? '', unix_socket: c.options?.unix_socket ?? '' })
+    setMetadata({ ...emptyMetadata(), folder_id: c.folder_id ?? '', environment: c.environment ?? '', color: c.color ?? '', description: c.description ?? '', favorite: !!c.favorite, default: !!c.default, tags: c.tags ?? [], connect_timeout: c.options?.connect_timeout ?? 5, keepalive: c.options?.keepalive ?? 30, application_name: c.options?.application_name ?? '', search_path: c.options?.search_path ?? '', sslrootcert: c.options?.sslrootcert ?? '', sslcert: c.options?.sslcert ?? '', sslkey: c.options?.sslkey ?? '', unix_socket: c.options?.unix_socket ?? '', ssh_enabled: c.options?.ssh_enabled ?? false, ssh_host: c.options?.ssh_host ?? '', ssh_port: c.options?.ssh_port ?? 22, ssh_user: c.options?.ssh_user ?? '', ssh_auth_method: c.options?.ssh_auth_method ?? 'password', ssh_host_key: c.options?.ssh_host_key ?? '' })
     p.setFields({ host: c.host, port: c.port, user: c.user, password: '', dbname: c.dbname, sslmode: c.sslmode, profileId: c.id })
   }
 
   const fresh = () => {
+    setConnectionError('')
     setSelectedId('')
     setName('')
     setMetadata(emptyMetadata())
     p.setFields({ ...p.fields, password: '', profileId: undefined })
+  }
+
+  const pinUntrustedHostKey = async (message: string): Promise<boolean> => {
+    const fingerprint = message.match(/SSH host key is not trusted; fingerprint: (SHA256:[^\s]+)/)?.[1]
+    if (!fingerprint || !selectedId || !selected) return false
+    const trust = await p.dialogs.confirm({ title: 'Verify SSH server identity', description: `The SSH server presented ${fingerprint}. Verify this fingerprint with your server administrator through a trusted channel before accepting it. Pin this key to the selected profile?`, confirmText: 'Pin verified key' })
+    if (!trust) return false
+    const next = { ...metadata, ssh_host_key: fingerprint }
+    setMetadata(next)
+    await p.onSave(name.trim(), false, false, next)
+    setMetadata((current) => ({ ...current, ssh_password: '', ssh_private_key: '', ssh_passphrase: '' }))
+    return true
   }
 
   const vaultDialog = async (action: 'setup' | 'unlock' | 'change_password') => {
@@ -97,7 +123,7 @@ export function CredentialManager(p: Props) {
       if (action === 'setup') {
         const values = await p.dialogs.form({
           title: 'Create credential vault',
-          description: 'The master password unlocks saved database passwords. It cannot be recovered.',
+          description: 'The master password unlocks saved PostgreSQL and SSH credentials. It cannot be recovered.',
           fields: [
             { key: 'master', label: 'Master password', placeholder: 'At least 8 characters', type: 'password' },
             { key: 'confirm', label: 'Confirm master password', placeholder: 'Repeat master password', type: 'password' },
@@ -148,7 +174,9 @@ export function CredentialManager(p: Props) {
       return
     }
     try {
-      await p.onSave(name.trim(), p.fields.password.length > 0, false, metadata)
+      const id = await p.onSave(name.trim(), p.fields.password.length > 0, false, metadata)
+      if (id) setSelectedId(id)
+      setMetadata((current) => ({ ...current, ssh_password: '', ssh_private_key: '', ssh_passphrase: '' }))
       toast.success('Connection profile saved')
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
@@ -173,19 +201,85 @@ export function CredentialManager(p: Props) {
 
   const connect = async () => {
     try {
+      setConnectionError('')
       await p.onConnect(selectedId || undefined)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
+      if (selected?.options?.ssh_enabled && /vault is locked|no SSH credentials saved/i.test(message)) {
+        const privateKey = selected.options.ssh_auth_method === 'private_key'
+        const fields = privateKey
+          ? [
+              { key: 'private_key', label: 'SSH private key', placeholder: 'Paste private key', type: 'password', multiline: true },
+              { key: 'passphrase', label: 'Key passphrase', placeholder: 'Optional passphrase', type: 'password' },
+            ]
+          : [{ key: 'password', label: 'SSH password', placeholder: 'SSH password', type: 'password' }]
+        const values = await p.dialogs.form({
+          title: 'Enter SSH credentials',
+          description: 'These credentials are used for this connection only. Unlock the vault to use saved SSH credentials or save them in Advanced settings.',
+          fields,
+          submitText: 'Connect',
+        })
+        if (!values) return
+        try {
+          setConnectionError('')
+          await p.onConnect(selectedId, { password: values.password ?? undefined, private_key: values.private_key ?? undefined, passphrase: values.passphrase ?? undefined })
+          return
+        } catch (retryError) {
+          const retryMessage = retryError instanceof Error ? retryError.message : String(retryError)
+          if (await pinUntrustedHostKey(retryMessage)) {
+            try {
+              const sshSecrets = { password: values.password ?? undefined, private_key: values.private_key ?? undefined, passphrase: values.passphrase ?? undefined }
+              await p.onConnect(selectedId, sshSecrets)
+              return
+            } catch (pinRetryError) {
+              const pinRetryMessage = pinRetryError instanceof Error ? pinRetryError.message : String(pinRetryError)
+              setConnectionError(pinRetryMessage)
+              toast.error(pinRetryMessage)
+              return
+            }
+          }
+          setConnectionError(retryMessage)
+          toast.error(retryMessage)
+          return
+        }
+      }
+      if (await pinUntrustedHostKey(message)) {
+        try {
+          await p.onConnect(selectedId)
+          return
+        } catch (pinRetryError) {
+          const pinRetryMessage = pinRetryError instanceof Error ? pinRetryError.message : String(pinRetryError)
+          setConnectionError(pinRetryMessage)
+          toast.error(pinRetryMessage)
+          return
+        }
+      }
+      setConnectionError(message)
       toast.error(message)
     }
   }
 
   const test = async () => {
     try {
+      setConnectionError('')
       const result = await p.onTest(selectedId || undefined, p.fields.password)
       toast.success(`Connection test succeeded · ${result.database ?? 'database'} · PostgreSQL ${result.version ?? 'unknown'} · ${result.latency_ms ?? 0} ms`)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
+      setConnectionError(message)
+      if (await pinUntrustedHostKey(message)) {
+        try {
+          const result = await p.onTest(selectedId, p.fields.password)
+          setConnectionError('')
+          toast.success(`Connection test succeeded · ${result.database ?? 'database'} · PostgreSQL ${result.version ?? 'unknown'} · ${result.latency_ms ?? 0} ms`)
+          return
+        } catch (retryError) {
+          const retryMessage = retryError instanceof Error ? retryError.message : String(retryError)
+          setConnectionError(retryMessage)
+          toast.error(retryMessage)
+          return
+        }
+      }
       toast.error(message)
     }
   }
@@ -194,7 +288,7 @@ export function CredentialManager(p: Props) {
     if (!selected) return
     const ok = await p.dialogs.confirm({
       title: `Delete ${selected.name}?`,
-      description: 'This removes the connection profile and its encrypted vault password.',
+      description: 'This removes the connection profile and its encrypted PostgreSQL and SSH credentials.',
       confirmText: 'Delete',
       danger: true,
     })
@@ -209,7 +303,7 @@ export function CredentialManager(p: Props) {
     }
   }
 
-  const visible = p.saved.filter((c) => !filter || `${c.name} ${c.host} ${c.dbname} ${c.user} ${c.environment ?? ''} ${(c.tags ?? []).join(' ')}`.toLowerCase().includes(filter.toLowerCase()))
+  const visible = p.saved.filter((c) => !filter || `${c.name} ${c.host} ${c.dbname} ${c.user} ${c.environment ?? ''} ${c.options?.ssh_host ?? ''} ${c.options?.ssh_user ?? ''} ${(c.tags ?? []).join(' ')}`.toLowerCase().includes(filter.toLowerCase()))
   const deadCount = Object.keys(p.deadIds).length
 
   return (
@@ -231,7 +325,7 @@ export function CredentialManager(p: Props) {
           {p.vault.exists && !p.vault.unlocked && <Button size="sm" onClick={() => void vaultDialog('unlock')}><Unlock /> Unlock</Button>}
           {p.vault.unlocked && <><Button size="sm" variant="ghost" onClick={() => void p.onVaultAction('lock').then(() => p.setFields({ ...p.fields, password: '' })).catch((e) => toast.error(e instanceof Error ? e.message : String(e)))}><Lock /> Lock</Button><Button size="sm" variant="ghost" onClick={() => void vaultDialog('change_password')}><KeyRound /> Change password</Button></>}
         </div>
-        {p.vault.exists && <div className="mt-2 border-t pt-2 text-[11px] text-muted-foreground">Forgot the master password? Close pglight, then run <code>pglight.exe vault reset</code> to remove saved database passwords while keeping profiles.</div>}
+        {p.vault.exists && <div className="mt-2 border-t pt-2 text-[11px] text-muted-foreground">Forgot the master password? Close pglight, then run <code>pglight.exe vault reset</code> to remove saved database and SSH credentials while keeping profiles.</div>}
       </Card>
 
       <div className="grid shrink-0 min-h-0 gap-3 lg:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1.2fr)]">
@@ -243,7 +337,7 @@ export function CredentialManager(p: Props) {
           <div className="flex flex-col gap-1">
             {visible.map((c) => (
               <Button key={c.id} variant="ghost" className={`h-auto w-full justify-start rounded border px-2 py-1.5 text-left text-[12px] ${c.id === selectedId ? 'border-primary bg-accent' : 'border-border hover:bg-accent'}`} onClick={() => choose(c)}>
-                <span className="flex items-center gap-1.5"><KeyRound className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 truncate font-medium">{c.name}</span>{c.has_password && <LockOpen className="h-3 w-3 shrink-0 text-emerald-500" />}</span>
+                <span className="flex items-center gap-1.5"><KeyRound className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 truncate font-medium">{c.name}</span>{c.options?.ssh_enabled && <Badge variant="secondary" className="px-1 py-0 text-[9px]">SSH</Badge>}{c.has_password && <LockOpen className="h-3 w-3 shrink-0 text-emerald-500" />}</span>
                 <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">{c.user}@{c.host}:{c.port}/{c.dbname}</span>
               </Button>
             ))}
@@ -264,17 +358,28 @@ export function CredentialManager(p: Props) {
             <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2"><FieldTip content="Maximum time, in seconds, to establish a new connection."><Input type="number" min={0} max={300} placeholder="Connection timeout (s)" value={metadata.connect_timeout} onChange={(e) => setMetadata({ ...metadata, connect_timeout: Number(e.target.value) || 0 })} aria-label="Connection timeout" /></FieldTip><FieldTip content="TCP keepalive interval, in seconds. Use 0 to leave the driver default."><Input type="number" min={0} max={86400} placeholder="Keepalive (s)" value={metadata.keepalive} onChange={(e) => setMetadata({ ...metadata, keepalive: Number(e.target.value) || 0 })} aria-label="Keepalive" /></FieldTip></div>
             <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2"><FieldTip content="Application name reported to PostgreSQL activity and logs."><Input placeholder="Application name" value={metadata.application_name} onChange={(e) => setMetadata({ ...metadata, application_name: e.target.value })} aria-label="Application name" /></FieldTip><FieldTip content="PostgreSQL startup search_path, for example public, extensions."><Input placeholder="Startup search_path" value={metadata.search_path} onChange={(e) => setMetadata({ ...metadata, search_path: e.target.value })} aria-label="Startup search_path" /></FieldTip></div>
             <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2"><FieldTip content="Optional Unix socket directory used instead of TCP host lookup."><Input placeholder="Unix socket path (optional)" value={metadata.unix_socket} onChange={(e) => setMetadata({ ...metadata, unix_socket: e.target.value })} aria-label="Unix socket path" /></FieldTip><FieldTip content="Path to the CA certificate used for PostgreSQL TLS verification."><Input placeholder="SSL CA/client cert paths" value={metadata.sslrootcert} onChange={(e) => setMetadata({ ...metadata, sslrootcert: e.target.value })} aria-label="SSL CA/client cert paths" /></FieldTip></div>
+            <div className="mt-3 rounded-md border p-2.5">
+              <label className="flex items-center justify-between gap-2 text-xs font-medium"><span>SSH tunnel</span><Switch checked={metadata.ssh_enabled} onCheckedChange={(v) => setMetadata({ ...metadata, ssh_enabled: v })} aria-label="Use SSH tunnel" /></label>
+              {metadata.ssh_enabled && <>
+                <p className="mb-2 mt-1 text-[11px] text-muted-foreground">PostgreSQL host below is resolved from the SSH server. SSH protects the route; PostgreSQL TLS settings above remain independent.</p>
+                <div className="grid gap-1.5 sm:grid-cols-[1fr_84px]"><Input placeholder="SSH host" value={metadata.ssh_host} onChange={(e) => setMetadata({ ...metadata, ssh_host: e.target.value })} aria-label="SSH host" /><Input type="number" min={1} max={65535} value={metadata.ssh_port} onChange={(e) => setMetadata({ ...metadata, ssh_port: Number(e.target.value) || 22 })} aria-label="SSH port" /></div>
+                <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2"><Input placeholder="SSH username" value={metadata.ssh_user} onChange={(e) => setMetadata({ ...metadata, ssh_user: e.target.value })} aria-label="SSH username" /><Select value={metadata.ssh_auth_method} onValueChange={(v) => setMetadata({ ...metadata, ssh_auth_method: v })}><SelectTrigger aria-label="SSH authentication"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="password">Password</SelectItem><SelectItem value="private_key">Private key</SelectItem></SelectContent></Select></div>
+                {metadata.ssh_auth_method === 'password' ? <Input className="mt-1.5" type="password" placeholder="SSH password (saved to vault)" value={metadata.ssh_password} onChange={(e) => setMetadata({ ...metadata, ssh_password: e.target.value })} aria-label="SSH password" /> : <><PasswordTextarea className="mt-1.5 min-h-24 font-mono text-xs" placeholder="Paste SSH private key (saved to vault)" value={metadata.ssh_private_key} onChange={(e) => setMetadata({ ...metadata, ssh_private_key: e.target.value })} aria-label="SSH private key" /><Input className="mt-1.5" type="password" placeholder="Key passphrase (optional)" value={metadata.ssh_passphrase} onChange={(e) => setMetadata({ ...metadata, ssh_passphrase: e.target.value })} aria-label="SSH key passphrase" /></>}
+                <FieldTip content="SHA256 fingerprint from a trusted SSH host key. First connection reports the fingerprint; verify it out of band, then paste it here before connecting again."><Input className="mt-1.5" placeholder="Trusted host key SHA256 fingerprint" value={metadata.ssh_host_key} onChange={(e) => setMetadata({ ...metadata, ssh_host_key: e.target.value })} aria-label="Trusted SSH host key fingerprint" /></FieldTip>
+              </>}
+            </div>
             <div className="mt-1.5 flex gap-4 text-[11px] text-muted-foreground"><label className="flex items-center gap-1"><SwitchTip content="Mark this profile as a favorite for easier discovery."><Switch checked={metadata.favorite} onCheckedChange={(v) => setMetadata({ ...metadata, favorite: v })} aria-label="Favorite" /></SwitchTip> Favorite</label><label className="flex items-center gap-1"><SwitchTip content="Use this profile as the default when pglight starts or opens a connection."><Switch checked={metadata.default} onCheckedChange={(v) => setMetadata({ ...metadata, default: v })} aria-label="Default" /></SwitchTip> Default</label></div>
           </>}
           {isInsecureTls(p.fields.host, p.fields.sslmode) && <p className="mt-2 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-[11px] text-amber-600 dark:text-amber-400">Non-local host without certificate verification.</p>}
           <div className="mt-2 flex flex-wrap gap-1.5"><Button size="sm" onClick={() => void connect()}><Unlock /> Connect</Button><Button size="sm" variant="secondary" onClick={() => void test()}><RefreshCw /> Test</Button><Button size="sm" variant="secondary" onClick={() => void save()}><Save /> Save</Button>{selected && <Button size="sm" variant="ghost" className="text-destructive" onClick={() => void remove()}><Trash2 /> Delete</Button>}</div>
+          {connectionError && <div className="mt-2 rounded border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-xs" role="alert"><ErrorText message={connectionError} /></div>}
           <label className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground"><span>Auto-connect on startup (requires unlocked vault for saved passwords)</span><SwitchTip content="Automatically connect to the default profile when pglight starts, if the vault is unlocked."><Switch checked={p.autoLogin} onCheckedChange={p.onAutoLogin} aria-label="Auto-connect on startup" /></SwitchTip></label>
         </Card>
       </div>
 
       <Card className="shrink-0 p-3">
         <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold"><span className="flex-1">Active sessions ({p.sessions.length})</span>{deadCount > 0 && <Button size="sm" variant="ghost" onClick={p.onReconnectAll}><RefreshCw /> Reconnect all</Button>}</div>
-        <div className="flex flex-col gap-1.5">{p.sessions.map((s) => { const dead = !!p.deadIds[s.id]; return <div key={s.id} className="flex items-center gap-1.5 rounded border px-2 py-1.5 text-[11px]"><Button size="sm" variant="ghost" className="min-w-0 flex-1 justify-start truncate" onClick={() => p.onSwitch(s.id)}><span className={dead ? 'text-red-400' : 'text-emerald-500'}>●</span><span className="truncate">{s.profile_name ? `${s.profile_name} · ` : ''}{s.user}@{s.host}:{s.port}/{s.dbname}</span></Button>{dead && <Button size="sm" variant="ghost" aria-label="Reconnect session" onClick={() => p.onReconnectOne(s.id)}><RefreshCw /></Button>}<Button size="sm" variant="ghost" aria-label="Disconnect session" onClick={() => p.onDisconnectOne(s.id)}><X /></Button></div> })}</div>
+        <div className="flex flex-col gap-1.5">{p.sessions.map((s) => { const dead = !!p.deadIds[s.id]; return <div key={s.id} className="flex items-center gap-1.5 rounded border px-2 py-1.5 text-[11px]"><Button size="sm" variant="ghost" className="min-w-0 flex-1 justify-start truncate" onClick={() => p.onSwitch(s.id)}><span className={dead ? 'text-red-400' : 'text-emerald-500'}>●</span><span className="truncate">{s.profile_name ? `${s.profile_name} · ` : ''}{s.user}@{s.host}:{s.port}/{s.dbname}</span>{s.ssh_tunnel && <Badge variant="secondary" className="shrink-0 px-1 py-0 text-[9px]">SSH</Badge>}</Button>{dead && <Button size="sm" variant="ghost" aria-label="Reconnect session" onClick={() => p.onReconnectOne(s.id)}><RefreshCw /></Button>}<Button size="sm" variant="ghost" aria-label="Disconnect session" onClick={() => p.onDisconnectOne(s.id)}><X /></Button></div> })}</div>
         {!p.sessions.length && <EmptyNote text="No active sessions" />}
       </Card>
     </div>

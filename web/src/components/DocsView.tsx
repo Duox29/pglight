@@ -78,14 +78,15 @@ const SECTIONS: Section[] = [
           <H>Profiles, options, and TLS</H>
           <Ul>
             <Li>Use <K>Advanced</K> to add folders, tags, environment, favorite/default flags, a description, connection timeout, TCP keepalive, application name, search path, Unix socket, and certificate paths.</Li>
-            <Li><K>Test</K> performs a temporary PostgreSQL ping without saving the profile. <K>Duplicate</K> copies a saved profile without copying its password into the form.</Li>
+            <Li><K>Test</K> performs a temporary PostgreSQL ping. If the SSH key is new, it saves only the fingerprint after you verify it. <K>Duplicate</K> copies saved transport settings and vault credentials without putting secrets in the form.</Li>
             <Li>SSL modes are <K>disable, prefer, require, verify-ca,</K> and <K>verify-full</K>. A non-local host using a mode without certificate verification shows a warning.</Li>
+            <Li>In Advanced, SSH tunnel connects through an SSH server using password or private-key authentication. SSH credentials are stored in the encrypted vault. Verify the displayed SHA256 host fingerprint with your administrator before pinning it; a changed fingerprint is rejected. PostgreSQL SSL settings remain separate.</Li>
             <Li><K>Auto-connect on startup</K> uses the default profile only when the vault is unlocked. The Power button asks for confirmation, closes sessions, and stops the local server.</Li>
           </Ul>
           <H>Vault recovery</H>
           <Ul>
             <Li>The master password cannot be recovered. If it is forgotten, close pglight and run <K>pglight.exe vault reset</K>.</Li>
-            <Li>Reset requires exclusive access to the app store. It removes the vault verifier and saved database passwords, creates a new locked vault, and keeps profiles, folders, tags, and non-secret metadata.</Li>
+            <Li>Reset requires exclusive access to the app store. It removes the vault verifier and saved database and SSH credentials, creates a new locked vault, and keeps profiles, folders, tags, and non-secret metadata.</Li>
             <Li>For automation, pipe one new password with <K>--password-stdin --yes</K>. History, snippets, backups, and PostgreSQL server passwords are outside this reset.</Li>
           </Ul>
         </>
@@ -112,14 +113,15 @@ const SECTIONS: Section[] = [
           <H>Profile, tùy chọn và TLS</H>
           <Ul>
             <Li>Dùng <K>Advanced</K> để thêm folder, tag, environment, cờ favorite/default, mô tả, timeout kết nối, TCP keepalive, application name, search path, Unix socket và đường dẫn certificate.</Li>
-            <Li><K>Test</K> ping PostgreSQL tạm thời mà không lưu profile. <K>Duplicate</K> sao chép profile đã lưu nhưng không đưa password vào form.</Li>
+            <Li><K>Test</K> ping PostgreSQL tạm thời. Nếu SSH host key mới, ứng dụng chỉ lưu fingerprint sau khi bạn xác minh. <K>Duplicate</K> sao chép cấu hình transport và credential trong vault nhưng không đưa secret vào form.</Li>
             <Li>SSL mode gồm <K>disable, prefer, require, verify-ca</K> và <K>verify-full</K>. Host không phải local dùng mode không xác minh certificate sẽ hiện cảnh báo.</Li>
+            <Li>Trong Advanced, SSH tunnel kết nối qua SSH server bằng password hoặc private key. SSH credentials được lưu trong vault mã hóa. Hãy xác minh fingerprint SHA256 với quản trị viên trước khi ghim; fingerprint thay đổi sẽ bị từ chối. Cấu hình SSL của PostgreSQL vẫn độc lập.</Li>
             <Li><K>Auto-connect on startup</K> chỉ dùng profile mặc định khi vault đã unlock. Nút Power hỏi xác nhận, đóng các session và dừng server local.</Li>
           </Ul>
           <H>Khôi phục vault</H>
           <Ul>
             <Li>Không thể khôi phục master password. Nếu quên password, đóng pglight rồi chạy <K>pglight.exe vault reset</K>.</Li>
-            <Li>Reset cần quyền độc quyền trên app store. Lệnh xóa verifier của vault và password database đã lưu, tạo vault mới ở trạng thái khóa, đồng thời giữ profile, folder, tag và metadata không nhạy cảm.</Li>
+            <Li>Reset cần quyền độc quyền trên app store. Lệnh xóa verifier của vault và credential PostgreSQL/SSH đã lưu, tạo vault mới ở trạng thái khóa, đồng thời giữ profile, folder, tag và metadata không nhạy cảm.</Li>
             <Li>Chạy tự động bằng cách pipe một password mới với <K>--password-stdin --yes</K>. History, snippets, backup và password trên PostgreSQL không thuộc phạm vi reset này.</Li>
           </Ul>
         </>

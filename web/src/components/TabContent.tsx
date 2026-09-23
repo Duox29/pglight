@@ -63,7 +63,7 @@ export interface TabContentProps {
     saved: SavedConnection[]
     onConnect: (profileId?: string) => Promise<string>
     onTest: (profileId?: string, password?: string) => Promise<{ database?: string; version?: string; latency_ms?: number }>
-    onSave: (name: string, savePassword: boolean, clearPassword: boolean, metadata: ProfileMetadata) => Promise<void>
+    onSave: (name: string, savePassword: boolean, clearPassword: boolean, metadata: ProfileMetadata) => Promise<string | void>
     onDuplicate: (name: string) => Promise<string>
     onDelete: (id: string) => Promise<void>
     vault: { exists: boolean; unlocked: boolean }

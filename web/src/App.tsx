@@ -224,11 +224,11 @@ export default function App() {
 
   const openTableForSession = (schema: string, table: string, sid?: string) => tableApi.openTableTab(schema, table, sid ?? activeId)
 
-  const connectProfile = (profileId?: string) => {
+  const connectProfile = (profileId?: string, sshSecrets?: { password?: string; private_key?: string; passphrase?: string }) => {
     if (!profileId) return sessionsApi.connect(true)
     const profile = sessionsApi.saved.find((x) => x.id === profileId)
     if (!profile) return Promise.reject(new Error('Connection profile not found'))
-    return sessionsApi.connectProfile(profile, sessionsApi.fields.password)
+    return sessionsApi.connectProfile(profile, sessionsApi.fields.password, sshSecrets)
   }
 
   const testConnection = async (profileId?: string, password?: string) => {
@@ -238,13 +238,14 @@ export default function App() {
     return { database: j.database, version: j.version, latency_ms: j.latency_ms }
   }
 
-  const saveConnection = async (name: string, savePassword: boolean, clearPassword: boolean, metadata: ProfileMetadata) => {
+  const saveConnection = async (name: string, savePassword: boolean, clearPassword: boolean, metadata: ProfileMetadata): Promise<string> => {
     const f = sessionsApi.fields
     const j = await apiClient.saveConnection({ id: f.profileId, name, host: f.host, port: Number(f.port) || 5432, user: f.user, password: f.password, dbname: f.dbname, sslmode: f.sslmode, save_password: savePassword, clear_password: clearPassword, ...metadata })
     if (j.error || !j.connection) throw new Error(j.error ?? 'Failed to save connection')
     const c = j.connection
     sessionsApi.setSaved((list) => [{ id: c.id, name: c.name, host: c.host, port: String(c.port), user: c.user, password: '', dbname: c.dbname, sslmode: c.sslmode ?? f.sslmode, has_password: c.has_password, last_used_at: c.last_used_at, folder_id: c.folder_id, environment: c.environment, color: c.color, description: c.description, favorite: c.favorite, default: c.default, tags: c.tags, options: c.options }, ...list.filter((x) => x.id !== c.id)])
     sessionsApi.setFields({ ...f, password: '', profileId: c.id })
+    return c.id ?? ''
   }
 
   const deleteConnection = async (id: string) => {

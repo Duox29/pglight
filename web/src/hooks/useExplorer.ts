@@ -19,8 +19,8 @@ export interface ExplorerDeps {
   setInTxn: (v: boolean) => void
   openTableTab: (schema: string, table: string, sid?: string) => void
   newQueryTab: (sql?: string, sid?: string) => void
-  bootConnect: (f: ConnFields, fresh: boolean, dbnameOver?: string, sidOver?: string, activate?: boolean, quiet?: boolean) => Promise<string>
-  findSession: (host: string, port: string | number, user: string, dbname: string, sslmode: string) => SessionInfo | undefined
+  bootConnect: (f: ConnFields, fresh: boolean, dbnameOver?: string, sidOver?: string, activate?: boolean, quiet?: boolean, profileId?: string) => Promise<string>
+  findSession: (host: string, port: string | number, user: string, dbname: string, sslmode: string, profileId?: string, sshOptions?: { ssh_enabled?: boolean; ssh_host?: string; ssh_port?: number; ssh_user?: string; ssh_auth_method?: string; ssh_host_key?: string }) => SessionInfo | undefined
   deadIds: Record<string, boolean>
   reconnectOne: (sid: string, opts?: { silent?: boolean }) => Promise<string>
   setActiveId: Dispatch<SetStateAction<string>>
@@ -123,7 +123,7 @@ export function useExplorer(deps: ExplorerDeps) {
       if (!active) return
       if (name === active.dbname) return
       // Same target already pooled? Just switch — no new session.
-      const hit = deps.findSession(active.host, active.port, active.user, name, active.sslmode)
+      const hit = deps.findSession(active.host, active.port, active.user, name, active.sslmode, active.profile_id, { ssh_enabled: !!active.ssh_tunnel, ssh_host: active.ssh_host, ssh_port: active.ssh_port, ssh_user: active.ssh_user, ssh_auth_method: active.ssh_auth_method, ssh_host_key: active.ssh_host_key })
       if (hit) {
         if (deps.deadIds[hit.id]) {
           const nid = await deps.reconnectOne(hit.id)
@@ -139,7 +139,7 @@ export function useExplorer(deps: ExplorerDeps) {
         if (v == null) return
         pw = v
       }
-      void deps.bootConnect({ host: active.host, port: active.port, user: active.user, password: pw, dbname: active.dbname, sslmode: active.sslmode }, true, name)
+      void deps.bootConnect({ host: active.host, port: active.port, user: active.user, password: pw, dbname: name, sslmode: active.sslmode, profileId: active.profile_id }, true, name, undefined, true, false, active.profile_id)
     },
     [deps, password, dialogs, active],
   )

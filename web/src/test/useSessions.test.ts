@@ -21,7 +21,7 @@ describe('useSessions profile connections', () => {
       if (path.endsWith('/api/sessions')) return new Response(JSON.stringify({ sessions: [] }), { status: 200 })
       if (path.endsWith('/api/preferences')) return new Response(JSON.stringify({ preferences: {} }), { status: 200 })
       if (path.endsWith('/api/connect')) {
-        return new Response(JSON.stringify({ session_id: 'session-1', info: { host: 'localhost', port: 5432, user: 'postgres', dbname: 'postgres', sslmode: 'disable', in_txn: false } }), { status: 200 })
+        return new Response(JSON.stringify({ session_id: 'session-1', info: { host: 'localhost', port: 5432, user: 'postgres', dbname: 'postgres', sslmode: 'disable', in_txn: false, profile_id: 'profile-1', ssh_tunnel: false } }), { status: 200 })
       }
       return new Response('{}', { status: 200 })
     })

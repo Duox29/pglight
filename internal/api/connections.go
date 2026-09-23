@@ -42,6 +42,15 @@ type connectionRequest struct {
 	SSLCert         string   `json:"sslcert"`
 	SSLKey          string   `json:"sslkey"`
 	UnixSocket      string   `json:"unix_socket"`
+	SSHEnabled      bool     `json:"ssh_enabled"`
+	SSHHost         string   `json:"ssh_host"`
+	SSHPort         int      `json:"ssh_port"`
+	SSHUser         string   `json:"ssh_user"`
+	SSHAuthMethod   string   `json:"ssh_auth_method"`
+	SSHHostKey      string   `json:"ssh_host_key"`
+	SSHPassword     string   `json:"ssh_password"`
+	SSHPrivateKey   string   `json:"ssh_private_key"`
+	SSHPassphrase   string   `json:"ssh_passphrase"`
 }
 
 type profileTransfer struct {
@@ -60,6 +69,7 @@ type profileTransfer struct {
 	Default     bool                    `json:"default,omitempty"`
 	Tags        []string                `json:"tags,omitempty"`
 	Options     store.ConnectionOptions `json:"options,omitempty"`
+	SSHSecrets  store.SSHSecretValues   `json:"ssh_secrets,omitempty"`
 }
 
 type profileTransferFile struct {
@@ -78,7 +88,7 @@ func connectionJSON(x store.ConnectionProfile) map[string]any {
 		out["folder_id"], out["environment"], out["color"], out["description"] = x.FolderID, x.Environment, x.Color, x.Description
 		out["favorite"], out["default"], out["tags"] = x.Favorite, x.Default, x.Tags
 	}
-	if x.Options.ConnectTimeout != 0 || x.Options.Keepalive != 0 || x.Options.ApplicationName != "" || x.Options.SearchPath != "" || x.Options.SSLRootCert != "" || x.Options.SSLCert != "" || x.Options.SSLKey != "" || x.Options.UnixSocket != "" {
+	if x.Options.ConnectTimeout != 0 || x.Options.Keepalive != 0 || x.Options.ApplicationName != "" || x.Options.SearchPath != "" || x.Options.SSLRootCert != "" || x.Options.SSLCert != "" || x.Options.SSLKey != "" || x.Options.UnixSocket != "" || x.Options.SSHEnabled {
 		out["options"] = x.Options
 	}
 	return out
@@ -148,15 +158,16 @@ func (h *Handler) Connections(w http.ResponseWriter, r *http.Request) {
 		if req.Port <= 0 {
 			req.Port = 5432
 		}
-		if req.SavePassword && !h.isVaultUnlocked() {
+		saveSSHSecret := req.SSHPassword != "" || req.SSHPrivateKey != "" || req.SSHPassphrase != ""
+		if (req.SavePassword || saveSSHSecret) && !h.isVaultUnlocked() {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "vault is locked; unlock it before saving a password"})
 			return
 		}
 		var key []byte
-		if req.SavePassword {
+		if req.SavePassword || saveSSHSecret {
 			key = h.copyVaultKey()
 			if len(key) == 0 {
-				writeJSON(w, http.StatusConflict, map[string]string{"error": "vault is locked; unlock it before saving a password"})
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "vault is locked; unlock it before saving credentials"})
 				return
 			}
 			defer func() {
@@ -169,11 +180,12 @@ func (h *Handler) Connections(w http.ResponseWriter, r *http.Request) {
 			ID: strings.TrimSpace(req.ID), Name: req.Name, Host: req.Host, Port: req.Port, User: req.User, DBName: req.DBName, SSLMode: req.SSLMode,
 			Password: req.Password, SavePassword: req.SavePassword, ClearPassword: req.ClearPassword, DuplicateFrom: strings.TrimSpace(req.DuplicateFrom),
 			FolderID: req.FolderID, Environment: req.Environment, Color: req.Color, Description: req.Description, Favorite: req.Favorite, Default: req.Default, Tags: req.Tags,
-			Options: store.ConnectionOptions{ConnectTimeout: req.ConnectTimeout, Keepalive: req.Keepalive, ApplicationName: req.ApplicationName, SearchPath: req.SearchPath, SSLRootCert: req.SSLRootCert, SSLCert: req.SSLCert, SSLKey: req.SSLKey, UnixSocket: req.UnixSocket},
+			SSHSecrets: store.SSHSecretValues{Password: req.SSHPassword, PrivateKey: req.SSHPrivateKey, Passphrase: req.SSHPassphrase},
+			Options:    store.ConnectionOptions{ConnectTimeout: req.ConnectTimeout, Keepalive: req.Keepalive, ApplicationName: req.ApplicationName, SearchPath: req.SearchPath, SSLRootCert: req.SSLRootCert, SSLCert: req.SSLCert, SSLKey: req.SSLKey, UnixSocket: req.UnixSocket, SSHEnabled: req.SSHEnabled, SSHHost: req.SSHHost, SSHPort: req.SSHPort, SSHUser: req.SSHUser, SSHAuthMethod: req.SSHAuthMethod, SSHHostKey: req.SSHHostKey},
 		}, key)
 		if err != nil {
 			code := http.StatusInternalServerError
-			if strings.Contains(err.Error(), "invalid connection timeout") || strings.Contains(err.Error(), "folder") || strings.Contains(err.Error(), "tag") {
+			if strings.Contains(err.Error(), "invalid connection timeout") || strings.Contains(err.Error(), "folder") || strings.Contains(err.Error(), "tag") || strings.Contains(err.Error(), "SSH") || strings.Contains(err.Error(), "Unix socket") {
 				code = http.StatusBadRequest
 			}
 			if strings.Contains(err.Error(), "vault is locked") {
@@ -298,6 +310,38 @@ func (h *Handler) ConnectionExport(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		hasSSHSecret, secretCheckErr := h.Store.HasSSHSecret(r.Context(), h.UserID, x.ID)
+		if secretCheckErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": secretCheckErr.Error()})
+			return
+		}
+		if encrypted && hasSSHSecret {
+			key := h.copyVaultKey()
+			if len(key) == 0 {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "vault is locked; unlock it before encrypted export"})
+				return
+			}
+			secret, ok, secretErr := h.Store.SSHSecret(r.Context(), h.UserID, x.ID, key)
+			for i := range key {
+				key[i] = 0
+			}
+			if secretErr != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": secretErr.Error()})
+				return
+			}
+			if ok {
+				if err := json.Unmarshal(secret, &item.SSHSecrets); err != nil {
+					for i := range secret {
+						secret[i] = 0
+					}
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "saved SSH credentials are invalid"})
+					return
+				}
+				for i := range secret {
+					secret[i] = 0
+				}
+			}
+		}
 		file.Connections = append(file.Connections, item)
 	}
 	payload, err := json.Marshal(file)
@@ -331,8 +375,10 @@ func (h *Handler) ConnectionImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	plain := req.Payload
+	encryptedPayload := false
 	var envelope store.EncryptedJSON
 	if json.Unmarshal(plain, &envelope) == nil && envelope.Format == "pglight-encrypted-json" {
+		encryptedPayload = true
 		if validMasterPassword(req.Password) != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "encrypted import requires a password"})
 			return
@@ -352,6 +398,10 @@ func (h *Handler) ConnectionImport(w http.ResponseWriter, r *http.Request) {
 	items := make([]store.ConnectionImportItem, 0, len(file.Connections))
 	needsVault := false
 	for _, item := range file.Connections {
+		if !encryptedPayload && (item.SSHSecrets.Password != "" || item.SSHSecrets.PrivateKey != "" || item.SSHSecrets.Passphrase != "") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "SSH credentials require an encrypted profile export"})
+			return
+		}
 		if strings.TrimSpace(item.Name) == "" || strings.TrimSpace(item.Host) == "" || strings.TrimSpace(item.User) == "" || strings.TrimSpace(item.DBName) == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "profile name,host,user,dbname are required"})
 			return
@@ -359,14 +409,14 @@ func (h *Handler) ConnectionImport(w http.ResponseWriter, r *http.Request) {
 		if item.Port <= 0 {
 			item.Port = 5432
 		}
-		if item.Password != "" {
+		if item.Password != "" || item.SSHSecrets.Password != "" || item.SSHSecrets.PrivateKey != "" || item.SSHSecrets.Passphrase != "" {
 			needsVault = true
 		}
 		items = append(items, store.ConnectionImportItem{
 			Name: item.Name, Host: item.Host, Port: item.Port, User: item.User, DBName: item.DBName,
 			SSLMode: db.NormalizeSSLMode(item.SSLMode), Password: item.Password, FolderID: item.FolderID,
 			Environment: item.Environment, Color: item.Color, Description: item.Description,
-			Favorite: item.Favorite, Default: item.Default, Tags: item.Tags, Options: item.Options,
+			Favorite: item.Favorite, Default: item.Default, Tags: item.Tags, Options: item.Options, SSHSecrets: item.SSHSecrets,
 		})
 	}
 	var key []byte
@@ -424,6 +474,38 @@ func (h *Handler) connectionTarget(ctx context.Context, profileID, suppliedPassw
 	return x, password, nil
 }
 
+func (h *Handler) connectionSSHCredentials(ctx context.Context, profileID, password, privateKey, passphrase string) (store.SSHSecretValues, error) {
+	if password != "" || privateKey != "" {
+		return store.SSHSecretValues{Password: password, PrivateKey: privateKey, Passphrase: passphrase}, nil
+	}
+	key := h.copyVaultKey()
+	if len(key) == 0 {
+		return store.SSHSecretValues{}, errors.New("vault is locked; unlock it before using saved SSH credentials")
+	}
+	defer func() {
+		for i := range key {
+			key[i] = 0
+		}
+	}()
+	data, ok, err := h.Store.SSHSecret(ctx, h.UserID, profileID, key)
+	if err != nil {
+		return store.SSHSecretValues{}, err
+	}
+	if !ok {
+		return store.SSHSecretValues{}, errors.New("no SSH credentials saved for this profile; enter them in Advanced settings")
+	}
+	defer func() {
+		for i := range data {
+			data[i] = 0
+		}
+	}()
+	var result store.SSHSecretValues
+	if err := json.Unmarshal(data, &result); err != nil {
+		return store.SSHSecretValues{}, errors.New("saved SSH credentials are invalid")
+	}
+	return result, nil
+}
+
 func (h *Handler) TestConnection(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -440,7 +522,15 @@ func (h *Handler) TestConnection(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if strings.TrimSpace(req.ProfileID) != "" {
 		profile, password, err = h.connectionTarget(r.Context(), strings.TrimSpace(req.ProfileID), req.Password)
-		opts = db.ConnOptions{ConnectTimeout: profile.Options.ConnectTimeout, Keepalive: profile.Options.Keepalive, ApplicationName: profile.Options.ApplicationName, SearchPath: profile.Options.SearchPath, SSLRootCert: profile.Options.SSLRootCert, SSLCert: profile.Options.SSLCert, SSLKey: profile.Options.SSLKey, UnixSocket: profile.Options.UnixSocket}
+		opts = db.ConnOptions{ConnectTimeout: profile.Options.ConnectTimeout, Keepalive: profile.Options.Keepalive, ApplicationName: profile.Options.ApplicationName, SearchPath: profile.Options.SearchPath, SSLRootCert: profile.Options.SSLRootCert, SSLCert: profile.Options.SSLCert, SSLKey: profile.Options.SSLKey, UnixSocket: profile.Options.UnixSocket, SSH: db.SSHTunnelOptions{Enabled: profile.Options.SSHEnabled, Host: profile.Options.SSHHost, Port: profile.Options.SSHPort, User: profile.Options.SSHUser, AuthMethod: profile.Options.SSHAuthMethod, HostKeySHA256: profile.Options.SSHHostKey, DestinationHost: profile.Host, DestinationPort: profile.Port}}
+		if opts.SSH.Enabled {
+			sshSecret, sshErr := h.connectionSSHCredentials(r.Context(), profile.ID, req.SSHPassword, req.SSHPrivateKey, req.SSHPassphrase)
+			if sshErr != nil {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": sshErr.Error()})
+				return
+			}
+			opts.SSH.Password, opts.SSH.PrivateKey, opts.SSH.Passphrase = sshSecret.Password, sshSecret.PrivateKey, sshSecret.Passphrase
+		}
 	} else {
 		profile = store.ConnectionProfile{Host: strings.TrimSpace(req.Host), Port: req.Port, Username: strings.TrimSpace(req.User), DBName: strings.TrimSpace(req.DBName), SSLMode: db.NormalizeSSLMode(req.SSLMode)}
 		opts = db.ConnOptions{ConnectTimeout: req.ConnectTimeout, Keepalive: req.Keepalive, ApplicationName: req.ApplicationName, SearchPath: req.SearchPath, SSLRootCert: req.SSLRootCert, SSLCert: req.SSLCert, SSLKey: req.SSLKey, UnixSocket: req.UnixSocket}

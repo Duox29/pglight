@@ -90,7 +90,7 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
 
   /* ---------- connection (multi-session) ---------- */
   const bootConnect = useCallback(
-    async (f: ConnFields, fresh: boolean, dbnameOver?: string, sidOver?: string, activate = true, quiet = false, profileId?: string): Promise<string> => {
+    async (f: ConnFields, fresh: boolean, dbnameOver?: string, sidOver?: string, activate = true, quiet = false, profileId?: string, sshSecrets?: { password?: string; private_key?: string; passphrase?: string }): Promise<string> => {
       const dbname = dbnameOver || f.dbname
       const j = await apiClient.connect({
         host: f.host,
@@ -100,6 +100,9 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
         dbname,
         sslmode: f.sslmode,
         profile_id: profileId || f.profileId,
+        ssh_password: sshSecrets?.password,
+        ssh_private_key: sshSecrets?.private_key,
+        ssh_passphrase: sshSecrets?.passphrase,
         session_id: fresh ? '' : sidOver || session || undefined,
       })
       if (j.error || !j.session_id) {
@@ -108,7 +111,7 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
       }
       const sid = j.session_id
       const info: SessionInfo = j.info
-        ? { id: sid, host: j.info.host, port: String(j.info.port ?? f.port), user: j.info.user || f.user, dbname: j.info.dbname || dbname, sslmode: j.info.sslmode || f.sslmode, tls_warn: j.info.tls_warn, profile_id: j.info.profile_id, profile_name: j.info.profile_name }
+        ? { id: sid, host: j.info.host, port: String(j.info.port ?? f.port), user: j.info.user || f.user, dbname: j.info.dbname || dbname, sslmode: j.info.sslmode || f.sslmode, tls_warn: j.info.tls_warn, profile_id: j.info.profile_id, profile_name: j.info.profile_name, ssh_tunnel: j.info.ssh_tunnel, ssh_host: j.info.ssh_host, ssh_port: j.info.ssh_port, ssh_user: j.info.ssh_user, ssh_auth_method: j.info.ssh_auth_method, ssh_host_key: j.info.ssh_host_key }
         : { id: sid, host: f.host, port: f.port, user: f.user, dbname, sslmode: f.sslmode, profile_id: profileId || f.profileId }
       setSessions((prev) => (prev.some((s) => s.id === sid) ? prev.map((s) => (s.id === sid ? info : s)) : [...prev, info]))
       if (activate) setActiveId(sid)
@@ -124,14 +127,17 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
   // duplicate pool (each pool holds up to 8 backends; duplicates pile up
   // in pg_stat_activity fast).
   const findSession = useCallback(
-    (host: string, port: string | number, user: string, dbname: string, sslmode: string) =>
+    (host: string, port: string | number, user: string, dbname: string, sslmode: string, profileId?: string, sshOptions?: SavedConnection['options']) =>
       sessions.find(
         (s) =>
           s.host === host &&
           String(s.port) === String(port) &&
           s.user === user &&
           s.dbname === dbname &&
-          (s.sslmode || '') === (sslmode || ''),
+          (s.sslmode || '') === (sslmode || '') &&
+          (profileId ? s.profile_id === profileId : !s.profile_id) &&
+          s.ssh_tunnel === !!sshOptions?.ssh_enabled &&
+          (!sshOptions?.ssh_enabled || (s.ssh_host === sshOptions.ssh_host && String(s.ssh_port) === String(sshOptions.ssh_port || 22) && s.ssh_user === sshOptions.ssh_user && s.ssh_auth_method === sshOptions.ssh_auth_method && s.ssh_host_key === sshOptions.ssh_host_key)),
       ),
     [sessions],
   )
@@ -176,20 +182,20 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
 
   /* ---------- reconnect (dead session → fresh pool, tabs follow) ---------- */
   const reconnectOne = useCallback(
-    async (oldSid: string, opts?: { silent?: boolean }): Promise<string> => {
-      const f = readSessionConns()[oldSid]
+    async (oldSid: string, opts?: { silent?: boolean; sshSecrets?: { password?: string; private_key?: string; passphrase?: string }; fields?: ConnFields }): Promise<string> => {
+      const f = opts?.fields ?? readSessionConns()[oldSid]
       if (!f || !f.host) {
         if (!opts?.silent) toast.error('No saved credentials for this session — connect manually')
         return ''
       }
-      if (opts?.silent && f.profileId && !vault.unlocked) {
+      if (opts?.silent && f.profileId && !vault.unlocked && !opts?.sshSecrets && !f.password) {
         if (!vaultWarningShown) {
           setVaultWarningShown(true)
           toast.info('Vault is locked — automatic profile reconnect is paused until you unlock it')
         }
         return ''
       }
-      const nid = await bootConnect({ ...f }, true, undefined, undefined, false, !!opts?.silent, f.profileId)
+      const nid = await bootConnect({ ...f }, true, undefined, undefined, false, !!opts?.silent, f.profileId, opts?.sshSecrets)
       if (!nid) return ''
       forgetSessionConn(oldSid)
       dropSnapshot(oldSid)
@@ -222,7 +228,8 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
     (fresh: boolean, dbnameOver?: string) => {
       if (fresh) {
         const dbname = dbnameOver || fields.dbname
-        const hit = findSession(fields.host, fields.port, fields.user, dbname, fields.sslmode)
+        const profileOptions = saved.find((profile) => profile.id === fields.profileId)?.options
+        const hit = findSession(fields.host, fields.port, fields.user, dbname, fields.sslmode, fields.profileId, profileOptions)
         if (hit) {
           if (deadIds[hit.id]) {
             return reconnectOne(hit.id).then((nid) => {
@@ -236,11 +243,11 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
       }
       return bootConnect(fields, fresh, dbnameOver, undefined, true, false, fields.profileId)
     },
-    [bootConnect, fields, findSession, deadIds, reconnectOne, setActiveId],
+    [bootConnect, fields, saved, findSession, deadIds, reconnectOne, setActiveId],
   )
 
   const connectProfile = useCallback(
-    (profile: SavedConnection, password = '') => {
+    (profile: SavedConnection, password = '', sshSecrets?: { password?: string; private_key?: string; passphrase?: string }) => {
       const f: ConnFields = {
         host: profile.host,
         port: profile.port,
@@ -251,10 +258,10 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
         profileId: profile.id,
       }
       setFields(f)
-      const hit = findSession(f.host, f.port, f.user, f.dbname, f.sslmode)
+      const hit = findSession(f.host, f.port, f.user, f.dbname, f.sslmode, profile.id, profile.options)
       if (hit) {
         if (deadIds[hit.id]) {
-          return reconnectOne(hit.id).then((nid) => {
+          return reconnectOne(hit.id, { sshSecrets, fields: f }).then((nid) => {
             if (nid) setActiveId(nid)
             return nid
           })
@@ -262,7 +269,7 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
         setActiveId(hit.id)
         return Promise.resolve(hit.id)
       }
-      return bootConnect(f, true, undefined, undefined, true, false, profile.id)
+      return bootConnect(f, true, undefined, undefined, true, false, profile.id, sshSecrets)
     },
     [bootConnect, deadIds, findSession, reconnectOne, setActiveId],
   )
@@ -339,6 +346,12 @@ export function useSessions({ onRemap }: { onRemap: (oldSid: string, newSid: str
           tls_warn: s.tls_warn,
           profile_id: s.profile_id,
           profile_name: s.profile_name,
+          ssh_tunnel: s.ssh_tunnel,
+          ssh_host: s.ssh_host,
+          ssh_port: s.ssh_port,
+          ssh_user: s.ssh_user,
+          ssh_auth_method: s.ssh_auth_method,
+          ssh_host_key: s.ssh_host_key,
         }))
         setSessions((prev) => {
           const ids = new Set(mapped.map((s) => s.id))

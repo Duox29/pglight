@@ -37,6 +37,7 @@ type Manager struct {
 	txs      map[string]*txEntry
 	seen     map[string]time.Time
 	metas    map[string]ConnMeta
+	tunnels  map[string]*SSHTunnel
 	txnLocks map[string]*txnLockEntry
 }
 
@@ -80,6 +81,12 @@ type ConnMeta struct {
 	ConnectedAt time.Time `json:"connected_at"`
 	ProfileID   string    `json:"profile_id,omitempty"`
 	ProfileName string    `json:"profile_name,omitempty"`
+	SSHTunnel   bool      `json:"ssh_tunnel,omitempty"`
+	SSHHost     string    `json:"ssh_host,omitempty"`
+	SSHPort     int       `json:"ssh_port,omitempty"`
+	SSHUser     string    `json:"ssh_user,omitempty"`
+	SSHAuth     string    `json:"ssh_auth_method,omitempty"`
+	SSHHostKey  string    `json:"ssh_host_key,omitempty"`
 }
 
 // SessionInfo is the list entry returned by GET /api/sessions.
@@ -95,6 +102,7 @@ func New() *Manager {
 		txs:      make(map[string]*txEntry),
 		seen:     make(map[string]time.Time),
 		metas:    make(map[string]ConnMeta),
+		tunnels:  make(map[string]*SSHTunnel),
 		txnLocks: make(map[string]*txnLockEntry),
 	}
 }
@@ -187,6 +195,7 @@ type ConnOptions struct {
 	SSLCert         string
 	SSLKey          string
 	UnixSocket      string
+	SSH             SSHTunnelOptions
 }
 
 func ConnStringWithOptions(host string, port int, user, password, dbname, sslmode string, opts ConnOptions) string {
@@ -248,10 +257,29 @@ func (m *Manager) Add(id, connStr string) error {
 func (m *Manager) AddWithOptions(id, connStr string, opts ConnOptions) error {
 	unlock := m.lockTxn(id)
 	defer unlock()
+	var tunnel *SSHTunnel
+	localHost, localPort := "", 0
+	if opts.SSH.Enabled {
+		var err error
+		tunnel, localHost, localPort, err = StartSSHTunnel(context.Background(), opts.SSH)
+		if err != nil {
+			return err
+		}
+	}
+	keepTunnel := false
+	defer func() {
+		if tunnel != nil && !keepTunnel {
+			tunnel.Close()
+		}
+	}()
 
 	cfg, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
 		return err
+	}
+	if tunnel != nil {
+		cfg.ConnConfig.Host = localHost
+		cfg.ConnConfig.Port = uint16(localPort)
 	}
 	connectTimeout := 5 * time.Second
 	if cfg.ConnConfig.ConnectTimeout > 0 {
@@ -293,9 +321,15 @@ func (m *Manager) AddWithOptions(id, connStr string, opts ConnOptions) error {
 	}
 	m.mu.Lock()
 	oldPool := m.pools[id]
+	oldTunnel := m.tunnels[id]
 	oldEntry := m.txs[id]
 	delete(m.txs, id)
 	m.pools[id] = pool
+	if tunnel != nil {
+		m.tunnels[id] = tunnel
+	} else {
+		delete(m.tunnels, id)
+	}
 	m.seen[id] = time.Now()
 	m.mu.Unlock()
 
@@ -313,6 +347,10 @@ func (m *Manager) AddWithOptions(id, connStr string, opts ConnOptions) error {
 	if oldPool != nil {
 		oldPool.Close()
 	}
+	if oldTunnel != nil {
+		oldTunnel.Close()
+	}
+	keepTunnel = true
 	return nil
 }
 
@@ -352,8 +390,10 @@ func (m *Manager) Close(id string) {
 	m.mu.Lock()
 	entry := m.txs[id]
 	pool := m.pools[id]
+	tunnel := m.tunnels[id]
 	delete(m.txs, id)
 	delete(m.pools, id)
+	delete(m.tunnels, id)
 	delete(m.seen, id)
 	delete(m.metas, id)
 	m.mu.Unlock()
@@ -372,6 +412,9 @@ func (m *Manager) Close(id string) {
 	}
 	if pool != nil {
 		pool.Close()
+	}
+	if tunnel != nil {
+		tunnel.Close()
 	}
 }
 

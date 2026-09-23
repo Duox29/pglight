@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
@@ -29,6 +30,18 @@ type ConnectionOptions struct {
 	SSLCert         string `json:"sslcert"`
 	SSLKey          string `json:"sslkey"`
 	UnixSocket      string `json:"unix_socket"`
+	SSHEnabled      bool   `json:"ssh_enabled,omitempty"`
+	SSHHost         string `json:"ssh_host,omitempty"`
+	SSHPort         int    `json:"ssh_port,omitempty"`
+	SSHUser         string `json:"ssh_user,omitempty"`
+	SSHAuthMethod   string `json:"ssh_auth_method,omitempty"`
+	SSHHostKey      string `json:"ssh_host_key,omitempty"`
+}
+
+type SSHSecretValues struct {
+	Password   string `json:"password,omitempty"`
+	PrivateKey string `json:"private_key,omitempty"`
+	Passphrase string `json:"passphrase,omitempty"`
 }
 
 type ConnectionImportItem struct {
@@ -47,6 +60,7 @@ type ConnectionImportItem struct {
 	Default     bool
 	Tags        []string
 	Options     ConnectionOptions
+	SSHSecrets  SSHSecretValues
 }
 
 type ConnectionSave struct {
@@ -69,6 +83,7 @@ type ConnectionSave struct {
 	Default       bool
 	Tags          []string
 	Options       ConnectionOptions
+	SSHSecrets    SSHSecretValues
 }
 
 func (s *Store) ListConnections(ctx context.Context, userID string) ([]ConnectionProfile, error) {
@@ -137,6 +152,9 @@ func (s *Store) UpsertConnection(ctx context.Context, userID, name, host string,
 // SQLite transaction so a later validation/encryption failure cannot leave a
 // partially updated profile behind.
 func (s *Store) SaveConnectionProfile(ctx context.Context, userID string, item ConnectionSave, key []byte) (ConnectionProfile, error) {
+	if item.Options.SSHEnabled && item.Options.SSHPort == 0 {
+		item.Options.SSHPort = 22
+	}
 	if err := validateConnectionOptions(item.Options); err != nil {
 		return ConnectionProfile{}, err
 	}
@@ -176,6 +194,16 @@ func (s *Store) SaveConnectionProfile(ctx context.Context, userID string, item C
 		if _, err := tx.ExecContext(ctx, `INSERT INTO connection_secrets(user_id,connection_id,nonce,ciphertext) SELECT user_id,?,nonce,ciphertext FROM connection_secrets WHERE user_id=? AND connection_id=? ON CONFLICT(connection_id) DO UPDATE SET user_id=excluded.user_id,nonce=excluded.nonce,ciphertext=excluded.ciphertext,updated_at=CURRENT_TIMESTAMP`, id, userID, source); err != nil {
 			return ConnectionProfile{}, err
 		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO connection_ssh_secrets(user_id,connection_id,nonce,ciphertext) SELECT user_id,?,nonce,ciphertext FROM connection_ssh_secrets WHERE user_id=? AND connection_id=? ON CONFLICT(connection_id) DO UPDATE SET user_id=excluded.user_id,nonce=excluded.nonce,ciphertext=excluded.ciphertext,updated_at=CURRENT_TIMESTAMP`, id, userID, source); err != nil {
+			return ConnectionProfile{}, err
+		}
+		var sshEnabled int
+		var sshPort int
+		err := tx.QueryRowContext(ctx, `SELECT connect_timeout,keepalive,application_name,search_path,sslrootcert,sslcert,sslkey,unix_socket,ssh_enabled,ssh_host,ssh_port,ssh_user,ssh_auth_method,ssh_host_key FROM connection_options WHERE user_id=? AND profile_id=?`, userID, source).Scan(&item.Options.ConnectTimeout, &item.Options.Keepalive, &item.Options.ApplicationName, &item.Options.SearchPath, &item.Options.SSLRootCert, &item.Options.SSLCert, &item.Options.SSLKey, &item.Options.UnixSocket, &sshEnabled, &item.Options.SSHHost, &sshPort, &item.Options.SSHUser, &item.Options.SSHAuthMethod, &item.Options.SSHHostKey)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return ConnectionProfile{}, err
+		}
+		item.Options.SSHEnabled, item.Options.SSHPort = sshEnabled != 0, sshPort
 	}
 	if item.SavePassword {
 		if len(key) == 0 {
@@ -189,10 +217,27 @@ func (s *Store) SaveConnectionProfile(ctx context.Context, userID string, item C
 			return ConnectionProfile{}, err
 		}
 	}
+	if item.SSHSecrets.Password != "" || item.SSHSecrets.PrivateKey != "" || item.SSHSecrets.Passphrase != "" {
+		if len(key) == 0 {
+			return ConnectionProfile{}, errors.New("vault is locked; unlock it before saving SSH credentials")
+		}
+		payload, err := json.Marshal(item.SSHSecrets)
+		if err != nil {
+			return ConnectionProfile{}, err
+		}
+		nonce, ciphertext, err := seal(key, payload)
+		zeroBytes(payload)
+		if err != nil {
+			return ConnectionProfile{}, fmt.Errorf("encrypt SSH credentials: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO connection_ssh_secrets(user_id,connection_id,nonce,ciphertext) VALUES(?,?,?,?) ON CONFLICT(connection_id) DO UPDATE SET user_id=excluded.user_id,nonce=excluded.nonce,ciphertext=excluded.ciphertext,updated_at=CURRENT_TIMESTAMP`, userID, id, nonce, ciphertext); err != nil {
+			return ConnectionProfile{}, err
+		}
+	}
 	if err := updateConnectionMetadataTx(ctx, tx, userID, id, item.FolderID, item.Environment, item.Color, item.Description, item.Favorite, item.Default, item.Tags); err != nil {
 		return ConnectionProfile{}, err
 	}
-	if _, err := tx.ExecContext(ctx, connectionOptionsSQL, userID, id, item.Options.ConnectTimeout, item.Options.Keepalive, strings.TrimSpace(item.Options.ApplicationName), strings.TrimSpace(item.Options.SearchPath), strings.TrimSpace(item.Options.SSLRootCert), strings.TrimSpace(item.Options.SSLCert), strings.TrimSpace(item.Options.SSLKey), strings.TrimSpace(item.Options.UnixSocket)); err != nil {
+	if _, err := tx.ExecContext(ctx, connectionOptionsSQL, connectionOptionArgs(userID, id, item.Options)...); err != nil {
 		return ConnectionProfile{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -278,7 +323,7 @@ func (s *Store) loadConnectionTags(ctx context.Context, userID string, x *Connec
 
 func (s *Store) loadConnectionOptions(ctx context.Context, userID string, x *ConnectionProfile) error {
 	var o ConnectionOptions
-	err := s.db.QueryRowContext(ctx, `SELECT connect_timeout,keepalive,application_name,search_path,sslrootcert,sslcert,sslkey,unix_socket FROM connection_options WHERE user_id=? AND profile_id=?`, userID, x.ID).Scan(&o.ConnectTimeout, &o.Keepalive, &o.ApplicationName, &o.SearchPath, &o.SSLRootCert, &o.SSLCert, &o.SSLKey, &o.UnixSocket)
+	err := s.db.QueryRowContext(ctx, `SELECT connect_timeout,keepalive,application_name,search_path,sslrootcert,sslcert,sslkey,unix_socket,ssh_enabled,ssh_host,ssh_port,ssh_user,ssh_auth_method,ssh_host_key FROM connection_options WHERE user_id=? AND profile_id=?`, userID, x.ID).Scan(&o.ConnectTimeout, &o.Keepalive, &o.ApplicationName, &o.SearchPath, &o.SSLRootCert, &o.SSLCert, &o.SSLKey, &o.UnixSocket, &o.SSHEnabled, &o.SSHHost, &o.SSHPort, &o.SSHUser, &o.SSHAuthMethod, &o.SSHHostKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -290,18 +335,45 @@ func (s *Store) loadConnectionOptions(ctx context.Context, userID string, x *Con
 }
 
 func (s *Store) UpdateConnectionOptions(ctx context.Context, userID, id string, o ConnectionOptions) error {
+	if o.SSHEnabled && o.SSHPort == 0 {
+		o.SSHPort = 22
+	}
 	if o.ConnectTimeout < 0 || o.ConnectTimeout > 300 || o.Keepalive < 0 || o.Keepalive > 86400 {
 		return fmt.Errorf("invalid connection timeout or keepalive")
 	}
-	_, err := s.db.ExecContext(ctx, connectionOptionsSQL, userID, id, o.ConnectTimeout, o.Keepalive, strings.TrimSpace(o.ApplicationName), strings.TrimSpace(o.SearchPath), strings.TrimSpace(o.SSLRootCert), strings.TrimSpace(o.SSLCert), strings.TrimSpace(o.SSLKey), strings.TrimSpace(o.UnixSocket))
+	_, err := s.db.ExecContext(ctx, connectionOptionsSQL, connectionOptionArgs(userID, id, o)...)
 	return err
 }
 
-const connectionOptionsSQL = `INSERT INTO connection_options(user_id,profile_id,connect_timeout,keepalive,application_name,search_path,sslrootcert,sslcert,sslkey,unix_socket) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(profile_id) DO UPDATE SET user_id=excluded.user_id,connect_timeout=excluded.connect_timeout,keepalive=excluded.keepalive,application_name=excluded.application_name,search_path=excluded.search_path,sslrootcert=excluded.sslrootcert,sslcert=excluded.sslcert,sslkey=excluded.sslkey,unix_socket=excluded.unix_socket`
+const connectionOptionsSQL = `INSERT INTO connection_options(user_id,profile_id,connect_timeout,keepalive,application_name,search_path,sslrootcert,sslcert,sslkey,unix_socket,ssh_enabled,ssh_host,ssh_port,ssh_user,ssh_auth_method,ssh_host_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(profile_id) DO UPDATE SET user_id=excluded.user_id,connect_timeout=excluded.connect_timeout,keepalive=excluded.keepalive,application_name=excluded.application_name,search_path=excluded.search_path,sslrootcert=excluded.sslrootcert,sslcert=excluded.sslcert,sslkey=excluded.sslkey,unix_socket=excluded.unix_socket,ssh_enabled=excluded.ssh_enabled,ssh_host=excluded.ssh_host,ssh_port=excluded.ssh_port,ssh_user=excluded.ssh_user,ssh_auth_method=excluded.ssh_auth_method,ssh_host_key=excluded.ssh_host_key`
+
+func connectionOptionArgs(userID, profileID string, o ConnectionOptions) []any {
+	return []any{userID, profileID, o.ConnectTimeout, o.Keepalive, strings.TrimSpace(o.ApplicationName), strings.TrimSpace(o.SearchPath), strings.TrimSpace(o.SSLRootCert), strings.TrimSpace(o.SSLCert), strings.TrimSpace(o.SSLKey), strings.TrimSpace(o.UnixSocket), boolInt(o.SSHEnabled), strings.TrimSpace(o.SSHHost), o.SSHPort, strings.TrimSpace(o.SSHUser), strings.TrimSpace(o.SSHAuthMethod), strings.TrimSpace(o.SSHHostKey)}
+}
 
 func validateConnectionOptions(o ConnectionOptions) error {
 	if o.ConnectTimeout < 0 || o.ConnectTimeout > 300 || o.Keepalive < 0 || o.Keepalive > 86400 {
 		return fmt.Errorf("invalid connection timeout or keepalive")
+	}
+	if o.SSHEnabled {
+		if strings.TrimSpace(o.UnixSocket) != "" {
+			return fmt.Errorf("SSH tunnel cannot be combined with a PostgreSQL Unix socket")
+		}
+		if strings.TrimSpace(o.SSHHost) == "" || strings.TrimSpace(o.SSHUser) == "" {
+			return fmt.Errorf("SSH host and username are required")
+		}
+		if o.SSHPort < 0 || o.SSHPort > 65535 {
+			return fmt.Errorf("invalid SSH port")
+		}
+		if o.SSHPort == 0 {
+			o.SSHPort = 22
+		}
+		if o.SSHAuthMethod != "password" && o.SSHAuthMethod != "private_key" {
+			return fmt.Errorf("SSH authentication must be password or private_key")
+		}
+		if key := strings.TrimSpace(o.SSHHostKey); key != "" && !strings.HasPrefix(key, "SHA256:") {
+			return fmt.Errorf("SSH host key must be a SHA256 fingerprint")
+		}
 	}
 	return nil
 }
@@ -316,6 +388,9 @@ func (s *Store) ImportConnectionProfiles(ctx context.Context, userID string, ite
 	}
 	defer tx.Rollback()
 	for _, item := range items {
+		if item.Options.SSHEnabled && item.Options.SSHPort == 0 {
+			item.Options.SSHPort = 22
+		}
 		if err := validateConnectionOptions(item.Options); err != nil {
 			return 0, err
 		}
@@ -329,7 +404,7 @@ func (s *Store) ImportConnectionProfiles(ctx context.Context, userID string, ite
 		if err := updateConnectionMetadataTx(ctx, tx, userID, id, item.FolderID, item.Environment, item.Color, item.Description, item.Favorite, item.Default, item.Tags); err != nil {
 			return 0, err
 		}
-		if _, err := tx.ExecContext(ctx, connectionOptionsSQL, userID, id, item.Options.ConnectTimeout, item.Options.Keepalive, strings.TrimSpace(item.Options.ApplicationName), strings.TrimSpace(item.Options.SearchPath), strings.TrimSpace(item.Options.SSLRootCert), strings.TrimSpace(item.Options.SSLCert), strings.TrimSpace(item.Options.SSLKey), strings.TrimSpace(item.Options.UnixSocket)); err != nil {
+		if _, err := tx.ExecContext(ctx, connectionOptionsSQL, connectionOptionArgs(userID, id, item.Options)...); err != nil {
 			return 0, err
 		}
 		if item.Password != "" {
@@ -341,6 +416,23 @@ func (s *Store) ImportConnectionProfiles(ctx context.Context, userID string, ite
 				return 0, fmt.Errorf("encrypt connection secret: %w", err)
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO connection_secrets(user_id,connection_id,nonce,ciphertext) VALUES(?,?,?,?) ON CONFLICT(connection_id) DO UPDATE SET user_id=excluded.user_id,nonce=excluded.nonce,ciphertext=excluded.ciphertext,updated_at=CURRENT_TIMESTAMP`, userID, id, nonce, ciphertext); err != nil {
+				return 0, err
+			}
+		}
+		if item.SSHSecrets.Password != "" || item.SSHSecrets.PrivateKey != "" || item.SSHSecrets.Passphrase != "" {
+			if len(key) == 0 {
+				return 0, errors.New("vault is locked; unlock it before importing SSH credentials")
+			}
+			payload, err := json.Marshal(item.SSHSecrets)
+			if err != nil {
+				return 0, err
+			}
+			nonce, ciphertext, err := seal(key, payload)
+			zeroBytes(payload)
+			if err != nil {
+				return 0, err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO connection_ssh_secrets(user_id,connection_id,nonce,ciphertext) VALUES(?,?,?,?) ON CONFLICT(connection_id) DO UPDATE SET user_id=excluded.user_id,nonce=excluded.nonce,ciphertext=excluded.ciphertext,updated_at=CURRENT_TIMESTAMP`, userID, id, nonce, ciphertext); err != nil {
 				return 0, err
 			}
 		}
