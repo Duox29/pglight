@@ -125,6 +125,7 @@ func main() {
 	mux.HandleFunc("/api/stats", h.Stats)
 	mux.HandleFunc("/api/locks", h.Locks)
 	mux.HandleFunc("/api/roles", h.Roles)
+	mux.HandleFunc("/api/privileges", h.Privileges)
 	mux.HandleFunc("/api/extensions", h.Extensions)
 	mux.HandleFunc("/api/types", h.Types)
 	mux.HandleFunc("/api/triggers", h.Triggers)

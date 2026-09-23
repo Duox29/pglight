@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Activity, Database, FileClock, Keyboard, KeyRound, LayoutDashboard, List, Palette, Settings, SlidersHorizontal, Terminal, Zap } from 'lucide-react'
+import { Activity, Database, FileClock, Keyboard, KeyRound, LayoutDashboard, List, LockKeyhole, Palette, Settings, SlidersHorizontal, Terminal, Zap } from 'lucide-react'
 import type { SideView } from '@/types'
 
 export const WORKSPACE_VIEW_META: Record<SideView, { label: string; icon: LucideIcon }> = {
@@ -10,6 +10,7 @@ export const WORKSPACE_VIEW_META: Record<SideView, { label: string; icon: Lucide
   activity: { label: 'Activity', icon: Activity },
   locks: { label: 'Locks', icon: SlidersHorizontal },
   stats: { label: 'Stats', icon: LayoutDashboard },
+  privileges: { label: 'Privileges', icon: LockKeyhole },
   connections: { label: 'Connections', icon: KeyRound },
   appearance: { label: 'Appearance', icon: Palette },
   settings: { label: 'Settings', icon: Settings },
@@ -19,7 +20,7 @@ export const WORKSPACE_VIEW_META: Record<SideView, { label: string; icon: Lucide
 }
 
 export const WORKSPACE_VIEWS: SideView[] = [
-  'history', 'snippets', 'aliases', 'server', 'activity', 'locks', 'stats',
+  'history', 'snippets', 'aliases', 'server', 'activity', 'locks', 'stats', 'privileges',
   'connections', 'appearance', 'settings', 'shortcuts', 'logs', 'quick-access',
 ]
 

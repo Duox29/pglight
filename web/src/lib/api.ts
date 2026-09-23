@@ -208,6 +208,9 @@ export const q = (session: string, path: string) =>
   `${path}${path.includes('?') ? '&' : '?'}session_id=${encodeURIComponent(session)}`
 
 export const apiClient = {
+  privileges: (session: string, schema: string, table: string) => api<PrivilegeCatalog>(q(session, `/api/privileges?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`)),
+  privilegeAction: (payload: { session_id: string; action: string; schema?: string; table?: string; changes?: { role: string; privilege: string; granted: boolean }[]; policy?: { operation: string; schema: string; table: string; name?: string; command?: string; permissive?: string; roles?: string[]; using?: string; with_check?: string } }) =>
+    api<{ ok?: boolean; sql?: string[]; count?: number; in_txn?: boolean; error?: string }>('/api/privileges', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   backup: (p: { session_id: string; format: 'custom' | 'plain'; schema_only?: boolean; data_only?: boolean }) =>
     api<JobSnapshot>('/api/backup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
   restore: (p: { session_id: string; file: File; overwrite: true }) => {
@@ -425,6 +428,13 @@ export interface JobSnapshot {
   bytes: number
   error?: string
   file_name?: string
+}
+
+export interface PrivilegeCatalog {
+  roles: { name: string; superuser: boolean; create_role: boolean; create_db: boolean; login: boolean }[]
+  grants: { role: string; privilege: string; grantable: boolean }[]
+  rls: { enabled: boolean; forced: boolean; in_txn: boolean; policies: { name: string; permissive: string; roles: string[]; command: string; using?: string; with_check?: string }[] }
+  error?: string
 }
 
 export interface MockDataColumn {

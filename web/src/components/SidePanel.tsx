@@ -19,6 +19,7 @@ import { CredentialManager, type ProfileMetadata } from './CredentialManager'
 import { KeyboardShortcutsPanel } from './KeyboardShortcutsPanel'
 import { AliasesPanel } from './AliasesPanel'
 import { LogsPanel } from './LogsPanel'
+import { PrivilegeEditor } from './PrivilegeEditor'
 import { api, apiClient, q } from '@/lib/api'
 import { QUICK_ACCESS_VIEWS, WORKSPACE_VIEW_META, WORKSPACE_VIEWS } from '@/lib/workspace'
 
@@ -116,7 +117,7 @@ export function SidePanel(p: Props) {
   }
 
   useEffect(() => {
-    if (p.view === 'history' || p.view === 'snippets' || p.view === 'aliases' || p.view === 'connections' || p.view === 'appearance' || p.view === 'settings' || p.view === 'shortcuts' || p.view === 'logs' || p.view === 'quick-access') return
+    if (p.view === 'history' || p.view === 'snippets' || p.view === 'aliases' || p.view === 'connections' || p.view === 'appearance' || p.view === 'settings' || p.view === 'shortcuts' || p.view === 'logs' || p.view === 'quick-access' || p.view === 'privileges') return
     // Drop the previous view's payload: without this a slow fetch briefly
     // renders stale data (e.g. an array) under the new view and crashes it.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -216,6 +217,7 @@ export function SidePanel(p: Props) {
         {p.view === 'aliases' && <AliasesPanel dialogs={p.dialogs} />}
         {p.view === 'quick-access' && <QuickAccessView quickAccess={p.quickAccess} onChange={p.onQuickAccessChange} />}
         {p.view === 'connections' && <CredentialManager {...p.connection} dialogs={p.dialogs} />}
+        {p.view === 'privileges' && <PrivilegeEditor key={p.session} session={p.session} dialogs={p.dialogs} />}
         {(p.view === 'server' || p.view === 'activity' || p.view === 'locks' || p.view === 'stats' || p.view === 'appearance' || p.view === 'settings' || p.view === 'shortcuts' || p.view === 'logs') && (
           <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
             <ErrorText message={error} />

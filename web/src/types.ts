@@ -201,7 +201,7 @@ export interface ObjectTabT {
 
 export type Tab = QueryTabT | TableTabT | BrowserTabT | ErdTabT | DocsTabT | WorkspaceTabT | ObjectTabT
 
-export type SideView = 'history' | 'snippets' | 'aliases' | 'server' | 'activity' | 'locks' | 'stats' | 'connections' | 'appearance' | 'settings' | 'shortcuts' | 'logs' | 'quick-access'
+export type SideView = 'history' | 'snippets' | 'aliases' | 'server' | 'activity' | 'locks' | 'stats' | 'privileges' | 'connections' | 'appearance' | 'settings' | 'shortcuts' | 'logs' | 'quick-access'
 
 /** Capped result snapshot kept for query tabs (never auto re-run). */
 export interface QuerySnapshot {

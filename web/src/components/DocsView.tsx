@@ -673,6 +673,35 @@ const SECTIONS: Section[] = [
     },
   },
   {
+    id: 'privileges',
+    title: { en: 'Privileges and row security', vi: 'Quyền và bảo mật theo hàng' },
+    group: { en: 'Objects & ERD', vi: 'Đối tượng & ERD' },
+    body: {
+      en: (
+        <>
+          <P>Workspace → Privileges edits table grants and row-level security for one table or view on the active PostgreSQL session.</P>
+          <Ul>
+            <Li>Load a schema and table/view to inspect available roles and effective ACL entries, including PUBLIC grants.</Li>
+            <Li>Stage SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, or TRIGGER grants and revokes. Preview the generated SQL, then confirm to apply the batch.</Li>
+            <Li>Enable or disable RLS, force or unforce it, and create, replace, or drop PERMISSIVE or RESTRICTIVE policies. Policy USING and WITH CHECK fields are SQL expressions; preview them before applying.</Li>
+            <Li>Changes are atomic. Within an explicit transaction the editor uses a savepoint, so an error rolls back only this operation.</Li>
+          </Ul>
+        </>
+      ),
+      vi: (
+        <>
+          <P>Workspace → Privileges chỉnh quyền bảng và bảo mật theo hàng cho một bảng hoặc view trong session PostgreSQL đang chọn.</P>
+          <Ul>
+            <Li>Tải schema và bảng/view để xem roles cùng ACL, bao gồm quyền PUBLIC.</Li>
+            <Li>Chuẩn bị cấp hoặc thu hồi SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES hoặc TRIGGER. Xem SQL rồi xác nhận để áp dụng.</Li>
+            <Li>Bật/tắt RLS, ép hoặc bỏ ép RLS, tạo/thay thế/xóa policy PERMISSIVE hoặc RESTRICTIVE. USING và WITH CHECK là biểu thức SQL; hãy xem trước trước khi áp dụng.</Li>
+            <Li>Thay đổi có tính nguyên tử. Trong transaction tường minh, editor dùng savepoint để lỗi chỉ hoàn tác thao tác này.</Li>
+          </Ul>
+        </>
+      ),
+    },
+  },
+  {
     id: 'erd',
     title: { en: 'ERD diagram', vi: 'Sơ đồ ERD' },
     group: { en: 'Objects & ERD', vi: 'Đối tượng & ERD' },

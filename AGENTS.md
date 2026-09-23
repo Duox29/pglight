@@ -16,7 +16,7 @@
   `internal/store/`, pure mock-data engine in `internal/mockgen/` (HTTP
   orchestration in `mockdata.go`), HTTP/query/txn logging in `internal/logging/`,
   cancellable progress jobs and process runner in `internal/jobs/`, flat route table in `main.go`
-  (59 `/api/*` registrations; `Manager.CloseAll`
+  (60 `/api/*` registrations; `Manager.CloseAll`
   + `os.Exit` shutdown).
 - **Frontend**: React 18 + Vite 5 + Tailwind v3 + shadcn-style prebuilt
   components (`web/src/components/ui/*`: Button, Input, Textarea, PasswordTextarea (masked multiline secrets such as SSH private keys), Badge,
@@ -250,7 +250,7 @@ backend/frontend surface:
 
 ## 6. Current function inventory (full project scan — 2026-09-21)
 
-The route table currently contains 59 registrations. Keep this inventory in
+The route table currently contains 60 registrations. Keep this inventory in
 sync when adding or removing a user-visible function:
 
 - **Sessions and connections**: `connect`, `sessions`, `disconnect`, `txn`,
@@ -264,7 +264,8 @@ sync when adding or removing a user-visible function:
   `complete`, `table-data`, `row`, `rows-delete`, `table-changes` (atomic
   staged update/insert/delete batches), `import` (JSON + streaming multipart
   CSV), `export/csv` (streaming table CSV), `maintenance`,
-  `activity`, and `cancel`, plus `backup`, `restore`, and session-scoped
+  `activity`, and `cancel`, plus `privileges` (object GRANT/REVOKE and RLS
+  policies), `backup`, `restore`, and session-scoped
   `jobs/{id}` (progress, cancellation, streamed backup download).
 - **App data and administration**: `aliases`, `snippets`, `history` (search,
   filters, paging, pin/delete; SQL/error size caps),
@@ -275,7 +276,7 @@ sync when adding or removing a user-visible function:
   the HTTP layer remains txn-aware.
 - **Frontend composition**: tab kinds are `query|table|browser|erd|docs|object`
   plus `workspace`; Workspace views are `history|snippets|aliases|server|
-  activity|locks|stats|connections|settings|shortcuts|logs|quick-access`.
+  activity|locks|stats|privileges|connections|settings|shortcuts|logs|quick-access`.
   Domain hooks are `useSessions`, `useTabs`, `useSplit`, `useExplorer`,
   `useQueryRunner`, `useTableOps`, `useObjectOps`, `useGridSelection`, and
   `useStagedTableChanges`.

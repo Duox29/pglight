@@ -27,7 +27,7 @@ Source features surveyed: JetBrains DataGrip (explorer, consoles, diff, Explain,
 | Import CSV / table export | ✅ (streaming multipart import + filtered CSV table export; bounded memory, JSON import retains 20k cap) |
 | ER diagram (FK graph) | ✅ (`@xyflow/react`, auto-layout, persisted) |
 | Maintenance (VACUUM/ANALYZE/REINDEX) | ✅ (allow-listed, txn-refused) |
-| Roles / privileges viewer | ✅ basic |
+| Roles / privileges / row security | ✅ (`/api/privileges`, previewed GRANT/REVOKE and RLS policy changes) |
 | Mock-data generator (Simple/Advanced) | ✅ (`meta`/preview≤100/generate≤20000) |
 | Split workspace (2-pane) + Docs tab + shutdown | ✅ |
 | Privacy controls + TLS warnings + exact numerics | ✅ |
@@ -88,7 +88,8 @@ Frontend (`web/`):
 - [x] Data editor staged edits + Apply/Discard and SQL preview, atomic mixed update/insert/delete batches, original-value concurrency checks.
 - [ ] Data editor JSON cell editor, column filters/sort UI, duplicate row, fill-down, clipboard paste staging.
 - [ ] Visual EXPLAIN (plan tree/graph, buffers/timing where available), plan compare.
-- [ ] Row-level security / privilege editor (GRANT wizard), role membership editor.
+- [x] Object privilege and row-level security editor: catalog roles/grants/policies, preview GRANT/REVOKE and RLS SQL before apply, savepoint protection in explicit transactions.
+- [ ] Role membership editor.
 - [ ] Charts from result sets, query plan history, slow-query panel (`pg_stat_statements` when installed).
 - [ ] MOTD log viewer only if a supported, permission-safe source is available; do not require `file_fdw` or server-side file access by default.
 - [x] Multi-connection tabs (per-tab session): sessions list + active session; explorer/txn/dashboard follow active, tabs keep their session; `switchDb` opens a new session.
