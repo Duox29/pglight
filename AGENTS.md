@@ -14,7 +14,8 @@
   profiles/folders/tags/options, vaults/secrets, preferences, ERD layouts) in
   `internal/store/`, pure mock-data engine in `internal/mockgen/` (HTTP
   orchestration in `mockdata.go`), HTTP/query/txn logging in `internal/logging/`,
-  flat route table in `main.go` (53 `/api/*` registrations; `Manager.CloseAll`
+  cancellable progress jobs in `internal/jobs/`, flat route table in `main.go`
+  (56 `/api/*` registrations; `Manager.CloseAll`
   + `os.Exit` shutdown).
 - **Frontend**: React 18 + Vite 5 + Tailwind v3 + shadcn-style prebuilt
   components (`web/src/components/ui/*`: Button, Input, Textarea, PasswordTextarea (masked multiline secrets such as SSH private keys), Badge,
