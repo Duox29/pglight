@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -513,6 +514,139 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 		response["in_txn"] = true
 	}
 	writeJSON(w, 200, response)
+}
+
+// ExportCSV streams a complete table query to the client one PostgreSQL row
+// at a time. It intentionally does not materialize the result set in memory.
+func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req struct {
+		Session string `json:"session_id"`
+		Schema  string `json:"schema"`
+		Table   string `json:"table"`
+		Filter  string `json:"filter"`
+		Order   string `json:"order"`
+	}
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
+		if err := r.ParseForm(); err != nil {
+			writeJSON(w, 400, map[string]string{"error": "invalid form"})
+			return
+		}
+		req.Session = r.Form.Get("session_id")
+		req.Schema = r.Form.Get("schema")
+		req.Table = r.Form.Get("table")
+		req.Filter = r.Form.Get("filter")
+		req.Order = r.Form.Get("order")
+	} else if err := decodeBody(r, &req); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid json"})
+		return
+	}
+	id := sessionFromBody(req.Session, r)
+	if id == "" {
+		writeJSON(w, 401, map[string]string{"error": "not connected"})
+		return
+	}
+	if req.Table == "" {
+		writeJSON(w, 400, map[string]string{"error": "table required"})
+		return
+	}
+	if req.Schema == "" {
+		req.Schema = "public"
+	}
+	qqRaw, release, _, _, ok := h.Mgr.AcquireLease(id)
+	if !ok {
+		writeJSON(w, 401, map[string]string{"error": "not connected"})
+		return
+	}
+	defer release()
+	ctx := r.Context()
+	where := ""
+	var args []any
+	if strings.TrimSpace(req.Filter) != "" {
+		filterSQL, filterArgs, err := safeTableFilter(req.Filter)
+		if err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		where, args = " WHERE "+filterSQL, filterArgs
+	}
+	if order := strings.TrimSpace(req.Order); order != "" {
+		parts := strings.Split(order, ",")
+		safe := make([]string, 0, len(parts))
+		for _, part := range parts {
+			bits := strings.Fields(strings.TrimSpace(part))
+			if len(bits) == 0 {
+				continue
+			}
+			dir := "ASC"
+			if len(bits) > 1 {
+				switch strings.ToUpper(bits[1]) {
+				case "ASC":
+				case "DESC":
+					dir = "DESC"
+				default:
+					writeJSON(w, 400, map[string]string{"error": "invalid order direction"})
+					return
+				}
+			}
+			safe = append(safe, pgx.Identifier{bits[0]}.Sanitize()+" "+dir)
+		}
+		if len(safe) > 0 {
+			where += " ORDER BY " + strings.Join(safe, ", ")
+		}
+	}
+	sql := "SELECT * FROM " + pgx.Identifier{req.Schema, req.Table}.Sanitize() + where
+	rows, err := logging.Wrap(qqRaw, h.Log, id).Query(ctx, sql, args...)
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	fields := rows.FieldDescriptions()
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	filename := mime.FormatMediaType("attachment", map[string]string{"filename": req.Table + ".csv"})
+	w.Header().Set("Content-Disposition", filename)
+	w.WriteHeader(http.StatusOK)
+	csvWriter := csv.NewWriter(w)
+	columns := make([]string, len(fields))
+	for i, field := range fields {
+		columns[i] = field.Name
+	}
+	if err := csvWriter.Write(columns); err != nil {
+		return
+	}
+	count := 0
+	for rows.Next() {
+		values, valueErr := rows.Values()
+		if valueErr != nil {
+			return
+		}
+		record := make([]string, len(values))
+		for i, value := range values {
+			if value == nil {
+				continue
+			}
+			if bytes, ok := value.([]byte); ok {
+				record[i] = string(bytes)
+			} else {
+				record[i] = fmt.Sprint(value)
+			}
+		}
+		if err := csvWriter.Write(record); err != nil {
+			return
+		}
+		count++
+		if count%256 == 0 {
+			csvWriter.Flush()
+			if csvWriter.Error() != nil {
+				return
+			}
+		}
+	}
+	csvWriter.Flush()
 }
 
 func (h *Handler) RowOp(w http.ResponseWriter, r *http.Request) {

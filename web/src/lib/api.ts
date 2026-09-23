@@ -1,4 +1,4 @@
-import { api } from './storage'
+import { api, apiStream } from './storage'
 import type { CommandId } from '@/commands/types'
 
 export { api }
@@ -71,6 +71,57 @@ export interface QueryResult {
   in_txn?: boolean
   /** True when restored from last session's snapshot — Run to refresh. */
   stale?: boolean
+}
+
+let csvDownloadFrame: HTMLIFrameElement | null = null
+let csvDownloadErrorHandler: ((message: string) => void) | undefined
+
+function getCSVDownloadFrame(): HTMLIFrameElement {
+  if (csvDownloadFrame?.isConnected) return csvDownloadFrame
+  const frame = document.createElement('iframe')
+  frame.name = 'pglight-csv-download'
+  frame.title = 'CSV download'
+  frame.hidden = true
+  frame.addEventListener('load', () => {
+    const text = frame.contentDocument?.body?.textContent?.trim()
+    if (!text) return
+    try {
+      const result = JSON.parse(text) as { error?: unknown }
+      if (typeof result.error === 'string') csvDownloadErrorHandler?.(result.error)
+    } catch {
+      // Successful attachment downloads do not navigate the hidden frame.
+    }
+  })
+  document.body.append(frame)
+  csvDownloadFrame = frame
+  return frame
+}
+
+function submitCSVDownload(payload: {
+  session_id: string
+  schema: string
+  table: string
+  filter?: string
+  order?: string
+}, onError?: (message: string) => void): void {
+  csvDownloadErrorHandler = onError
+  const form = document.createElement('form')
+  form.method = 'POST'
+  form.action = '/api/export/csv'
+  form.enctype = 'application/x-www-form-urlencoded'
+  form.target = getCSVDownloadFrame().name
+  form.hidden = true
+  for (const [name, value] of Object.entries(payload)) {
+    if (value === undefined) continue
+    const input = document.createElement('input')
+    input.type = 'hidden'
+    input.name = name
+    input.value = value
+    form.append(input)
+  }
+  document.body.append(form)
+  form.submit()
+  form.remove()
 }
 
 export interface MultiResult {
@@ -148,6 +199,8 @@ export const q = (session: string, path: string) =>
   `${path}${path.includes('?') ? '&' : '?'}session_id=${encodeURIComponent(session)}`
 
 export const apiClient = {
+  exportCSV: (p: { session_id: string; schema: string; table: string; filter?: string; order?: string }, onError?: (message: string) => void) =>
+    submitCSVDownload(p, onError),
   connect: (b: ConnectParams) =>
     api<{ session_id?: string; info?: SessionInfo; error?: string }>('/api/connect', {
       method: 'POST',

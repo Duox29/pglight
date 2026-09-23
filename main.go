@@ -132,6 +132,7 @@ func main() {
 	mux.HandleFunc("/api/maintenance", h.Maintenance)
 	mux.HandleFunc("/api/import", h.Import)
 	mux.HandleFunc("/api/import/csv", h.ImportCSV)
+	mux.HandleFunc("/api/export/csv", h.ExportCSV)
 	mux.HandleFunc("/api/mock-data/meta", h.MockMeta)
 	mux.HandleFunc("/api/mock-data/preview", h.MockPreview)
 	mux.HandleFunc("/api/mock-data/generate", h.MockGenerate)

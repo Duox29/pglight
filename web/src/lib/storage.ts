@@ -33,6 +33,26 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
 }
 
+/** Fetch a successful non-JSON response while preserving the shared 401 handling. */
+export async function apiStream(path: string, init?: RequestInit): Promise<Response> {
+  let res: Response
+  try {
+    res = await fetch(path, init)
+  } catch (e) {
+    throw new ApiError(e instanceof Error ? e.message : 'Network request failed', 0)
+  }
+  if (res.status === 401) notifyUnauthorized(path, init)
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`
+    try {
+      const body = await res.json() as { error?: string }
+      if (body.error) message = body.error
+    } catch { /* keep status message for non-JSON errors */ }
+    throw new ApiError(message, res.status)
+  }
+  return res
+}
+
 
 type UnauthorizedCb = (sessionId: string) => void
 const unauthorizedCbs = new Set<UnauthorizedCb>()

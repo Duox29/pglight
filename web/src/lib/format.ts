@@ -9,6 +9,34 @@ export function quoteQualified(schema: string, table: string): string {
   return `${quoteIdent(schema)}.${quoteIdent(table)}`
 }
 
+type StreamFileHandle = {
+  createWritable: () => Promise<{ write: (data: Uint8Array) => Promise<void>; close: () => Promise<void> }>
+}
+
+/** Save an HTTP response incrementally through the browser's file stream API. */
+export async function saveResponseStream(response: Response, filename: string): Promise<void> {
+  const streamWindow = window as Window & {
+    showSaveFilePicker?: (options: { suggestedName: string }) => Promise<StreamFileHandle>
+  }
+  if (!streamWindow.showSaveFilePicker || !response.body) {
+    throw new Error('This browser cannot save streamed exports; use a browser with file streaming support')
+  }
+  const handle = await streamWindow.showSaveFilePicker({ suggestedName: filename })
+  const output = await handle.createWritable()
+  const reader = response.body.getReader()
+  try {
+    while (true) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      if (chunk.value) await output.write(chunk.value)
+    }
+    await output.close()
+  } catch (error) {
+    await reader.cancel()
+    throw error
+  }
+}
+
 /** PostgreSQL type OIDs the backend sends in QueryResult.types. Exact
  * numerics (int8/numeric/money) cross the wire as strings — see handlers.go
  * jsonSafeCells — so literals must recognize OIDs, not just type names. */

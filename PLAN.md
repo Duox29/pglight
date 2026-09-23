@@ -23,7 +23,7 @@ Source features surveyed: JetBrains DataGrip (explorer, consoles, diff, Explain,
 | Workspace (server, activity, locks, db stats) | ✅ (Workspace tab: Server/Activity/Locks/Stats) |
 | Global object search (Ctrl+K) | ✅ |
 | SQL format + CodeMirror editor + snippets | ✅ (sqlite-backed snippets/history) |
-| Import CSV / export as INSERTs | ✅ (streaming multipart CSV, bounded 500-row batches; JSON import retains 20k cap) |
+| Import CSV / table export | ✅ (streaming multipart import + filtered CSV table export; bounded memory, JSON import retains 20k cap) |
 | ER diagram (FK graph) | ✅ (`@xyflow/react`, auto-layout, persisted) |
 | Maintenance (VACUUM/ANALYZE/REINDEX) | ✅ (allow-listed, txn-refused) |
 | Roles / privileges viewer | ✅ basic |
@@ -58,6 +58,7 @@ Backend (`internal/db`, `internal/api`):
 - [x] `POST /api/maintenance {vacuum,analyze,vacuum_full,reindex}` — pgAdmin-style maintenance buttons.
 - [x] `POST /api/import {columns, rows[][]}` — txn-wrapped bulk INSERT for CSV import (500-row batches, `ON CONFLICT DO NOTHING` option).
 - [x] `POST /api/import/csv` — multipart CSV upload (2 GiB request cap), bounded 500-row batches, matching-header mapping, atomic private txn or explicit-txn savepoint; typed client helper added.
+- [x] `POST /api/export/csv` — txn-aware filtered/ordered table CSV response, streamed from PostgreSQL rows to HTTP; browsers without the File System Access API use a native form download.
 
 Frontend (`web/`):
 - [x] UX hierarchy pass: header reduces visual competition (search-first + configurable Quick Access buttons, with Connections/Settings as defaults + utility menu for Workspace/Docs); query toolbar grouped Primary/Query/Result/Utility with Run dominant and Explain in a dropdown; connection management lives in the persisted Workspace → Connections tab with vault lock state; Explorer tiers schema > muted-uppercase group > object, Tables open by default, Lucide-only icons with subtle type colors, filter match counts; tabs show active dot/dirty state, middle-click close, DB badges; DataGrid is type-aware (OID-based numeric right-align, bool, JSON, type tooltips, zebra rows, Lucide sort icons); table workspace has a real identity header with Data | Structure (Columns/Constraints/Triggers) | SQL | Indexes | Stats; side-panel tools moved into one persisted Workspace tab with a single navigation bar and Quick Access configuration …
@@ -181,6 +182,7 @@ GET  /api/search?session_id=&q=
 POST /api/maintenance       {session_id,schema,table,op}
 POST /api/import            {session_id,schema,table,columns,rows,on_conflict_do_nothing}
 POST /api/import/csv        multipart: session_id,schema,table,columns(JSON),file,delimiter? — bounded 500-row batches, atomic transaction/savepoint
+POST /api/export/csv       JSON or urlencoded {session_id,schema,table,filter?,order?} — streamed CSV download
 POST /api/alter-table       {session_id,schema,table,op,…} — columns: add_column|drop_column|rename_column|alter_type|set_nullable|set_default|rename_table (types validated via to_regtype, custom enums ok); constraints: add_constraint|drop_constraint; indexes: create_index{index?,unique,method,columns[],include[],where}|drop_index|rename_index (CREATE INDEX takes an unqualified name — always lands in the table's schema); triggers: create_trigger{trigger,timing,events[],for_each,function,update_of[],when}|drop_trigger|enable_trigger|disable_trigger
 Object tabs (functions/sequences/types): view definition + properties; edits run through `POST /api/query` with quoted identifiers — sequence ALTER (increment/min/max/cache/restart/cycle), function CREATE OR REPLACE, enum ADD VALUE, sequence/type RENAME, DROP (functions resolved via `regprocedure`, all overloads confirmed). No new backend endpoint.
 Multi-statement: `POST /api/query` returns `{results[]}` when >1 statement; console limits 200/1000/5000/10000 rows or no limit; no-limit results guarded at 64 MiB with an actionable 413 error; large grids virtualize DOM rows.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -403,5 +404,47 @@ func TestImportCSVIsAtomicAcrossBatches(t *testing.T) {
 	requireErrContains(t, res.Body.String(), res.Code, 400, "duplicate key")
 	if got := len(queryRows(t, h, sid, fmt.Sprintf(`SELECT * FROM %s`, tbl))); got != 0 {
 		t.Fatalf("failed streaming import left %d rows behind", got)
+	}
+}
+
+func TestExportCSVStreamsFilteredTableRows(t *testing.T) {
+	h, sid := newHandler(t)
+	tbl := tempTable(t)
+	execSQL(t, h, sid, fmt.Sprintf(`CREATE TABLE %s (id int, value text)`, tbl))
+	defer execSQL(t, h, sid, fmt.Sprintf(`DROP TABLE %s`, tbl))
+	execSQL(t, h, sid, fmt.Sprintf(`INSERT INTO %s VALUES (1,'comma,quote"'),(2,NULL),(3,E'line\nbreak')`, tbl))
+	r := httptest.NewRequest("POST", "/api/export/csv", strings.NewReader(fmt.Sprintf(`{"session_id":%q,"schema":"public","table":%q,"filter":"id > 1","order":"id DESC"}`, sid, tbl)))
+	r.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	h.ExportCSV(res, r)
+	requireStatus(t, res.Body.String(), res.Code, 200)
+	if got := res.Body.String(); got != "id,value\n3,\"line\nbreak\"\n2,\n" {
+		t.Fatalf("unexpected streamed CSV: %q", got)
+	}
+}
+
+func TestExportCSVSupportsNativeBrowserFormDownload(t *testing.T) {
+	h, sid := newHandler(t)
+	tbl := tempTable(t)
+	execSQL(t, h, sid, fmt.Sprintf(`CREATE TABLE %s (id int, value text)`, tbl))
+	defer execSQL(t, h, sid, fmt.Sprintf(`DROP TABLE %s`, tbl))
+	execSQL(t, h, sid, fmt.Sprintf(`INSERT INTO %s VALUES (1,'alpha'),(2,'beta')`, tbl))
+	form := url.Values{
+		"session_id": {sid},
+		"schema":     {"public"},
+		"table":      {tbl},
+		"filter":     {"id > 1"},
+		"order":      {"id DESC"},
+	}
+	r := httptest.NewRequest("POST", "/api/export/csv", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	res := httptest.NewRecorder()
+	h.ExportCSV(res, r)
+	requireStatus(t, res.Body.String(), res.Code, 200)
+	if got := res.Header().Get("Content-Disposition"); !strings.Contains(got, "attachment") || !strings.Contains(got, tbl+".csv") {
+		t.Fatalf("unexpected download disposition: %q", got)
+	}
+	if got := res.Body.String(); got != "id,value\n2,beta\n" {
+		t.Fatalf("unexpected form CSV: %q", got)
 	}
 }

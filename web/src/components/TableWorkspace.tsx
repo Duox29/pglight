@@ -15,7 +15,7 @@ import type { DialogsApi } from './dialogs'
 import { ColumnDialog, ConstraintDialog, type ColumnValues } from './ColumnEditor'
 import { IndexDialog, TriggerDialog } from './IndexTriggerEditor'
 import { MockDataDialog } from './MockDataDialog'
-import { download, parseCSV, quoteQualified, resultToCSV, resultToInserts } from '@/lib/format'
+import { download, parseCSV, quoteQualified, resultToInserts } from '@/lib/format'
 import { useGridSelection } from '@/hooks/useGridSelection'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from './ui/context-menu'
 
@@ -35,6 +35,7 @@ interface Props {
   onMaintenance: (op: string) => void
   onImport: (columns: string[], rows: unknown[][]) => void
   onImportCSV?: (file: File, columns: string[], delimiter: string) => void
+  onExportTableCSV: (filter: string, order: string) => void
   onOpenErd: () => void
   onAlter: (p: {
     op: string
@@ -208,7 +209,7 @@ export function TableWorkspace(p: Props) {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => t.result && download(resultToCSV(t.result.columns, t.result.rows), `${t.table}.csv`, 'text/csv')}
+              onClick={() => p.onExportTableCSV(t.filter, t.order)}
             >
               <FileDown /> CSV
             </Button>

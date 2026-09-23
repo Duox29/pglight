@@ -361,7 +361,7 @@ const SECTIONS: Section[] = [
           <H>Bulk selection</H>
           <Ul>
             <Li><K>Ctrl/Command-click</K> toggles rows. <K>Shift-click</K> selects a range. Selection is keyed by primary key values, or by serialized row content when the table has no primary key.</Li>
-            <Li>Right-click the grid for the selection menu with the selected count: <K>Export</K> to <K>CSV, JSON,</K> or <K>INSERTs</K>; <K>Copy</K> as CSV; <K>Delete</K> with confirmation.</Li>
+            <Li>The <K>CSV</K> button streams the full filtered and ordered table through the browser download manager; the destination follows browser download settings. Right-click the grid for the selection menu with the selected count: <K>Export</K> to <K>CSV, JSON,</K> or <K>INSERTs</K>; <K>Copy</K> as CSV; <K>Delete</K> with confirmation.</Li>
           </Ul>
           <H>To import CSV</H>
           <Ol>
@@ -384,7 +384,7 @@ const SECTIONS: Section[] = [
           <H>Chọn nhiều dòng</H>
           <Ul>
             <Li><K>Ctrl/Command-click</K> bật tắt từng dòng. <K>Shift-click</K> chọn một đoạn. Khóa chọn theo giá trị primary key, hoặc theo nội dung dòng serialize khi bảng không có primary key.</Li>
-            <Li>Chuột phải lên lưới để mở menu theo số dòng đã chọn: <K>Export</K> sang <K>CSV, JSON</K> hoặc <K>INSERTs</K>; <K>Copy</K> dạng CSV; <K>Delete</K> kèm xác nhận.</Li>
+            <Li>Nút <K>CSV</K> stream toàn bộ bảng theo filter và thứ tự hiện tại qua trình quản lý tải xuống của browser; vị trí lưu theo cài đặt download của browser. Chuột phải lên lưới để mở menu theo số dòng đã chọn: <K>Export</K> sang <K>CSV, JSON</K> hoặc <K>INSERTs</K>; <K>Copy</K> dạng CSV; <K>Delete</K> kèm xác nhận.</Li>
           </Ul>
           <H>Để import CSV</H>
           <Ol>

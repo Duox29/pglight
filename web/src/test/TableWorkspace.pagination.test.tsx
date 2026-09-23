@@ -30,6 +30,7 @@ function renderTable(result: TableTabT['result']) {
       onInsert={vi.fn()}
       onMaintenance={vi.fn()}
       onImport={vi.fn()}
+      onExportTableCSV={vi.fn()}
       onOpenErd={vi.fn()}
       onAlter={vi.fn(async () => undefined)}
       onRenameTable={vi.fn()}

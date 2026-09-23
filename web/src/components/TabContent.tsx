@@ -293,6 +293,9 @@ function TabContentInner(p: TabContentProps) {
             toast.error(e instanceof Error ? e.message : String(e))
           }
         }}
+        onExportTableCSV={async (filter, order) => {
+          apiClient.exportCSV({ session_id: tab.sessionId, schema: tab.schema, table: tab.table, filter, order }, (message) => toast.error(message))
+        }}
         onOpenErd={() => p.openErd(tab.schema, tab.sessionId)}
         onAlter={(pl) => p.table.alterTable(tab.id, pl)}
         onRenameTable={() => p.table.renameTable(tab.id)}
