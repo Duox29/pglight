@@ -27,5 +27,20 @@ services:
       timeout: 3s
       retries: 20
 
+  ssh-bastion:
+    build: ./ssh-bastion
+    container_name: pglight-ssh-bastion
+    restart: unless-stopped
+    environment:
+      SSH_TEST_USER: tester
+      SSH_TEST_PASSWORD: pglight-test
+    ports:
+      - "${PGLIGHT_SSH_TEST_PORT:-2222}:22"
+    depends_on:
+      pg14:
+        condition: service_healthy
+    # pg14 and this bastion share the Compose network, so the target hostname
+    # from the app's SSH profile is simply "pg14".
+
 volumes:
   pg14data:

@@ -564,10 +564,10 @@ it calls `os.Exit`, which would kill the runner.
 go test -count=1 -run TestIntegration ./test/  # HTTP journeys only
 ```
 
-## Test database (docker/postgres:14-alpine)
+## Test database and SSH bastion (docker/postgres:14-alpine)
 
 ```sh
-docker compose -f docker/docker-compose.yml up -d   # pg14 + seed demo data
+docker compose -f docker/docker-compose.yml up -d --build # pg14 + seed data + SSH bastion
 docker compose -f docker/docker-compose.yml down    # stop (keeps data)
 docker compose -f docker/docker-compose.yml down -v # reset + reseed
 docker exec pglight-pg14 psql -U postgres -d postgres -c "ANALYZE;"  # refresh planner stats after reseed (reltuples starts at -1; TestExplorerBasics reads authors.est_rows)
@@ -575,6 +575,16 @@ docker exec pglight-pg14 psql -U postgres -d postgres -c "ANALYZE;"  # refresh p
 
 Preconfigured credentials (match the UI defaults, just type the password):
 `host=localhost port=5432 user=postgres password=postgres dbname=postgres`.
+
+The Compose stack also provides a password-authenticated SSH bastion for testing
+saved-profile tunnels. In Workspace → Connections → Advanced, set SSH host
+`localhost`, port `2222`, user `tester`, password `pglight-test`; set the
+PostgreSQL destination host to `pg14`, port `5432`, and use the normal test DB
+credentials above. The database destination is resolved from inside the Docker
+network. First use reports the host fingerprint: verify the RSA fingerprint
+locally with `ssh-keyscan -p 2222 -t rsa localhost | ssh-keygen -lf - -E sha256`,
+then pin that fingerprint on the profile and test/connect again. To change the
+published SSH port, set `PGLIGHT_SSH_TEST_PORT` before starting Compose.
 
 `docker/init.sql` seeds tables with FK (`authors` → `books` → `reviews`),
 a view (`published_books`), matview (`author_stats`), function
