@@ -720,7 +720,9 @@ func (h *Handler) TableChanges(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for column, value := range before {
-			key[column] = value
+			if _, isKey := key[column]; !isKey {
+				key[column] = value
+			}
 		}
 		sql, args, buildErr := buildUpdate(qt, changes, key, udts)
 		if buildErr != nil {
@@ -745,7 +747,9 @@ func (h *Handler) TableChanges(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for column, value := range before {
-			key[column] = value
+			if _, isKey := key[column]; !isKey {
+				key[column] = value
+			}
 		}
 		sql, args, buildErr := buildDelete(qt, key, udts)
 		if buildErr != nil {

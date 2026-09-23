@@ -9,6 +9,26 @@ export function quoteQualified(schema: string, table: string): string {
   return `${quoteIdent(schema)}.${quoteIdent(table)}`
 }
 
+export function formatTableChangesPreview(
+  schema: string,
+  table: string,
+  changes: {
+    updates: { key: Record<string, unknown>; before: Record<string, unknown>; changes: Record<string, unknown> }[]
+    inserts: Record<string, unknown>[]
+    deletes: { key: Record<string, unknown>; before: Record<string, unknown> }[]
+  },
+): string[] {
+  const target = quoteQualified(schema, table)
+  const predicates = (record: Record<string, unknown>) => Object.entries(record)
+    .map(([column, value]) => `${quoteIdent(column)} IS NOT DISTINCT FROM ${quoteLiteral(value)}`)
+    .join(' AND ')
+  return [
+    ...changes.updates.map((item) => `UPDATE ${target} SET ${Object.entries(item.changes).map(([column, value]) => `${quoteIdent(column)} = ${quoteLiteral(value)}`).join(', ')} WHERE ${predicates({ ...item.before, ...item.key })};`),
+    ...changes.inserts.map((item) => `INSERT INTO ${target} (${Object.keys(item).map(quoteIdent).join(', ')}) VALUES (${Object.values(item).map((value) => quoteLiteral(value)).join(', ')});`),
+    ...changes.deletes.map((item) => `DELETE FROM ${target} WHERE ${predicates({ ...item.before, ...item.key })};`),
+  ]
+}
+
 type StreamFileHandle = {
   createWritable: () => Promise<{ write: (data: Uint8Array) => Promise<void>; close: () => Promise<void> }>
 }

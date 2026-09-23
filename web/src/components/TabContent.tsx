@@ -137,7 +137,9 @@ function TabContentInner(p: TabContentProps) {
   if (tab.kind === 'table') {
     return (
       <TableWorkspace
+        key={tab.id}
         tab={tab}
+        primaryKeys={pkOf(tab)}
         onSubtab={(s) => {
           p.updateTab(tab.id, (x) => (x.kind === 'table' ? { ...x, subtab: s } : x))
           if (s !== 'data') p.table.loadTableMeta(tab.sessionId, tab.id, tab.schema, tab.table)
@@ -158,37 +160,32 @@ function TabContentInner(p: TabContentProps) {
           }
           const v = await p.dialogs.promptNullable({
             title: `Edit ${col}`,
-            description: 'Leave empty to keep the value as-is, or Set NULL for NULL',
+            description: 'Enter a value (including empty text), or choose Set NULL for NULL.',
             defaultValue: orig[col] == null ? '' : String(orig[col]),
           })
           if (v == null) return
           const value = typeof v === 'object' ? null : v
-          const where: Record<string, unknown> = {}
-          for (const k of keys) where[k] = orig[k]
-          p.table.rowOp(tab.id, 'update', { [col]: value }, where, true)
+          return value
         }}
-        onDeleteRow={async (orig) => {
+        onDeleteRow={async () => {
           const keys = pkOf(tab)
           if (!keys.length) {
             toast.error('No primary key — deletion is disabled for this table')
-            return
+            return false
           }
           const ok = await p.dialogs.confirm({
-            title: 'Delete row?',
-            description: `This will delete this row from ${tab.schema}.${tab.table}.`,
-            confirmText: 'Delete',
+            title: 'Stage row deletion?',
+            description: `The row remains unchanged until pending changes are applied to ${tab.schema}.${tab.table}.`,
+            confirmText: 'Stage delete',
             danger: true,
           })
-          if (!ok) return
-          const where: Record<string, unknown> = {}
-          for (const k of keys) where[k] = orig[k]
-          p.table.rowOp(tab.id, 'delete', {}, where, true)
+          return ok
         }}
         onCopyInsert={(orig) => {
           p.explorer.copyName(resultToInserts(Object.keys(orig), [Object.values(orig)], `${qi(tab.schema)}.${qi(tab.table)}`))
         }}
         onExportRows={(rows, fmt) => {
-          if (!rows.length) return
+          if (!rows.length) return false
           const cols = tab.result?.columns ?? Object.keys(rows[0])
           const types = tab.result?.types
           const matrix = rows.map((r) => cols.map((c) => r[c]))
@@ -203,54 +200,61 @@ function TabContentInner(p: TabContentProps) {
           p.explorer.copyName(resultToCSV(cols, rows.map((r) => cols.map((c) => r[c]))))
         }}
         onDeleteRows={async (rows) => {
-          if (!rows.length) return
+          if (!rows.length) return false
           if (!tab.sessionId) {
             toast.error('Session closed — reconnect to delete rows')
-            return
+            return false
           }
           const keys = pkOf(tab)
           if (!keys.length) {
             toast.error('No primary key — deletion is disabled for this table')
-            return
+            return false
           }
-          const ok = await p.dialogs.confirm({
-            title: `Delete ${rows.length} row${rows.length === 1 ? '' : 's'}?`,
-            description: `This will delete ${rows.length} row${rows.length === 1 ? '' : 's'} from ${tab.schema}.${tab.table}.`,
-            confirmText: 'Delete',
+          return p.dialogs.confirm({
+            title: `Stage deletion of ${rows.length} row${rows.length === 1 ? '' : 's'}?`,
+            description: `The rows remain unchanged until pending changes are applied to ${tab.schema}.${tab.table}.`,
+            confirmText: 'Stage delete',
             danger: true,
           })
-          if (!ok) return
-          try {
-            // PK-only predicates; the server deletes them in one
-            // transaction and aborts on the first non-unique match.
-            const where = rows.map((r) => Object.fromEntries(keys.map((k) => [k, r[k]])))
-            const j = await apiClient.batchDelete({ session_id: tab.sessionId, schema: tab.schema, table: tab.table, where })
-            if (j.error) toast.error(j.error)
-            else {
-              p.markTxn(tab.sessionId, !!j.in_txn)
-              toast.success(`Deleted ${j.deleted ?? rows.length} row${(j.deleted ?? rows.length) === 1 ? '' : 's'}`)
-            }
-            p.table.loadTablePage(tab.sessionId, tab.id, tab.schema, tab.table, tab.limit, tab.offset, tab.filter, tab.order)
-          } catch (e) {
-            toast.error(e instanceof Error ? e.message : String(e))
-            p.table.loadTablePage(tab.sessionId, tab.id, tab.schema, tab.table, tab.limit, tab.offset, tab.filter, tab.order)
-          }
         }}
         onInsert={async () => {
-          if (!tab.result) return
+          if (!tab.result) return undefined
           const vals = await p.dialogs.form({
             title: `Insert into ${tab.schema}.${tab.table}`,
             description: 'Empty = skip · per-field N button = NULL',
             fields: tab.result.columns.map((c) => ({ key: c, label: c, allowNull: true })),
             submitText: 'Insert',
           })
-          if (!vals) return
+          if (!vals) return undefined
           const clean: Record<string, unknown> = {}
           for (const [k, v] of Object.entries(vals)) {
             if (v === null) clean[k] = null
             else if (v !== '') clean[k] = v
           }
-          p.table.rowOp(tab.id, 'insert', clean, {})
+          if (!Object.keys(clean).length) {
+            toast.error('Enter at least one value to stage an insert')
+            return undefined
+          }
+          return clean
+        }}
+        onApplyChanges={async (changes) => {
+          try {
+            const txn = p.txnFor(tab.sessionId)
+            if (!txn.autocommit && !txn.inTxn) {
+              const started = await apiClient.txn(tab.sessionId, 'begin')
+              if (started.error) { toast.error(started.error); return false }
+              p.markTxn(tab.sessionId, true)
+            }
+            const j = await apiClient.tableChanges({ session_id: tab.sessionId, schema: tab.schema, table: tab.table, ...changes })
+            if (j.error) { toast.error(j.error); return false }
+            p.markTxn(tab.sessionId, !!j.in_txn)
+            toast.success(j.in_txn ? `Applied ${j.rows_affected ?? 0} changes to open transaction` : `Saved ${j.rows_affected ?? 0} changes`)
+            p.table.loadTablePage(tab.sessionId, tab.id, tab.schema, tab.table, tab.limit, tab.offset, tab.filter, tab.order)
+            return true
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : String(e))
+            return false
+          }
         }}
         onMaintenance={async (op) => {
           const ok = await p.dialogs.confirm({

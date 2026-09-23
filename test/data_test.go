@@ -468,4 +468,8 @@ func TestTableChangesApplyMixedOperationsAtomically(t *testing.T) {
 	execSQL(t, h, sid, fmt.Sprintf(`UPDATE %s SET v='external' WHERE id=1`, tbl))
 	code, body = call(fmt.Sprintf(`{"session_id":%q,"schema":"public","table":%q,"updates":[{"key":{"id":1},"before":{"id":1,"v":"A"},"changes":{"v":"overwrite"}}]}`, sid, tbl))
 	requireErrContains(t, body, code, 409, "expected exactly 1")
+	code, body = call(fmt.Sprintf(`{"session_id":%q,"schema":"public","table":%q,"updates":[{"key":{"id":1},"before":{"id":3,"v":"c"},"changes":{"v":"wrong row"}}]}`, sid, tbl))
+	requireErrContains(t, body, code, 409, "expected exactly 1")
+	rows = queryRows(t, h, sid, fmt.Sprintf(`SELECT id,v FROM %s WHERE id=3`, tbl))
+	requireDeep(t, "", "mismatched before data cannot redirect key", rows, [][]any{{3, "c"}})
 }

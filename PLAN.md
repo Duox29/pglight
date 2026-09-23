@@ -69,7 +69,8 @@ Frontend (`web/`):
 - [x] Session survive-restart: per-session credentials (`session-conns`), boot 1:1 reconnect so tabs keep their own DB (dead sessions badged, never collapsed onto another DB), global 401 hook + 30s/focus heartbeat with one-shot auto-retry, per-session Reconnect / Reconnect-all in Connections, tab ids remapped on reconnect.
 - [x] Workspace tab: History | Snippets | Aliases | Server | Activity | Locks | Stats | Connections | Appearance | Settings | Shortcuts | Logs, with one navigation bar; Quick Access uses a per-section toggle list for Connection Bar visibility (Connections/Settings by default, while respecting user changes) and database views retain auto-refresh for Activity/Locks. Connections provides a compact Simple form plus an Advanced mode for optional profile metadata and PostgreSQL options; connection fields expose contextual tooltips. Appearance is a peer workspace view with app-wide Dark/Light themes, Dark/Light/Ocean presets, live custom color pickers for background/text/panel/accent/border, CSS-token synchronization across the UI and SQL editor, and persisted reload-safe preferences.
 - [x] ERD tab per schema: SVG FK graph (click node → open table).
-- [x] Import CSV into open table (multipart file upload, `.tsv` forced to tab delimiter, bounded server batches, matching-header detection + ragged-width reject), Export as INSERT statements (identifier-quoted, typed literals: NULL/TRUE/FALSE/numbers/JSON/arrays), right-click opens the row menu (Copy cell value / Export / Copy / Delete — never `preventDefault` on the cell, or Radix skips open). CSV export quotes headers, NULL as empty, objects as JSON.
+- [x] Import/export transfer: multipart CSV upload in bounded server batches; full filtered/ordered table CSV streams from PostgreSQL to a file; selection exports remain for CSV/JSON/INSERT.
+- [x] Table editor stages cell updates, row/bulk deletes, and inserts; previews SQL, supports cell/row undo and discard, then applies mixed changes atomically with original-value conflict detection.
 - [x] Grid selection flow (shared `useGridSelection`, Open Data + query `DataGrid[selectable]`): plain left-click selects exactly one row, ctrl/meta toggles, shift ranges from anchor, right-click keeps multi-selection when inside it; query grids offer Copy cell value / Copy rows / Export selected CSV|JSON.
 - [x] Data-region scrolling: main grids, tables, and long lists (including aliases) stay inside their pane with `min-h-0`/`flex-1` scroll owners, sticky headers, internal horizontal scrolling, and virtualized large `DataGrid` results; Activity cancel/kill actions live in the grid action column, and floating scrollbar geometry is frame-scheduled per active container.
 - [x] Async safety: `api()` throws `ApiError` on transport/invalid-JSON (backend `{error}` JSON still resolved per contract); `runQuery` uses try/finally so the running flag always clears; txn/explorer/table/row/alter/cancel/maintenance/import paths surface transport errors via toast or tab error; reconnect-all is per-session guarded; browser/ERD/restore loads carry a token so late responses cannot overwrite newer tabs; search palette drops stale responses by sequence.
@@ -80,7 +81,8 @@ Frontend (`web/`):
 - [ ] Read-only connection mode, enforced by the backend session rather than only disabling UI actions.
 - [ ] Schema diff between databases/sessions with a reviewable migration script preview.
 - [ ] `pg_dump`/`pg_restore` backup and restore with progress, cancellation, and explicit overwrite/target confirmation.
-- [ ] Data editor: staged edits + Apply/Rollback, JSON cell editor, column filters/sort UI, duplicate row, fill-down.
+- [x] Data editor staged edits + Apply/Discard and SQL preview, atomic mixed update/insert/delete batches, original-value concurrency checks.
+- [ ] Data editor JSON cell editor, column filters/sort UI, duplicate row, fill-down, clipboard paste staging.
 - [ ] Visual EXPLAIN (plan tree/graph, buffers/timing where available), plan compare.
 - [ ] Row-level security / privilege editor (GRANT wizard), role membership editor.
 - [ ] Charts from result sets, query plan history, slow-query panel (`pg_stat_statements` when installed).
@@ -346,7 +348,7 @@ locked-vault manual-password fallback), `Explorer` (databases → schemas →
 tables/views/matviews/foreign/functions/sequences/types + server objects),
 `QueryConsole` (multi-result, read-only Explain plan for whole or selected SQL, formatter, per-result
 CSV/JSON/INSERT export), `TableWorkspace` (Data/Columns/DDL/Indexes/
-Constraints/Triggers/Stats sub-tabs, cell edit/duplicate/delete, CSV import,
+Constraints/Triggers/Stats sub-tabs, staged cell edits/insert/delete, CSV import,
 Generate mock data (`MockDataDialog`: Simple zero-config vs Advanced
 per-column grid with Generator select + params, NULL % and Unique switch,
 pk/fk/unique/not-null badges with ref-target tooltips, compare-constraint
@@ -371,7 +373,8 @@ heartbeat + txn map + autocommit), `useTabs` (tab model, open/close/remap,
 last-session restore), `useSplit` (2-pane split state), `useExplorer` (tree + schema/table actions),
 `useQueryRunner` (run/cancel/explain + history/snippets), `useTableOps`
 (table data/meta/row/alter), `useObjectOps` (function/sequence/type DDL),
-`useGridSelection` (shared single/toggle/range + right-click selection);
+`useGridSelection` (shared single/toggle/range + right-click selection),
+`useStagedTableChanges` (coalesced staged updates/inserts/deletes + undo);
 shared pure helpers (`qi`, tab-id builders, `slimTab`/restore, `pkOf`, `DDL_RE`) in
 `lib/tabs.ts`, SQL formatting in `lib/format.ts`, editor completion in
 `lib/complete.ts` + `lib/schemaCache.ts`.

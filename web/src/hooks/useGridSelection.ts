@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 export interface CtxCell {
   value: unknown
   col: string
+  row?: unknown[]
 }
 
 const emptySelection = new Set<string>()
@@ -66,8 +67,8 @@ export function useGridSelection(pageRows: unknown[][], rowKey: (r: unknown[], i
     else anchor.current = ri
   }
 
-  const handleCellContextMenu = (value: unknown, col: string) => {
-    setCtxCell({ value, col })
+  const handleCellContextMenu = (value: unknown, col: string, row?: unknown[]) => {
+    setCtxCell(row ? { value, col, row } : { value, col })
   }
 
   const clear = () => {

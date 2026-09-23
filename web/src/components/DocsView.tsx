@@ -353,10 +353,11 @@ const SECTIONS: Section[] = [
           <P>The header shows the table name with <K>schema, total rows,</K> and <K>owner</K>. Use the <K>WHERE</K> box (for example <K>id &gt; 10</K>) and the <K>ORDER</K> box (for example <K>id DESC</K>), then <K>Apply</K>. Page with <K>Previous</K> and <K>Next</K>. The meta line shows row count, total, duration, and the edit hint.</P>
           <H>To edit, insert, or delete a row</H>
           <Ol>
-            <Li>Double-click a cell to edit it. Use the <K>Set NULL</K> button for NULL. Editing requires a primary key. A NULL primary key value blocks the edit. Single edits and deletes are PK-scoped and the server refuses them unless exactly one row matches. The server refuses UPDATE and DELETE without a key.</Li>
+            <Li>Double-click a cell to stage an edit. Changed cells are highlighted; use the context menu to undo a staged cell. The <K>Row</K> and delete actions also stage changes. Staging requires a non-NULL primary key.</Li>
             <Li>Single-click selects. Right-click a cell copies its value.</Li>
-            <Li>Use the row action buttons to copy the row as INSERT or to delete the row with confirmation.</Li>
-            <Li>Use the <K>Row</K> button to open the insert form. Empty means skip the column. The per-field <K>N</K> toggle means NULL.</Li>
+            <Li>Use the row action buttons to copy the row as INSERT or stage its deletion. Bulk delete also stages rows after confirmation.</Li>
+            <Li>Use the <K>Row</K> button to stage an insert. Empty means skip the column. The per-field <K>N</K> toggle means NULL.</Li>
+            <Li>Review pending changes with <K>Preview SQL</K>, then use <K>Apply changes</K> to commit the batch atomically or <K>Discard all</K>. The server checks original row values and reports conflicts if another writer changed a row.</Li>
           </Ol>
           <H>Bulk selection</H>
           <Ul>
@@ -376,10 +377,11 @@ const SECTIONS: Section[] = [
           <P>Header hiển thị tên bảng kèm <K>schema, tổng rows</K> và <K>owner</K>. Dùng ô <K>WHERE</K> (ví dụ <K>id &gt; 10</K>) và ô <K>ORDER</K> (ví dụ <K>id DESC</K>), rồi chọn <K>Apply</K>. Phân trang bằng <K>Previous</K> và <K>Next</K>. Dòng meta hiển thị số dòng, tổng, thời gian và gợi ý sửa.</P>
           <H>Để sửa, thêm hoặc xóa dòng</H>
           <Ol>
-            <Li>Double-click một cell để sửa. Dùng nút <K>Set NULL</K> cho NULL. Sửa cần primary key. Giá trị primary key NULL sẽ chặn sửa. Sửa/xóa một dòng theo khóa chính và server từ chối trừ khi khớp đúng một dòng. Server từ chối UPDATE và DELETE không khóa.</Li>
+            <Li>Double-click một cell để tạo thay đổi chờ. Ô thay đổi được tô màu; dùng menu chuột phải để hoàn tác ô. Nút <K>Row</K> và các nút xóa cũng tạo thay đổi chờ. Cần primary key khác NULL.</Li>
             <Li>Single-click để chọn. Chuột phải lên cell để copy giá trị.</Li>
-            <Li>Dùng nút actions trên dòng để copy dòng dạng INSERT hoặc xóa dòng kèm xác nhận.</Li>
-            <Li>Dùng nút <K>Row</K> để mở form insert. Ô trống nghĩa là bỏ qua cột. Nút <K>N</K> từng ô nghĩa là NULL.</Li>
+            <Li>Dùng nút actions trên dòng để copy dòng dạng INSERT hoặc thêm thao tác xóa vào danh sách chờ. Xóa nhiều dòng cũng được xác nhận trước khi thêm.</Li>
+            <Li>Dùng nút <K>Row</K> để tạo insert chờ. Ô trống nghĩa là bỏ qua cột. Nút <K>N</K> từng ô nghĩa là NULL.</Li>
+            <Li>Xem <K>Preview SQL</K>, sau đó chọn <K>Apply changes</K> để áp dụng nguyên tử hoặc <K>Discard all</K>. Server kiểm tra giá trị dòng ban đầu và báo xung đột nếu có thay đổi đồng thời.</Li>
           </Ol>
           <H>Chọn nhiều dòng</H>
           <Ul>

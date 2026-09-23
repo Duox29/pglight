@@ -15,8 +15,10 @@ import type { DialogsApi } from './dialogs'
 import { ColumnDialog, ConstraintDialog, type ColumnValues } from './ColumnEditor'
 import { IndexDialog, TriggerDialog } from './IndexTriggerEditor'
 import { MockDataDialog } from './MockDataDialog'
-import { download, parseCSV, quoteQualified, resultToInserts } from '@/lib/format'
+import { download, formatTableChangesPreview, parseCSV, quoteQualified, resultToInserts } from '@/lib/format'
 import { useGridSelection } from '@/hooks/useGridSelection'
+import { useStagedTableChanges } from '@/hooks/useStagedTableChanges'
+import type { TableChangesPayload } from '@/lib/api'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from './ui/context-menu'
 
 interface Props {
@@ -25,13 +27,15 @@ interface Props {
   onFilterChange: (filter: string, order: string) => void
   onApply: () => void
   onPage: (d: number) => void
-  onEditCell: (col: string, orig: Record<string, unknown>) => void
-  onDeleteRow: (orig: Record<string, unknown>) => void
+  primaryKeys: string[]
+  onEditCell: (col: string, orig: Record<string, unknown>) => Promise<unknown | undefined>
+  onDeleteRow: (orig: Record<string, unknown>) => Promise<boolean>
   onCopyInsert: (orig: Record<string, unknown>) => void
   onExportRows: (rows: Record<string, unknown>[], fmt: 'csv' | 'json' | 'sql') => void
   onCopyRows: (rows: Record<string, unknown>[]) => void
-  onDeleteRows: (rows: Record<string, unknown>[]) => void
-  onInsert: () => void
+  onDeleteRows: (rows: Record<string, unknown>[]) => Promise<boolean>
+  onInsert: () => Promise<Record<string, unknown> | undefined>
+  onApplyChanges: (changes: Pick<TableChangesPayload, 'updates' | 'inserts' | 'deletes'>) => Promise<boolean>
   onMaintenance: (op: string) => void
   onImport: (columns: string[], rows: unknown[][]) => void
   onImportCSV?: (file: File, columns: string[], delimiter: string) => void
@@ -74,6 +78,7 @@ export function TableWorkspace(p: Props) {
   const [idxDlg, setIdxDlg] = useState(false)
   const [trgDlg, setTrgDlg] = useState(false)
   const [mockOpen, setMockOpen] = useState(false)
+  const staged = useStagedTableChanges(t.id)
   const colNames = (t.cols ?? []).map((c) => String(c['name'] ?? '')).filter(Boolean)
   const pkCols = (t.cols ?? [])
     .filter((c) => String(c['pk'] ?? '').toLowerCase() === 't' || c['pk'] === true)
@@ -96,6 +101,53 @@ export function TableWorkspace(p: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t.id, t.offset, t.result])
   const selRecs = pageRows.filter((r, i) => sel.has(rowKey(r, i))).map((r) => Object.fromEntries(pageCols.map((c, i) => [c, r[i]])))
+
+  const rowPrimaryKey = (row: Record<string, unknown>) => Object.fromEntries(p.primaryKeys.map((column) => [column, row[column]]))
+  const contextRow = gridSel.ctxCell?.row ? Object.fromEntries(pageCols.map((column, index) => [column, gridSel.ctxCell!.row![index]])) : null
+  const contextKey = contextRow ? rowPrimaryKey(contextRow) : null
+  const contextUpdate = contextKey ? staged.pending.updates.find((item) => JSON.stringify(item.key) === JSON.stringify(contextKey)) : undefined
+  const contextHasCellChange = !!contextUpdate && !!gridSel.ctxCell?.col && Object.prototype.hasOwnProperty.call(contextUpdate.changes, gridSel.ctxCell.col)
+  const contextHasPendingChange = !!contextKey && (
+    !!contextUpdate || staged.pending.deletes.some((item) => JSON.stringify(item.key) === JSON.stringify(contextKey))
+  )
+  const stageCellEdit = async (column: string, row: Record<string, unknown>) => {
+    const key = rowPrimaryKey(row)
+    if (!p.primaryKeys.length || Object.values(key).some((value) => value == null)) {
+      toast.error('A non-null primary key is required to stage this edit')
+      return
+    }
+    const value = await p.onEditCell(column, row)
+    if (value !== undefined) staged.stageUpdate({ key, before: row, column, value })
+  }
+  const stageRowDelete = async (row: Record<string, unknown>) => {
+    const key = rowPrimaryKey(row)
+    if (!p.primaryKeys.length || Object.values(key).some((value) => value == null)) {
+      toast.error('A non-null primary key is required to stage this delete')
+      return
+    }
+    if (await p.onDeleteRow(row)) staged.stageDelete({ key, before: row })
+  }
+  const stageSelectedDelete = async () => {
+    if (!await p.onDeleteRows(selRecs)) return
+    for (const row of selRecs) {
+      const key = rowPrimaryKey(row)
+      if (p.primaryKeys.length && Object.values(key).every((value) => value != null)) staged.stageDelete({ key, before: row })
+    }
+  }
+  const applyPending = async () => {
+    const ok = await p.dialogs.confirm({
+      title: `Apply ${staged.pendingCount} pending change${staged.pendingCount === 1 ? '' : 's'}?`,
+      description: 'The changes are applied as one atomic database operation.',
+      confirmText: 'Apply',
+    })
+    if (ok && await p.onApplyChanges(staged.pending)) staged.discard()
+  }
+  const previewPending = async () => {
+    const statements = formatTableChangesPreview(t.schema, t.table, staged.pending)
+    const visible = statements.slice(0, 20).join('\n\n')
+    const omitted = statements.length > 20 ? `\n\n… ${statements.length - 20} more statements` : ''
+    await p.dialogs.confirm({ title: 'SQL preview', description: visible + omitted, confirmText: 'Close' })
+  }
 
   const startImport = () => fileRef.current?.click()
 
@@ -203,9 +255,17 @@ export function TableWorkspace(p: Props) {
             >
               Apply
             </Button>
-            <Button size="sm" variant="secondary" onClick={p.onInsert}>
+            <Button size="sm" variant="secondary" onClick={async () => { const values = await p.onInsert(); if (values) staged.stageInsert(values) }}>
               <Plus /> Row
             </Button>
+            {staged.pendingCount > 0 && (
+              <>
+                <Badge variant="secondary">{staged.pendingCount} pending</Badge>
+                <Button size="sm" variant="ghost" onClick={() => void previewPending()}>Preview SQL</Button>
+                <Button size="sm" variant="secondary" onClick={applyPending}>Apply changes</Button>
+                <Button size="sm" variant="ghost" onClick={staged.discard}>Discard all</Button>
+              </>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -302,17 +362,25 @@ export function TableWorkspace(p: Props) {
                     {t.result.rows.map((r, ri) => {
                       const orig = Object.fromEntries(t.result!.columns.map((c, i) => [c, r[i]]))
                       const k = rowKey(r, ri)
+                      const primaryKey = rowPrimaryKey(orig)
+                      const update = staged.pending.updates.find((item) => JSON.stringify(item.key) === JSON.stringify(primaryKey))
+                      const deleted = staged.pending.deletes.some((item) => JSON.stringify(item.key) === JSON.stringify(primaryKey))
                       return (
                         <TableRow
                           key={ri}
                           data-state={sel.has(k) ? 'selected' : undefined}
+                          className={deleted ? 'opacity-50 line-through' : undefined}
                           onContextMenu={() => gridSel.handleRowContextMenu(ri, r)}
                         >
-                          {r.map((c, ci) => (
+                          {r.map((c, ci) => {
+                            const column = t.result!.columns[ci]
+                            const hasChange = !!update && Object.prototype.hasOwnProperty.call(update.changes, column)
+                            const value = hasChange ? update.changes[column] : c
+                            return (
                               <TableCell
                                 key={ci}
-                                className="cursor-text bg-sky-950/30"
-                                onDoubleClick={() => p.onEditCell(t.result!.columns[ci], orig)}
+                                className={`cursor-text ${hasChange ? 'bg-amber-950/40' : 'bg-sky-950/30'}`}
+                                onDoubleClick={() => { if (!deleted) void stageCellEdit(column, orig) }}
                                 onClick={(e) => {
                                   if (e.detail > 1) return
                                   gridSel.handleCellClick(e, ri, r)
@@ -321,13 +389,14 @@ export function TableWorkspace(p: Props) {
                                 // NEVER preventDefault — that would stop the
                                 // Radix menu from opening (see useGridSelection).
                                 onContextMenu={() => {
-                                  gridSel.handleCellContextMenu(c, t.result!.columns[ci])
+                                  gridSel.handleCellContextMenu(c, column, r)
                                   gridSel.handleRowContextMenu(ri, r)
                                 }}
                               >
-                                {c == null ? <span className="italic text-muted-foreground">NULL</span> : String(c).slice(0, 200)}
+                                {value == null ? <span className="italic text-muted-foreground">NULL</span> : String(value).slice(0, 200)}
                               </TableCell>
-                          ))}
+                            )
+                          })}
                           <TableCell>
                             <div className="flex gap-1">
                               <Tip content="Copy row as INSERT">
@@ -337,8 +406,8 @@ export function TableWorkspace(p: Props) {
                               </Tip>
                               <Tip content={hasIdentity ? 'Delete row' : 'No primary key — deletion disabled'}>
                                 <span className="inline-flex">
-                                  <Button size="sm" variant="ghost" aria-label="Delete row" disabled={!hasIdentity} onClick={() => p.onDeleteRow(orig)}>
-                                    <Trash2 className="h-3 w-3" />
+                                  <Button size="sm" variant="ghost" aria-label={deleted ? 'Undo delete' : 'Delete row'} disabled={!hasIdentity} onClick={() => deleted ? staged.undoRow(primaryKey) : void stageRowDelete(orig)}>
+                                    {deleted ? <RefreshCw className="h-3 w-3" /> : <Trash2 className="h-3 w-3" />}
                                   </Button>
                                 </span>
                               </Tip>
@@ -347,6 +416,12 @@ export function TableWorkspace(p: Props) {
                         </TableRow>
                       )
                     })}
+                    {staged.pending.inserts.map((row, index) => (
+                      <TableRow key={`pending-insert-${index}`} className="bg-emerald-950/30">
+                        {pageCols.map((column) => <TableCell key={column}>{row[column] == null ? <span className="italic text-muted-foreground">NULL</span> : String(row[column]).slice(0, 200)}</TableCell>)}
+                        <TableCell><Button size="sm" variant="ghost" aria-label="Undo inserted row" onClick={() => staged.undoInsert(index)}><RefreshCw className="h-3 w-3" /></Button></TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
                 </div>
@@ -373,9 +448,13 @@ export function TableWorkspace(p: Props) {
                   Copy {selRecs.length ? `${selRecs.length} row${selRecs.length === 1 ? '' : 's'}` : 'rows'}
                 </ContextMenuItem>
                 <ContextMenuSeparator />
-                <ContextMenuItem disabled={!selRecs.length || !hasIdentity} className="text-red-400 focus:text-red-400" onSelect={() => p.onDeleteRows(selRecs)}>
+                <ContextMenuItem disabled={!selRecs.length || !hasIdentity} className="text-red-400 focus:text-red-400" onSelect={() => void stageSelectedDelete()}>
                   {hasIdentity ? 'Delete' : 'Delete (no primary key)'}
                 </ContextMenuItem>
+                <ContextMenuItem disabled={!contextHasCellChange || !contextKey || !gridSel.ctxCell} onSelect={() => {
+                  if (contextKey && gridSel.ctxCell) staged.undoCell(contextKey, gridSel.ctxCell.col)
+                }}>Undo staged cell</ContextMenuItem>
+                <ContextMenuItem disabled={!contextHasPendingChange || !contextKey} onSelect={() => { if (contextKey) staged.undoRow(contextKey) }}>Undo staged row</ContextMenuItem>
                 <ContextMenuItem disabled={!selRecs.length} onSelect={gridSel.clear}>
                   Clear selection
                 </ContextMenuItem>

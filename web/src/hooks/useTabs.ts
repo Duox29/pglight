@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { api, q } from '../lib/api'
 import { BROWSER_DEFS, DEFAULT_SQL, isWorkspaceView, readStoredTabs, shortSid, slimTab } from '../lib/tabs'
 import type { ObjectKind, SideView, StoredTab, Tab } from '../types'
+import { clearStagedTableChanges, remapStagedTableChanges } from './useStagedTableChanges'
 
 export interface TabLoaders {
   loadTablePage: (sid: string, id: string, schema: string, table: string, limit: number, offset: number, filter: string, order: string) => Promise<void>
@@ -25,6 +26,15 @@ export function useTabs() {
   // writing into tab state so a late response cannot overwrite newer tabs.
   const loadSeq = useRef(0)
   const tabSeq = useRef(0)
+  const observedTabIds = useRef(new Set<string>())
+
+  useEffect(() => {
+    const currentIds = new Set(tabs.map((tab) => tab.id))
+    for (const oldId of observedTabIds.current) {
+      if (!currentIds.has(oldId)) clearStagedTableChanges(oldId)
+    }
+    observedTabIds.current = currentIds
+  }, [tabs])
 
   const cur = tabs.find((t) => t.id === activeTab) ?? null
   const updateTab = useCallback((id: string, fn: (t: Tab) => Tab) => {
@@ -121,6 +131,7 @@ export function useTabs() {
       const pairs = tabs
         .filter((t) => (t as { sessionId?: string }).sessionId === oldSid && newId(t) !== t.id)
         .map((t) => [t.id, newId(t)] as const)
+      for (const [oldId, newIdValue] of pairs) remapStagedTableChanges(oldId, newIdValue)
       setTabs((prev) =>
         prev.map((t) => {
           if ((t as { sessionId?: string }).sessionId !== oldSid || !('sessionId' in t)) return t

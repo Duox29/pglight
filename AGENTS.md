@@ -25,7 +25,7 @@
   `components/erd/`) + Sonner toasts + promise-based dialog host
   (`dialogs.tsx`: `confirm`/`prompt`/`promptNullable`/`form`).
   Domain logic in `hooks/` (`useSessions|useTabs|useSplit|useExplorer|`
-  `useQueryRunner|useTableOps|useObjectOps|useGridSelection`); tab kinds
+  `useQueryRunner|useTableOps|useObjectOps|useGridSelection|useStagedTableChanges`); tab kinds
   `query|table|browser|erd|docs|object` (`types.ts`, helpers in `lib/tabs.ts`).
   Build output `web/dist` is **git-ignored** (local build artifact) — `main.go` embeds it.
 - **Test DB**: `docker/` → postgres:14-alpine + `init.sql` seed.
@@ -151,6 +151,7 @@ is git-ignored: rebuild it, never commit it).
    callbacks out — no cross-component imports. Domain logic lives in `hooks/`
    (`useSessions`, `useTabs`, `useSplit`, `useExplorer`, `useQueryRunner`,
    `useTableOps`, `useObjectOps`); shared selection in `useGridSelection`;
+   staged table edits in `useStagedTableChanges`;
    pure helpers (`qi`, tab-id builders, `slimTab`/restore, `pkOf`, `DDL_RE`)
    in `lib/tabs.ts`.
 6. **Grids**: result/object tables use `<DataGrid>` or `ui/table` parts; cell
@@ -218,7 +219,8 @@ backend/frontend surface:
   history, snippets, cancellation (`application_name=pglight:<session>` +
   Dashboard), paging/filtering/ordering (`has_more`), guarded row edits
   (PK-scoped, `single:true` 409 on non-1-row, real JSON null — no
-  `__NULL__` sentinel), bulk delete, CSV import, CSV/JSON/INSERT export
+  `__NULL__` sentinel), staged table edits (atomic mixed apply + stale-value
+  checks), bulk delete, streaming CSV import/export, CSV/JSON/INSERT export
   (OID-aware exact numerics: int8/numeric/money as strings + `UseNumber`
   decode), maintenance, and mock-data generation (Simple zero-config vs
   Advanced schema-aware: semantic generators, ranges, FK pools incl.
@@ -269,7 +271,8 @@ sync when adding or removing a user-visible function:
   plus `workspace`; Workspace views are `history|snippets|aliases|server|
   activity|locks|stats|connections|settings|shortcuts|logs|quick-access`.
   Domain hooks are `useSessions`, `useTabs`, `useSplit`, `useExplorer`,
-  `useQueryRunner`, `useTableOps`, `useObjectOps`, and `useGridSelection`.
+  `useQueryRunner`, `useTableOps`, `useObjectOps`, `useGridSelection`, and
+  `useStagedTableChanges`.
   Shared UI functions include SQL formatting/export, schema-cache completion,
   ERD layout/storage, dialog promises, command registration, and shortcut
   normalization.
