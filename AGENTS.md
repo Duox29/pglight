@@ -244,7 +244,7 @@ backend/frontend surface:
 
 ## 6. Current function inventory (full project scan — 2026-09-21)
 
-The route table currently contains 55 registrations. Keep this inventory in
+The route table currently contains 56 registrations. Keep this inventory in
 sync when adding or removing a user-visible function:
 
 - **Sessions and connections**: `connect`, `sessions`, `disconnect`, `txn`,
@@ -255,8 +255,9 @@ sync when adding or removing a user-visible function:
   `constraints`, `triggers`, `table-stats`, `erd`, and `search` (including
   SQLite-backed ERD layout/viewport persistence through `erd?layout=1`).
 - **Query and data**: `query` (single and multi-statement), `explain`,
-  `complete`, `table-data`, `row`, `rows-delete`, `import` (JSON + streaming
-  multipart CSV), `export/csv` (streaming table CSV), `maintenance`,
+  `complete`, `table-data`, `row`, `rows-delete`, `table-changes` (atomic
+  staged update/insert/delete batches), `import` (JSON + streaming multipart
+  CSV), `export/csv` (streaming table CSV), `maintenance`,
   `activity`, and `cancel`.
 - **App data and administration**: `aliases`, `snippets`, `history`,
   `preferences`, `preferences/shortcuts`, `server-info`, `stats`, `locks`,

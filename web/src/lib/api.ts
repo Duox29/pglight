@@ -73,6 +73,15 @@ export interface QueryResult {
   stale?: boolean
 }
 
+export interface TableChangesPayload {
+  session_id: string
+  schema: string
+  table: string
+  updates?: { key: Record<string, unknown>; before: Record<string, unknown>; changes: Record<string, unknown> }[]
+  inserts?: Record<string, unknown>[]
+  deletes?: { key: Record<string, unknown>; before: Record<string, unknown> }[]
+}
+
 let csvDownloadFrame: HTMLIFrameElement | null = null
 let csvDownloadErrorHandler: ((message: string) => void) | undefined
 
@@ -199,6 +208,12 @@ export const q = (session: string, path: string) =>
   `${path}${path.includes('?') ? '&' : '?'}session_id=${encodeURIComponent(session)}`
 
 export const apiClient = {
+  tableChanges: (payload: TableChangesPayload) =>
+    api<{ rows_affected?: number; in_txn?: boolean; error?: string }>('/api/table-changes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
   exportCSV: (p: { session_id: string; schema: string; table: string; filter?: string; order?: string }, onError?: (message: string) => void) =>
     submitCSVDownload(p, onError),
   connect: (b: ConnectParams) =>

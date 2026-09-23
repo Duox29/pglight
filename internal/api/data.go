@@ -649,6 +649,181 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	csvWriter.Flush()
 }
 
+// TableChanges applies staged updates, inserts, and deletes as one atomic unit.
+func (h *Handler) TableChanges(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req struct {
+		Session string `json:"session_id"`
+		Schema  string `json:"schema"`
+		Table   string `json:"table"`
+		Updates []struct {
+			Key     map[string]any `json:"key"`
+			Before  map[string]any `json:"before"`
+			Changes map[string]any `json:"changes"`
+		} `json:"updates"`
+		Inserts []map[string]any `json:"inserts"`
+		Deletes []struct {
+			Key    map[string]any `json:"key"`
+			Before map[string]any `json:"before"`
+		} `json:"deletes"`
+	}
+	if err := decodeBody(r, &req); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid json"})
+		return
+	}
+	id := sessionFromBody(req.Session, r)
+	if id == "" {
+		writeJSON(w, 401, map[string]string{"error": "not connected"})
+		return
+	}
+	if req.Table == "" {
+		writeJSON(w, 400, map[string]string{"error": "table required"})
+		return
+	}
+	totalChanges := len(req.Updates) + len(req.Inserts) + len(req.Deletes)
+	if totalChanges == 0 || totalChanges > 5000 {
+		writeJSON(w, 400, map[string]string{"error": "changes list must hold 1..5000 entries"})
+		return
+	}
+	if req.Schema == "" {
+		req.Schema = "public"
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	qqRaw, release, inTxn, pool, ok := h.Mgr.AcquireLease(id)
+	if !ok {
+		writeJSON(w, 401, map[string]string{"error": "not connected"})
+		return
+	}
+	defer release()
+	base := logging.Wrap(qqRaw, h.Log, id)
+	udts, err := colUDTs(ctx, base, req.Schema, req.Table)
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	qt := pgx.Identifier{req.Schema, req.Table}.Sanitize()
+	type statement struct {
+		sql    string
+		args   []any
+		single bool
+	}
+	statements := make([]statement, 0, totalChanges)
+	for i, update := range req.Updates {
+		key, changes := numMap(update.Key), numMap(update.Changes)
+		before := numMap(update.Before)
+		if len(key) == 0 || len(before) == 0 || len(changes) == 0 {
+			writeJSON(w, 400, map[string]string{"error": fmt.Sprintf("update %d requires key, before values and changes", i)})
+			return
+		}
+		for column, value := range before {
+			key[column] = value
+		}
+		sql, args, buildErr := buildUpdate(qt, changes, key, udts)
+		if buildErr != nil {
+			writeJSON(w, 400, map[string]string{"error": fmt.Sprintf("update %d: %s", i, buildErr)})
+			return
+		}
+		statements = append(statements, statement{sql: sql, args: args, single: true})
+	}
+	for i, insert := range req.Inserts {
+		values := numMap(insert)
+		if len(values) == 0 {
+			writeJSON(w, 400, map[string]string{"error": fmt.Sprintf("insert %d requires values", i)})
+			return
+		}
+		sql, args := buildInsert(qt, values, udts)
+		statements = append(statements, statement{sql: sql, args: args})
+	}
+	for i, delete := range req.Deletes {
+		key, before := numMap(delete.Key), numMap(delete.Before)
+		if len(key) == 0 || len(before) == 0 {
+			writeJSON(w, 400, map[string]string{"error": fmt.Sprintf("delete %d requires key and before values", i)})
+			return
+		}
+		for column, value := range before {
+			key[column] = value
+		}
+		sql, args, buildErr := buildDelete(qt, key, udts)
+		if buildErr != nil {
+			writeJSON(w, 400, map[string]string{"error": fmt.Sprintf("delete %d: %s", i, buildErr)})
+			return
+		}
+		statements = append(statements, statement{sql: sql, args: args, single: true})
+	}
+	target := base
+	var tx pgx.Tx
+	if inTxn {
+		if _, err := target.Exec(ctx, "SAVEPOINT pglight_table_changes"); err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+	} else {
+		if pool == nil {
+			writeJSON(w, 401, map[string]string{"error": "not connected"})
+			return
+		}
+		tx, err = pool.Begin(ctx)
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		defer func() {
+			if tx != nil {
+				_ = tx.Rollback(context.Background())
+			}
+		}()
+		target = logging.Wrap(tx, h.Log, id)
+	}
+	rollback := func() {
+		if inTxn {
+			_, _ = target.Exec(context.Background(), "ROLLBACK TO SAVEPOINT pglight_table_changes")
+			_, _ = target.Exec(context.Background(), "RELEASE SAVEPOINT pglight_table_changes")
+		} else if tx != nil {
+			_ = tx.Rollback(context.Background())
+			tx = nil
+		}
+	}
+	var affected int64
+	for i, statement := range statements {
+		tag, execErr := target.Exec(ctx, statement.sql, statement.args...)
+		if execErr != nil {
+			rollback()
+			writeJSON(w, 400, map[string]string{"error": execErr.Error()})
+			return
+		}
+		count := tag.RowsAffected()
+		if statement.single && count != 1 {
+			rollback()
+			writeJSON(w, 409, map[string]string{"error": fmt.Sprintf("change %d matched %d rows; expected exactly 1", i, count)})
+			return
+		}
+		affected += count
+	}
+	if inTxn {
+		if _, err := target.Exec(ctx, "RELEASE SAVEPOINT pglight_table_changes"); err != nil {
+			rollback()
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+	} else {
+		if err := tx.Commit(ctx); err != nil {
+			tx = nil
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		tx = nil
+	}
+	response := map[string]any{"rows_affected": affected}
+	if inTxn {
+		response["in_txn"] = true
+	}
+	writeJSON(w, 200, response)
+}
+
 func (h *Handler) RowOp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "method not allowed", 405)

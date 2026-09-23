@@ -448,3 +448,24 @@ func TestExportCSVSupportsNativeBrowserFormDownload(t *testing.T) {
 		t.Fatalf("unexpected form CSV: %q", got)
 	}
 }
+
+func TestTableChangesApplyMixedOperationsAtomically(t *testing.T) {
+	h, sid := newHandler(t)
+	tbl := tempTable(t)
+	execSQL(t, h, sid, fmt.Sprintf(`CREATE TABLE %s (id int PRIMARY KEY, v text)`, tbl))
+	defer execSQL(t, h, sid, fmt.Sprintf(`DROP TABLE %s`, tbl))
+	execSQL(t, h, sid, fmt.Sprintf(`INSERT INTO %s VALUES (1,'a'),(2,'b')`, tbl))
+	call := func(payload string) (int, string) { return callPOST(t, h.TableChanges, "/api/table-changes", payload) }
+	code, body := call(fmt.Sprintf(`{"session_id":%q,"schema":"public","table":%q,"updates":[{"key":{"id":1},"before":{"id":1,"v":"a"},"changes":{"v":"A"}}],"inserts":[{"id":3,"v":"c"}],"deletes":[{"key":{"id":2},"before":{"id":2,"v":"b"}}]}`, sid, tbl))
+	requireStatus(t, body, code, 200)
+	requireDeep(t, body, "affected", decodeObj(t, body)["rows_affected"], 3)
+	rows := queryRows(t, h, sid, fmt.Sprintf(`SELECT id,v FROM %s ORDER BY id`, tbl))
+	requireDeep(t, "", "mixed changes", rows, [][]any{{1, "A"}, {3, "c"}})
+	code, body = call(fmt.Sprintf(`{"session_id":%q,"schema":"public","table":%q,"updates":[{"key":{"id":1},"before":{"id":1,"v":"A"},"changes":{"v":"should rollback"}}],"inserts":[{"id":1,"v":"duplicate"}]}`, sid, tbl))
+	requireErrContains(t, body, code, 400, "duplicate key")
+	rows = queryRows(t, h, sid, fmt.Sprintf(`SELECT id,v FROM %s ORDER BY id`, tbl))
+	requireDeep(t, "", "failed batch rolled back", rows, [][]any{{1, "A"}, {3, "c"}})
+	execSQL(t, h, sid, fmt.Sprintf(`UPDATE %s SET v='external' WHERE id=1`, tbl))
+	code, body = call(fmt.Sprintf(`{"session_id":%q,"schema":"public","table":%q,"updates":[{"key":{"id":1},"before":{"id":1,"v":"A"},"changes":{"v":"overwrite"}}]}`, sid, tbl))
+	requireErrContains(t, body, code, 409, "expected exactly 1")
+}
