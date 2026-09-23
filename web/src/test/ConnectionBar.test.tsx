@@ -26,7 +26,7 @@ describe('ConnectionBar', () => {
     expect(p.onShutdown).toHaveBeenCalledTimes(1)
     await user.click(screen.getByRole('button', { name: /Search objects/ }))
     expect(p.onSearch).toHaveBeenCalledTimes(1)
-    await user.click(screen.getByRole('button', { name: 'History' }))
+    await user.click(screen.getByRole('button', { name: 'Query Manager' }))
     expect(p.onWorkspace).toHaveBeenCalledWith('history')
     await user.click(screen.getByRole('button', { name: 'Dashboard' }))
     expect(p.onWorkspace).toHaveBeenCalledWith('server')

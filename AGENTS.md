@@ -11,7 +11,8 @@
   `handlers.go`, autocomplete cache in `complete_cache.go`), connection pool +
   explicit-txn state + operation leases in `internal/db/manager.go`, app data
   (sqlite `data/pglight.db`: users, snippets, history, aliases, connection
-  profiles/folders/tags/options, vaults/secrets, preferences, ERD layouts) in
+  profiles/folders/tags/options, vaults/secrets, preferences, ERD layouts, and
+  query history diagnostics/pins) in
   `internal/store/`, pure mock-data engine in `internal/mockgen/` (HTTP
   orchestration in `mockdata.go`), HTTP/query/txn logging in `internal/logging/`,
   cancellable progress jobs and process runner in `internal/jobs/`, flat route table in `main.go`
@@ -106,7 +107,9 @@ is git-ignored: rebuild it, never commit it).
     `query_history`, `aliases`, `connection_profiles`, `connection_folders`,
     `connection_tags`, `connection_options`, `vaults`, `connection_secrets`,
     `connection_ssh_secrets`,
-    `user_preferences`, `erd_layouts`) — never in PG target connections.
+    `user_preferences`, `erd_layouts`) — query history stores bounded
+    connection/database, statement type, status/error, and pin metadata; never
+    in PG target connections.
 
 ## 3. Frontend rules (React + shadcn)
 
@@ -263,7 +266,8 @@ sync when adding or removing a user-visible function:
   CSV), `export/csv` (streaming table CSV), `maintenance`,
   `activity`, and `cancel`, plus `backup`, `restore`, and session-scoped
   `jobs/{id}` (progress, cancellation, streamed backup download).
-- **App data and administration**: `aliases`, `snippets`, `history`,
+- **App data and administration**: `aliases`, `snippets`, `history` (search,
+  filters, paging, pin/delete; SQL/error size caps),
   `preferences`, `preferences/shortcuts`, `server-info`, `stats`, `locks`,
   `roles`, `extensions`, `settings`, `logs`, and `shutdown`.
 - **Mock data**: `mock-data/meta`, `mock-data/preview`, and

@@ -52,9 +52,11 @@ export interface TabContentProps {
   dialogs: DialogsApi
   session: string
   history: HistoryEntry[]
+  onHistoryChange: (history: HistoryEntry[]) => void
   snippets: Snippet[]
   onOpenSql: (sql: string) => void
   onDeleteSnippet: (i: number) => void
+  onSaveSnippet: (name: string, sql: string) => Promise<void>
   quickAccess: SideView[]
   onQuickAccessChange: (view: SideView, enabled: boolean) => void
   connection: {
@@ -96,9 +98,11 @@ function TabContentInner(p: TabContentProps) {
         onView={(view) => p.updateTab(tab.id, (x) => x.kind === 'workspace' ? { ...x, view } : x)}
         session={p.session}
         history={p.history}
+        onHistoryChange={p.onHistoryChange}
         snippets={p.snippets}
         onOpenSql={p.onOpenSql}
         onDeleteSnippet={p.onDeleteSnippet}
+        onSaveSnippet={p.onSaveSnippet}
         dialogs={p.dialogs}
         quickAccess={p.quickAccess}
         onQuickAccessChange={p.onQuickAccessChange}

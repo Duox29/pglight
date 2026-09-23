@@ -125,7 +125,7 @@ export default function App() {
     tabs, updateTab, session,
     autocommit: sessionsApi.autocommit, markTxn: sessionsApi.markTxn,
   })
-  const { running, history, snippets, setSnippets } = queryApi
+  const { running, history, snippets, setHistory, setSnippets } = queryApi
 
   const split = useSplit({ tabs, activeTab, onActivate: setActiveTab })
 
@@ -391,6 +391,7 @@ export default function App() {
                 dialogs={dialogs}
                 session={session}
                 history={history}
+                onHistoryChange={setHistory}
                 snippets={snippets}
                 onOpenSql={(sql) => newQueryTab(sql, activeId)}
                 onDeleteSnippet={(i) => {
@@ -400,6 +401,11 @@ export default function App() {
                     if (j.error) toast.error(j.error)
                     else setSnippets((s) => s.filter((_, x) => x !== i))
                   }).catch((e) => toast.error(e instanceof Error ? e.message : String(e)))
+                }}
+                onSaveSnippet={async (name, sql) => {
+                  const result = await apiClient.saveSnippet(name, sql)
+                  if (result.error || !result.snippet) throw new Error(result.error ?? 'Failed to save snippet')
+                  setSnippets((items) => [{ name: result.snippet!.name, sql: result.snippet!.sql }, ...items.filter((item) => item.name !== result.snippet!.name)])
                 }}
                 quickAccess={quickAccess}
                 onQuickAccessChange={(view, enabled) => {

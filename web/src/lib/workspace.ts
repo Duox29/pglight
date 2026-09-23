@@ -3,7 +3,7 @@ import { Activity, Database, FileClock, Keyboard, KeyRound, LayoutDashboard, Lis
 import type { SideView } from '@/types'
 
 export const WORKSPACE_VIEW_META: Record<SideView, { label: string; icon: LucideIcon }> = {
-  history: { label: 'History', icon: FileClock },
+  history: { label: 'Query Manager', icon: FileClock },
   snippets: { label: 'Snippets', icon: List },
   aliases: { label: 'Aliases', icon: Zap },
   server: { label: 'Server', icon: Database },

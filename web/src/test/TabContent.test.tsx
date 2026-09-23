@@ -108,9 +108,11 @@ function baseProps(): TabContentProps {
     dialogs: {} as DialogsApi,
     session: 's1',
     history: [],
+    onHistoryChange: vi.fn(),
     snippets: [],
     onOpenSql: vi.fn(),
     onDeleteSnippet: vi.fn(),
+    onSaveSnippet: vi.fn(async () => undefined),
     quickAccess: [],
     onQuickAccessChange: vi.fn(),
     connection: {

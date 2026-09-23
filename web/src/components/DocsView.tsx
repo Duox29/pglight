@@ -732,17 +732,21 @@ const SECTIONS: Section[] = [
     body: {
       en: (
         <>
-          <P>History lists executed statements from consoles as cards with <K>time, duration,</K> and <K>rows</K>, newest first, capped at 200 entries and stored in the backend application database.</P>
+          <P>History records console scripts, including failures, connection/database, statement type, duration, rows, and SQL state when available. SQL is capped at 1 MiB and errors at 4 KiB; server retention keeps at most 2,000 records per user.</P>
           <Ul>
-            <Li>Filter by SQL text. Select a card to reopen its SQL, up to 2,000 characters per statement, as a new query.</Li>
+            <Li>Search SQL, database, or error text; filter by status, connection, statement type, minimum duration, and pinned items. Results are paged.</Li>
+            <Li>Open a card to load its SQL into a query tab. Copy it, save it as a snippet, pin it, or delete the record from its action buttons.</Li>
+            <Li>History persistence follows the Privacy setting. When persistence is disabled, query history stays in memory for the current app session only.</Li>
           </Ul>
         </>
       ),
       vi: (
         <>
-          <P>History liệt kê các câu lệnh đã chạy từ consoles dưới dạng thẻ gồm <K>time, duration</K> và <K>rows</K>, mới nhất trước, tối đa 200 mục và lưu trong database ứng dụng backend.</P>
+          <P>History lưu script console, bao gồm cả lỗi, connection/database, loại câu lệnh, duration, số dòng và SQL state nếu có. SQL giới hạn 1 MiB, lỗi 4 KiB; retention phía server giữ tối đa 2.000 bản ghi mỗi user.</P>
           <Ul>
-            <Li>Lọc theo nội dung SQL. Chọn một thẻ để mở lại SQL, tối đa 2.000 ký tự mỗi câu, thành query mới.</Li>
+            <Li>Tìm trong SQL, database hoặc nội dung lỗi; lọc theo trạng thái, connection, loại câu lệnh, duration tối thiểu và mục đã pin. Kết quả được phân trang.</Li>
+            <Li>Mở card để nạp SQL vào query tab. Có thể copy, lưu thành snippet, pin hoặc xóa bản ghi bằng các nút thao tác.</Li>
+            <Li>Việc lưu History tuân theo Privacy setting. Khi tắt persistence, lịch sử chỉ nằm trong bộ nhớ của phiên ứng dụng hiện tại.</Li>
           </Ul>
         </>
       ),

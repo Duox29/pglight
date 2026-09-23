@@ -381,8 +381,14 @@ export const apiClient = {
   listSnippets: () => api<{ snippets: { id: string; name: string; sql: string }[] }>('/api/snippets'),
   saveSnippet: (name: string, sql: string) => api<{ snippet?: { id: string; name: string; sql: string }; error?: string }>('/api/snippets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, sql }) }),
   deleteSnippet: (name: string) => api<{ ok?: boolean; error?: string }>(`/api/snippets?name=${encodeURIComponent(name)}`, { method: 'DELETE' }),
-  listHistory: () => api<{ history: { id: string; sql: string; ms?: number; n?: number; at: string }[] }>('/api/history'),
-  addHistory: (sql: string, ms?: number, n?: number) => api('/api/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql, ms, n }) }),
+  listHistory: (filters: { q?: string; connection_id?: string; status?: 'success' | 'failed' | ''; statement_type?: string; min_ms?: number; pinned?: boolean; limit?: number; offset?: number } = {}) => {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(filters)) if (value !== undefined && value !== '' && value !== false) params.set(key, String(value))
+    return api<{ history: import('@/types').HistoryEntry[]; has_more: boolean }>(`/api/history?${params.toString()}`)
+  },
+  addHistory: (sql: string, ms?: number, n?: number, details?: { session_id?: string; success?: boolean; error_code?: string; error_message?: string }) => api('/api/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql, ms, n, ...details }) }),
+  pinHistory: (id: string, pinned: boolean) => api<{ ok?: boolean; error?: string }>('/api/history', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, pinned }) }),
+  deleteHistoryEntry: (id: string) => api<{ ok?: boolean; error?: string }>(`/api/history?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
   clearHistory: () => api<{ ok?: boolean; error?: string }>('/api/history', { method: 'DELETE' }),
   listConnections: (query = '') => api<{ connections: ConnectionProfile[]; folders?: { id: string; name: string; parent_id?: string }[]; vault_unlocked?: boolean }>(`/api/connections${query ? `?${query}` : ''}`),
   saveConnection: (p: { id?: string; name: string; host: string; port: number; user: string; dbname: string; sslmode: string; password?: string; save_password?: boolean; clear_password?: boolean; duplicate_from?: string; folder_id?: string; environment?: string; color?: string; description?: string; favorite?: boolean; default?: boolean; tags?: string[]; connect_timeout?: number; keepalive?: number; application_name?: string; search_path?: string; sslrootcert?: string; sslcert?: string; sslkey?: string; unix_socket?: string; ssh_enabled?: boolean; ssh_host?: string; ssh_port?: number; ssh_user?: string; ssh_auth_method?: string; ssh_host_key?: string; ssh_password?: string; ssh_private_key?: string; ssh_passphrase?: string }) => api<{ connection?: ConnectionProfile; error?: string }>('/api/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),

@@ -28,17 +28,20 @@ export function useQueryRunner(deps: QueryRunnerDeps) {
 
   useEffect(() => {
     if (!readJSON<boolean>('privacy.persistHistory', true)) return
-    void Promise.all([apiClient.listHistory(), apiClient.listSnippets()]).then(([h, s]) => {
+    void Promise.all([apiClient.listHistory({ limit: 50 }), apiClient.listSnippets()]).then(([h, s]) => {
       setHistory(h.history ?? [])
       setSnippets((s.snippets ?? []).map((x) => ({ name: x.name, sql: x.sql })))
     }).catch(() => undefined)
   }, [])
 
-  const pushHist = (sql: string, ms?: number, n?: number) => {
-    const entry: HistoryEntry = { sql: sql.slice(0, 2000), ms, n, at: new Date().toLocaleTimeString() }
+  const pushHist = (sql: string, ms: number, n: number, sessionId: string, success: boolean, errorCode = '', errorMessage = '') => {
+    const storedSQL = new TextDecoder().decode(new TextEncoder().encode(sql).subarray(0, 1 << 20))
+    const entry: HistoryEntry = { sql: storedSQL, ms, n, at: new Date().toISOString(), success, error_code: errorCode, error_message: errorMessage }
     setHistory((h) => [entry, ...h].slice(0, 200))
     if (!readJSON<boolean>('privacy.persistHistory', true)) return
-    void apiClient.addHistory(entry.sql, ms, n).catch(() => undefined)
+    void apiClient.addHistory(entry.sql, ms, n, { session_id: sessionId, success, error_code: errorCode, error_message: errorMessage.slice(0, 4096) })
+      .then(async () => setHistory((await apiClient.listHistory({ limit: 50 })).history ?? []))
+      .catch(() => undefined)
   }
 
   const runQuery = useCallback(
@@ -51,6 +54,7 @@ export function useQueryRunner(deps: QueryRunnerDeps) {
       setRunning((r) => ({ ...r, [id]: true }))
       updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: undefined, errLoc: undefined, flashTick: undefined, plan: undefined } : x))
       try {
+        const startedAt = performance.now()
         if (!autocommit) {
           const st = await apiClient.txn(sid, 'status')
           if (!st.in_txn) await apiClient.txn(sid, 'begin')
@@ -66,12 +70,14 @@ export function useQueryRunner(deps: QueryRunnerDeps) {
           void ensureSnapshot(sid, true)
         }
         if (j.error && !j.results) {
+          pushHist(sql, performance.now() - startedAt, 0, sid, false, j.code ?? '', j.error)
           updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: j.error, errLoc, flashTick: (x.flashTick ?? 0) + 1, results: null } : x))
           return
         }
         if (j.results) {
           const total = (j as { duration_ms?: number }).duration_ms
           const count = j.statements ?? j.results.length
+          pushHist(sql, typeof total === 'number' ? total : performance.now() - startedAt, j.results.reduce((sum, result) => sum + (result.rows ?? []).length, 0), sid, !j.error, j.code ?? '', j.error ?? '')
           updateTab(id, (x) => (x.kind === 'query' ? { ...x, results: j.results ?? null, meta: `${count} statements · ${total ?? 0}ms`, error: j.error, errLoc, flashTick: j.error ? (x.flashTick ?? 0) + 1 : undefined } : x))
         } else {
           updateTab(id, (x) =>
@@ -79,9 +85,10 @@ export function useQueryRunner(deps: QueryRunnerDeps) {
               ? { ...x, results: [j], meta: `${(j.rows ?? []).length} rows · ${j.duration_ms}ms`, error: undefined, errLoc: undefined, flashTick: undefined }
               : x,
           )
-          pushHist(sql, j.duration_ms, (j.rows ?? []).length)
+          pushHist(sql, j.duration_ms ?? performance.now() - startedAt, (j.rows ?? []).length, sid, true)
         }
       } catch (e) {
+        pushHist(sql, 0, 0, sid, false, '', e instanceof Error ? e.message : String(e))
         updateTab(id, (x) => (x.kind === 'query' ? { ...x, error: e instanceof Error ? e.message : String(e), errLoc: undefined, flashTick: undefined, results: null } : x))
       } finally {
         setRunning((r) => ({ ...r, [id]: false }))

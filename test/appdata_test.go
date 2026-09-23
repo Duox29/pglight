@@ -76,7 +76,11 @@ func TestHistoryCRUD(t *testing.T) {
 	h := newStoreHandler(t)
 	code, body := callPOST(t, h.History, "/api/history", `{"sql":"SELECT 1","ms":5,"n":1}`)
 	requireStatus(t, body, code, 200)
-	requireDeep(t, body, "add", decodeObj(t, body), map[string]any{"ok": true})
+	added := decodeObj(t, body)
+	requireDeep(t, body, "add.ok", added["ok"], true)
+	if added["id"] == "" {
+		t.Fatalf("history add did not return an entry id: %s", body)
+	}
 	code, body = callGET(t, h.History, "/api/history")
 	requireStatus(t, body, code, 200)
 	list, _ := decodeObj(t, body)["history"].([]any)

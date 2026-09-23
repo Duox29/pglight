@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Ban, Skull, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { Ban, Copy, Pin, Save, Skull, Trash2, X } from 'lucide-react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Card } from './ui/card'
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs'
 import { Switch } from './ui/switch'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { DataGrid } from './ui/data-grid'
 import { EmptyNote, ErrorText } from './ui/feedback'
 import { Tip } from './ui/tooltip'
@@ -25,9 +27,11 @@ interface Props {
   onView: (v: SideView) => void
   session: string
   history: HistoryEntry[]
+  onHistoryChange: (history: HistoryEntry[]) => void
   snippets: Snippet[]
   onOpenSql: (sql: string) => void
   onDeleteSnippet: (i: number) => void
+  onSaveSnippet: (name: string, sql: string) => Promise<void>
   dialogs: DialogsApi
   quickAccess: SideView[]
   onQuickAccessChange: (view: SideView, enabled: boolean) => void
@@ -55,9 +59,61 @@ interface Props {
 }
 
 export function SidePanel(p: Props) {
+  const { view, onHistoryChange } = p
   const [filter, setFilter] = useState('')
   const [payload, setPayload] = useState<unknown>(null)
   const [error, setError] = useState('')
+  const [historyStatus, setHistoryStatus] = useState<'success' | 'failed' | ''>('')
+  const [historyConnection, setHistoryConnection] = useState('')
+  const [historyStatement, setHistoryStatement] = useState('')
+  const [historyMinMs, setHistoryMinMs] = useState('')
+  const [historyPinned, setHistoryPinned] = useState(false)
+  const [historyHasMore, setHistoryHasMore] = useState(false)
+
+  useEffect(() => {
+    if (view !== 'history') return
+    let ignore = false
+    const load = async () => {
+      try {
+        const result = await apiClient.listHistory({ q: filter, connection_id: historyConnection, status: historyStatus, statement_type: historyStatement, min_ms: Number(historyMinMs) || undefined, pinned: historyPinned, limit: 25 })
+        if (!ignore) { onHistoryChange(result.history ?? []); setHistoryHasMore(result.has_more) }
+      } catch (e) { if (!ignore) setError(e instanceof Error ? e.message : String(e)) }
+    }
+    void load()
+    return () => { ignore = true }
+  }, [filter, historyConnection, historyMinMs, historyPinned, historyStatement, historyStatus, onHistoryChange, view])
+
+  const loadMoreHistory = async () => {
+    try {
+      const result = await apiClient.listHistory({ q: filter, connection_id: historyConnection, status: historyStatus, statement_type: historyStatement, min_ms: Number(historyMinMs) || undefined, pinned: historyPinned, limit: 25, offset: p.history.length })
+      p.onHistoryChange([...p.history, ...(result.history ?? [])]); setHistoryHasMore(result.has_more)
+    } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
+  }
+
+  const saveHistorySnippet = async (sql: string) => {
+    const name = await p.dialogs.prompt({ title: 'Save query as snippet', defaultValue: 'Query from History' })
+    if (!name?.trim()) return
+    try { await p.onSaveSnippet(name.trim(), sql); toast.success('Snippet saved') }
+    catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
+  }
+
+  const toggleHistoryPin = async (entry: HistoryEntry) => {
+    if (!entry.id) return
+    try {
+      const result = await apiClient.pinHistory(entry.id, !entry.pinned)
+      if (result.error) throw new Error(result.error)
+      p.onHistoryChange(p.history.map((item) => item.id === entry.id ? { ...item, pinned: !entry.pinned } : item))
+    } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
+  }
+
+  const removeHistoryEntry = async (entry: HistoryEntry) => {
+    if (!entry.id) return
+    try {
+      const result = await apiClient.deleteHistoryEntry(entry.id)
+      if (result.error) throw new Error(result.error)
+      p.onHistoryChange(p.history.filter((item) => item.id !== entry.id))
+    } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
+  }
 
   useEffect(() => {
     if (p.view === 'history' || p.view === 'snippets' || p.view === 'aliases' || p.view === 'connections' || p.view === 'appearance' || p.view === 'settings' || p.view === 'shortcuts' || p.view === 'logs' || p.view === 'quick-access') return
@@ -114,18 +170,23 @@ export function SidePanel(p: Props) {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-2.5">
         {p.view === 'history' && (
           <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-auto">
-            <Input placeholder="Filter history…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-            {p.history
-              .filter((h) => !filter || h.sql.toLowerCase().includes(filter.toLowerCase()))
-              .map((h, i) => (
-                <Card key={i} className="cursor-pointer p-2 hover:bg-accent" onClick={() => p.onOpenSql(h.sql)}>
-                  <div className="text-[11px] text-muted-foreground">
-                    {h.at} · {h.ms}ms · {h.n} rows
-                  </div>
-                  <pre className="mt-1 whitespace-pre-wrap text-[11px] text-muted-foreground">{h.sql.slice(0, 200)}</pre>
-                </Card>
-              ))}
+            <Input placeholder="Search SQL, database, or errors…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+            <div className="grid grid-cols-2 gap-1.5">
+              <Select value={historyStatus || 'any'} onValueChange={(v) => setHistoryStatus(v === 'any' ? '' : v as 'success' | 'failed')}><SelectTrigger aria-label="Query status"><SelectValue placeholder="Any status" /></SelectTrigger><SelectContent><SelectItem value="any">Any status</SelectItem><SelectItem value="success">Succeeded</SelectItem><SelectItem value="failed">Failed</SelectItem></SelectContent></Select>
+              <Select value={historyStatement || 'any'} onValueChange={(v) => setHistoryStatement(v === 'any' ? '' : v)}><SelectTrigger aria-label="Statement type"><SelectValue placeholder="Any statement" /></SelectTrigger><SelectContent><SelectItem value="any">Any statement</SelectItem>{['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'WITH'].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select>
+              <Select value={historyConnection || 'any'} onValueChange={(v) => setHistoryConnection(v === 'any' ? '' : v)}><SelectTrigger aria-label="Connection"><SelectValue placeholder="Any connection" /></SelectTrigger><SelectContent><SelectItem value="any">Any connection</SelectItem>{p.connection.sessions.map((s) => <SelectItem key={s.profile_id || s.id} value={s.profile_id || s.id}>{s.profile_name ?? `${s.user}@${s.dbname}`}</SelectItem>)}</SelectContent></Select>
+              <Input type="number" min="0" placeholder="Min duration ms" value={historyMinMs} onChange={(e) => setHistoryMinMs(e.target.value)} aria-label="Minimum duration in milliseconds" />
+            </div>
+            <label className="flex items-center gap-2 px-1 text-[11px] text-muted-foreground"><Switch checked={historyPinned} onCheckedChange={setHistoryPinned} aria-label="Show pinned queries only" /> Pinned only</label>
+            {p.history.map((h, i) => (
+              <Card key={h.id ?? `${h.at}-${i}`} className="p-2 hover:bg-accent/50">
+                <div className="flex items-start gap-1"><Button variant="ghost" className="h-auto min-w-0 flex-1 justify-start whitespace-normal p-0 text-left" onClick={() => p.onOpenSql(h.sql)}><span className="block w-full"><span className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground"><span className={h.success === false ? 'text-destructive' : 'text-emerald-600'}>{h.success === false ? 'Failed' : 'Succeeded'}</span><span>· {h.statement_type ?? 'SQL'}</span>{h.database && <span>· {h.database}</span>}<span>· {h.ms ?? 0}ms · {h.n ?? 0} rows</span><span>· {h.at}</span></span><pre className="mt-1 whitespace-pre-wrap break-all text-[11px] text-muted-foreground">{h.sql.slice(0, 240)}</pre>{h.error_message && <span className="mt-1 line-clamp-2 text-[11px] text-destructive">{h.error_code ? `${h.error_code}: ` : ''}{h.error_message}</span>}</span></Button>
+                  <div className="flex shrink-0"><Button size="icon" variant="ghost" aria-label="Copy query" onClick={() => { void navigator.clipboard.writeText(h.sql).then(() => toast.success('Query copied')).catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e))) }}><Copy /></Button><Button size="icon" variant="ghost" aria-label="Save query as snippet" onClick={() => void saveHistorySnippet(h.sql)}><Save /></Button>{h.id && <><Button size="icon" variant="ghost" aria-label={h.pinned ? 'Unpin query' : 'Pin query'} onClick={() => void toggleHistoryPin(h)}><Pin className={h.pinned ? 'fill-current' : ''} /></Button><Button size="icon" variant="ghost" aria-label="Delete history entry" onClick={() => void removeHistoryEntry(h)}><X /></Button></>}</div>
+                </div>
+              </Card>
+            ))}
             {!p.history.length && <EmptyNote text="No history yet" />}
+            {historyHasMore && <Button size="sm" variant="secondary" onClick={() => void loadMoreHistory()}>Load more</Button>}
           </div>
         )}
         {p.view === 'snippets' && (

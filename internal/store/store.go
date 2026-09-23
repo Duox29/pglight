@@ -62,7 +62,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	)`); err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
-	const version = 6
+	const version = 7
 	var applied int
 	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&applied); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
@@ -227,6 +227,19 @@ func (s *Store) migrate(ctx context.Context) error {
 				updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 			)`,
 			`INSERT OR IGNORE INTO schema_migrations(version) VALUES (6)`,
+		)
+	}
+	if applied < 7 {
+		statements = append(statements,
+			`ALTER TABLE query_history ADD COLUMN connection_id TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE query_history ADD COLUMN database_name TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE query_history ADD COLUMN statement_type TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE query_history ADD COLUMN success INTEGER NOT NULL DEFAULT 1`,
+			`ALTER TABLE query_history ADD COLUMN error_code TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE query_history ADD COLUMN error_message TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE query_history ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`,
+			`CREATE INDEX IF NOT EXISTS idx_history_user_status ON query_history(user_id, success, executed_at DESC)`,
+			`INSERT OR IGNORE INTO schema_migrations(version) VALUES (7)`,
 		)
 	}
 	for _, stmt := range statements {

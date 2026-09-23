@@ -56,10 +56,18 @@ export interface SavedConnection {
 }
 
 export interface HistoryEntry {
+  id?: string
   sql: string
   ms?: number
   n?: number
   at: string
+  connection_id?: string
+  database?: string
+  statement_type?: string
+  success?: boolean
+  error_code?: string
+  error_message?: string
+  pinned?: boolean
 }
 
 export interface Snippet {
